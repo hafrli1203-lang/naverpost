@@ -17,6 +17,8 @@ import {
   RotateCcw,
   PenLine,
   FileText,
+  Copy,
+  Save,
 } from "lucide-react";
 
 interface ArticlePreviewProps {
@@ -24,6 +26,7 @@ interface ArticlePreviewProps {
   onApprove: () => void;
   onRewrite: () => void;
   onManualEdit: (content: string) => void;
+  onSave?: () => void;
   isLoading: boolean;
 }
 
@@ -66,10 +69,46 @@ export function ArticlePreview({
   onApprove,
   onRewrite,
   onManualEdit,
+  onSave,
   isLoading,
 }: ArticlePreviewProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState(article.content);
+  const [copiedField, setCopiedField] = useState<"title" | "keywords" | "content" | null>(null);
+
+  function copyToClipboard(text: string, field: "title" | "keywords" | "content") {
+    const doSet = () => {
+      setCopiedField(field);
+      setTimeout(() => setCopiedField(null), 2000);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(doSet).catch(() => {
+        fallbackCopy(text);
+        doSet();
+      });
+    } else {
+      fallbackCopy(text);
+      doSet();
+    }
+  }
+
+  function fallbackCopy(text: string) {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.top = "0";
+    ta.style.left = "0";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    try {
+      document.execCommand("copy");
+    } catch {
+      // ignore
+    }
+    document.body.removeChild(ta);
+  }
 
   const charCount = article.content.length;
   const { validation } = article;
@@ -93,7 +132,18 @@ export function ArticlePreview({
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
                 <FileText className="w-4 h-4 text-blue-500" />
-                {article.title}
+                <span className="flex-1">{article.title}</span>
+                <button
+                  onClick={() => copyToClipboard(article.title, "title")}
+                  className="ml-auto p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                  title="제목 복사"
+                >
+                  {copiedField === "title" ? (
+                    <Check className="w-3.5 h-3.5 text-green-500" />
+                  ) : (
+                    <Copy className="w-3.5 h-3.5" />
+                  )}
+                </button>
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -122,8 +172,21 @@ export function ArticlePreview({
                   </div>
                 </div>
               ) : (
-                <div className="prose prose-sm max-w-none overflow-y-auto max-h-[500px] pr-2">
-                  {renderContent(article.content)}
+                <div className="relative">
+                  <button
+                    onClick={() => copyToClipboard(article.content, "content")}
+                    className="absolute top-0 right-0 z-10 p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                    title="본문 복사"
+                  >
+                    {copiedField === "content" ? (
+                      <Check className="w-3.5 h-3.5 text-green-500" />
+                    ) : (
+                      <Copy className="w-3.5 h-3.5" />
+                    )}
+                  </button>
+                  <div className="prose prose-sm max-w-none overflow-y-auto max-h-[500px] pr-2">
+                    {renderContent(article.content)}
+                  </div>
                 </div>
               )}
             </CardContent>
@@ -213,7 +276,25 @@ export function ArticlePreview({
 
               {/* Keywords */}
               <div className="space-y-1 pt-1">
-                <p className="text-xs text-muted-foreground font-medium">사용 키워드</p>
+                <div className="flex items-center justify-between">
+                  <p className="text-xs text-muted-foreground font-medium">사용 키워드</p>
+                  <button
+                    onClick={() =>
+                      copyToClipboard(
+                        `메인: ${article.mainKeyword}\n서브1: ${article.subKeyword1}\n서브2: ${article.subKeyword2}`,
+                        "keywords"
+                      )
+                    }
+                    className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                    title="키워드 복사"
+                  >
+                    {copiedField === "keywords" ? (
+                      <Check className="w-3.5 h-3.5 text-green-500" />
+                    ) : (
+                      <Copy className="w-3.5 h-3.5" />
+                    )}
+                  </button>
+                </div>
                 <div className="flex flex-wrap gap-1">
                   <Badge className="text-xs bg-blue-100 text-blue-700 hover:bg-blue-100">
                     {article.mainKeyword}
@@ -235,6 +316,17 @@ export function ArticlePreview({
 
       {/* Action buttons */}
       <div className="flex flex-wrap gap-3 justify-end">
+        {onSave && (
+          <Button
+            variant="outline"
+            onClick={onSave}
+            disabled={isLoading}
+            className="gap-2 border-blue-300 text-blue-600 hover:bg-blue-50 hover:text-blue-700"
+          >
+            <Save className="w-4 h-4" />
+            저장
+          </Button>
+        )}
         <Button
           variant="outline"
           onClick={() => setIsEditing((v) => !v)}

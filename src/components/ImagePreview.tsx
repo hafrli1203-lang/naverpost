@@ -1,10 +1,12 @@
 "use client";
 
+import { useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
+import { Textarea } from "@/components/ui/textarea";
 import { BlogImage } from "@/types";
 import {
   RefreshCw,
@@ -14,11 +16,14 @@ import {
   Loader2,
   ImageOff,
   CheckCheck,
+  ChevronDown,
+  ChevronUp,
+  Edit2,
 } from "lucide-react";
 
 interface ImagePreviewProps {
   images: BlogImage[];
-  onRegenerate: (index: number) => void;
+  onRegenerate: (index: number, customPrompt?: string) => void;
   onApproveAll: () => void;
   isGenerating: boolean;
   progress: { current: number; total: number };
@@ -56,6 +61,157 @@ function ImageStatusBadge({ status }: { status: BlogImage["status"] }) {
   }
 }
 
+interface ImageCardProps {
+  image: BlogImage;
+  onRegenerate: (index: number, customPrompt?: string) => void;
+  isGenerating: boolean;
+}
+
+function ImageCard({ image, onRegenerate, isGenerating }: ImageCardProps) {
+  const [promptOpen, setPromptOpen] = useState(false);
+  const [editedPrompt, setEditedPrompt] = useState(image.prompt);
+
+  const isBusy =
+    isGenerating ||
+    image.status === "generating" ||
+    image.status === "retrying";
+
+  const handleDownload = useCallback(async () => {
+    if (!image.imageUrl) return;
+    try {
+      const res = await fetch(image.imageUrl);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `blog-image-${image.index + 1}.png`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      // Fallback: open in new tab if fetch fails (e.g. cross-origin)
+      const a = document.createElement("a");
+      a.href = image.imageUrl;
+      a.download = `blog-image-${image.index + 1}.png`;
+      a.target = "_blank";
+      a.click();
+    }
+  }, [image.imageUrl, image.index]);
+
+  const handleRegenerate = useCallback(() => {
+    onRegenerate(image.index, image.prompt);
+  }, [image.index, image.prompt, onRegenerate]);
+
+  const handleRegenerateWithPrompt = useCallback(() => {
+    onRegenerate(image.index, editedPrompt);
+  }, [image.index, editedPrompt, onRegenerate]);
+
+  return (
+    <Card className="overflow-hidden">
+      {/* Image area */}
+      <div className="relative bg-gray-100 aspect-square">
+        {image.imageUrl && image.status === "success" ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={image.imageUrl}
+            alt={`이미지 ${image.index + 1}`}
+            className="w-full h-full object-cover"
+          />
+        ) : (
+          <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-muted-foreground">
+            {image.status === "generating" || image.status === "retrying" ? (
+              <Loader2 className="w-8 h-8 animate-spin text-blue-400" />
+            ) : image.status === "failed" ? (
+              <XCircle className="w-8 h-8 text-red-400" />
+            ) : (
+              <ImageOff className="w-8 h-8 opacity-30" />
+            )}
+          </div>
+        )}
+        {/* Status overlay */}
+        <div className="absolute top-2 left-2">
+          <ImageStatusBadge status={image.status} />
+        </div>
+      </div>
+
+      <CardContent className="p-3 space-y-2">
+        {/* Section label */}
+        <p className="text-xs font-semibold text-gray-700 truncate">
+          {image.section || `섹션 ${image.index + 1}`}
+        </p>
+
+        {/* Collapsible prompt */}
+        {image.prompt && (
+          <div className="space-y-1">
+            <button
+              type="button"
+              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-gray-700 transition-colors w-full text-left"
+              onClick={() => setPromptOpen((v) => !v)}
+            >
+              <Edit2 className="w-3 h-3 shrink-0" />
+              <span className="flex-1 truncate">프롬프트</span>
+              {promptOpen ? (
+                <ChevronUp className="w-3 h-3 shrink-0" />
+              ) : (
+                <ChevronDown className="w-3 h-3 shrink-0" />
+              )}
+            </button>
+
+            {promptOpen && (
+              <Textarea
+                value={editedPrompt}
+                onChange={(e) => setEditedPrompt(e.target.value)}
+                className="text-xs min-h-[80px] resize-y"
+                placeholder="이미지 생성 프롬프트를 입력하세요"
+              />
+            )}
+          </div>
+        )}
+
+        {/* Action buttons */}
+        <div className="flex gap-1.5">
+          <Button
+            variant="outline"
+            size="sm"
+            className="flex-1 h-7 text-xs gap-1"
+            onClick={handleRegenerate}
+            disabled={isBusy}
+            title="원래 프롬프트로 재생성"
+          >
+            <RefreshCw className="w-3 h-3" />
+            재생성
+          </Button>
+
+          {image.prompt && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex-1 h-7 text-xs gap-1"
+              onClick={handleRegenerateWithPrompt}
+              disabled={isBusy || !editedPrompt.trim()}
+              title="수정된 프롬프트로 재생성"
+            >
+              <Edit2 className="w-3 h-3" />
+              수정 재생성
+            </Button>
+          )}
+
+          <Button
+            variant="outline"
+            size="sm"
+            className="flex-1 h-7 text-xs gap-1"
+            onClick={handleDownload}
+            disabled={image.status !== "success"}
+            title="이미지 다운로드"
+          >
+            <Download className="w-3 h-3" />
+            다운로드
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export function ImagePreview({
   images,
   onRegenerate,
@@ -67,15 +223,6 @@ export function ImagePreview({
   const failCount = images.filter((img) => img.status === "failed").length;
   const progressPercent =
     progress.total > 0 ? (progress.current / progress.total) * 100 : 0;
-
-  function handleDownload(image: BlogImage) {
-    if (!image.imageUrl) return;
-    const a = document.createElement("a");
-    a.href = image.imageUrl;
-    a.download = `image-${image.index + 1}.jpg`;
-    a.target = "_blank";
-    a.click();
-  }
 
   return (
     <div className="w-full max-w-5xl mx-auto space-y-5">
@@ -122,73 +269,12 @@ export function ImagePreview({
       ) : (
         <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
           {images.map((image) => (
-            <Card key={image.index} className="overflow-hidden">
-              {/* Image area */}
-              <div className="relative bg-gray-100 aspect-square">
-                {image.imageUrl && image.status === "success" ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={image.imageUrl}
-                    alt={`이미지 ${image.index + 1}`}
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-muted-foreground">
-                    {image.status === "generating" || image.status === "retrying" ? (
-                      <Loader2 className="w-8 h-8 animate-spin text-blue-400" />
-                    ) : image.status === "failed" ? (
-                      <XCircle className="w-8 h-8 text-red-400" />
-                    ) : (
-                      <ImageOff className="w-8 h-8 opacity-30" />
-                    )}
-                  </div>
-                )}
-                {/* Status overlay */}
-                <div className="absolute top-2 left-2">
-                  <ImageStatusBadge status={image.status} />
-                </div>
-              </div>
-
-              <CardContent className="p-3 space-y-2">
-                <div>
-                  <p className="text-xs font-semibold text-gray-700 truncate">
-                    {image.section || `섹션 ${image.index + 1}`}
-                  </p>
-                  {image.prompt && (
-                    <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5">
-                      {image.prompt}
-                    </p>
-                  )}
-                </div>
-
-                <div className="flex gap-1.5">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="flex-1 h-7 text-xs gap-1"
-                    onClick={() => onRegenerate(image.index)}
-                    disabled={
-                      isGenerating ||
-                      image.status === "generating" ||
-                      image.status === "retrying"
-                    }
-                  >
-                    <RefreshCw className="w-3 h-3" />
-                    재생성
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="flex-1 h-7 text-xs gap-1"
-                    onClick={() => handleDownload(image)}
-                    disabled={image.status !== "success"}
-                  >
-                    <Download className="w-3 h-3" />
-                    다운로드
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
+            <ImageCard
+              key={image.index}
+              image={image}
+              onRegenerate={onRegenerate}
+              isGenerating={isGenerating}
+            />
           ))}
         </div>
       )}

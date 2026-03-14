@@ -38,6 +38,8 @@ export interface ValidationResult {
   prohibitedWords: string[];
   cautionPhrases: string[];
   overusedWords: { word: string; count: number }[];
+  missingKeywords: string[];
+  hasTable: boolean;
   revisionReasons: string[];
 }
 

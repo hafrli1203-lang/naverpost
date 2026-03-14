@@ -7,7 +7,7 @@ function getClient(): Anthropic {
   return _anthropic;
 }
 
-const MODEL = "claude-sonnet-4-20250514";
+const MODEL = "claude-opus-4-6";
 
 export async function generateKeywords(
   prompt: string

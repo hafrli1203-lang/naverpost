@@ -26,11 +26,12 @@ export function KeywordOptions({
   validations,
 }: KeywordOptionsProps) {
   const [selectedIndex, setSelectedIndex] = useState<string>("");
+  const safeOptions = Array.isArray(options) ? options : [];
 
   function handleConfirm() {
     const idx = parseInt(selectedIndex, 10);
-    if (!isNaN(idx) && options[idx]) {
-      onSelect(options[idx]);
+    if (!isNaN(idx) && safeOptions[idx]) {
+      onSelect(safeOptions[idx]);
     }
   }
 
@@ -39,7 +40,7 @@ export function KeywordOptions({
       <div className="text-center space-y-1">
         <h2 className="text-xl font-semibold">키워드 옵션 선택</h2>
         <p className="text-sm text-muted-foreground">
-          아래 3개의 키워드 조합 중 하나를 선택하세요
+          아래 키워드 조합 중 하나를 선택하세요
         </p>
       </div>
 
@@ -49,7 +50,7 @@ export function KeywordOptions({
         disabled={isLoading}
         className="space-y-4"
       >
-        {options.map((option, idx) => {
+        {safeOptions.map((option, idx) => {
           const validation = validations?.[idx];
           const isSelected = selectedIndex === String(idx);
 

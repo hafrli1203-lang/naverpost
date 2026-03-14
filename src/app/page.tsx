@@ -10,6 +10,7 @@ import { FinalConfirm } from "@/components/FinalConfirm";
 import { usePersistedWorkflow } from "@/hooks/usePersistedWorkflow";
 import { toast } from "sonner";
 import { CATEGORIES } from "@/lib/constants";
+import type { ArticleOptions } from "@/components/ShopSelector";
 import type { WorkflowState, KeywordOption, ArticleContent, BlogImage, Shop } from "@/types";
 
 const INITIAL_STATE: WorkflowState = {
@@ -36,12 +37,35 @@ export default function Home() {
 
   const uiStage: 0 | 1 | 2 | 3 | 4 = state.shop === null ? 0 : (state.currentStage as 1 | 2 | 3 | 4);
 
+  const [maxStageReached, setMaxStageReached] = useState<number>(state.currentStage);
   const [isLoading, setIsLoading] = useState(false);
   const [isGeneratingImages, setIsGeneratingImages] = useState(false);
   const [imageProgress, setImageProgress] = useState({ current: 0, total: 0 });
   const [savedPostId, setSavedPostId] = useState<string | undefined>(undefined);
   const [keywordOptions, setKeywordOptions] = useState<KeywordOption[]>([]);
   const [shops, setShops] = useState<Shop[]>([]);
+  const [articleOptions, setArticleOptions] = useState<ArticleOptions | null>(null);
+  const [savedSessions, setSavedSessions] = useState<Array<{
+    id: string;
+    savedAt: string;
+    shopName: string;
+    category: string;
+    topic: string;
+    title: string;
+    mainKeyword: string;
+    subKeyword1: string;
+    subKeyword2: string;
+    articleContent: string;
+  }>>([]);
+
+  const loadSavedSessions = useCallback(() => {
+    fetch("/api/sessions")
+      .then((r) => r.json())
+      .then((json) => {
+        if (json.success) setSavedSessions(json.data);
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     fetch("/api/shops")
@@ -50,14 +74,16 @@ export default function Home() {
         if (json.success) setShops(json.data);
       })
       .catch(() => {});
-  }, []);
+    loadSavedSessions();
+  }, [loadSavedSessions]);
 
   const handleStart = useCallback(
-    async (shopId: string, categoryId: string, topic: string) => {
+    async (shopId: string, categoryId: string, topic: string, opts?: ArticleOptions) => {
       const shop = shops.find((s) => s.id === shopId) ?? null;
       const category = CATEGORIES.find((c) => c.id === categoryId) ?? null;
       if (!shop || !category) return;
 
+      if (opts) setArticleOptions(opts);
       setIsLoading(true);
       try {
         const res = await fetch("/api/keywords", {
@@ -70,7 +96,8 @@ export default function Home() {
           throw new Error(json.error ?? "키워드 생성에 실패했습니다.");
         }
 
-        const options: KeywordOption[] = json.data?.results ?? [];
+        const raw = json.data?.results;
+        const options: KeywordOption[] = Array.isArray(raw) ? raw : [];
         setKeywordOptions(options);
         setState({
           ...state,
@@ -110,7 +137,8 @@ export default function Home() {
       if (!res.ok || !json.success) {
         throw new Error(json.error ?? "키워드 재생성에 실패했습니다.");
       }
-      setKeywordOptions(json.data?.results ?? []);
+      const rawResults = json.data?.results;
+      setKeywordOptions(Array.isArray(rawResults) ? rawResults : []);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "키워드 재생성 중 오류가 발생했습니다.");
     } finally {
@@ -130,6 +158,7 @@ export default function Home() {
             shopId: state.shop?.id,
             categoryId: state.category?.id,
             topic: state.topic,
+            ...(articleOptions ?? {}),
           }),
         });
         const json = await res.json();
@@ -143,6 +172,7 @@ export default function Home() {
           article: json.data as ArticleContent,
           currentStage: 2,
         });
+        setMaxStageReached((prev) => Math.max(prev, 2));
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "본문 작성 중 오류가 발생했습니다.");
       } finally {
@@ -171,16 +201,28 @@ export default function Home() {
     setIsGeneratingImages(true);
     setImageProgress({ current: 0, total: 10 });
     setState({ ...state, currentStage: 3, images: [] });
+    setMaxStageReached((prev) => Math.max(prev, 3));
 
     try {
-      const params = new URLSearchParams({
-        sessionId: state.sessionId,
-        articleContent: state.article.content,
-        title: state.article.title,
-        mainKeyword: state.article.mainKeyword,
+      // POST the article params first to avoid URL length limits (articles can be 3000+ chars).
+      // The server stores them temporarily and returns a short token used by the SSE endpoint.
+      const sessionRes = await fetch("/api/image/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: state.sessionId,
+          articleContent: state.article.content,
+          title: state.article.title,
+          mainKeyword: state.article.mainKeyword,
+        }),
       });
 
-      const eventSource = new EventSource(`/api/image/generate?${params.toString()}`);
+      if (!sessionRes.ok) {
+        throw new Error("이미지 생성 세션을 시작하지 못했습니다.");
+      }
+
+      const { token } = await sessionRes.json();
+      const eventSource = new EventSource(`/api/image/generate?token=${token}`);
 
       eventSource.onmessage = (e) => {
         try {
@@ -244,7 +286,7 @@ export default function Home() {
   }, [state, setState]);
 
   const handleImageRegenerate = useCallback(
-    async (index: number) => {
+    async (index: number, customPrompt?: string) => {
       if (!state.shop) return;
 
       setState({
@@ -255,10 +297,16 @@ export default function Home() {
       });
 
       try {
+        const body: { index: number; sessionId: string; prompt?: string } = {
+          index,
+          sessionId: state.sessionId,
+        };
+        if (customPrompt) body.prompt = customPrompt;
+
         const res = await fetch("/api/image/regenerate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ index, sessionId: state.sessionId }),
+          body: JSON.stringify(body),
         });
         const json = await res.json();
         if (!res.ok || !json.success) throw new Error(json.error ?? "재생성 실패");
@@ -272,6 +320,7 @@ export default function Home() {
                   status: "success" as const,
                   imageUrl: json.data.imageUrl,
                   imageId: json.data.imageId,
+                  ...(customPrompt ? { prompt: customPrompt } : {}),
                 }
               : img
           ),
@@ -291,6 +340,7 @@ export default function Home() {
 
   const handleApproveAll = useCallback(() => {
     setState({ ...state, currentStage: 4 });
+    setMaxStageReached((prev) => Math.max(prev, 4));
   }, [state, setState]);
 
   // TODO: 네이버 연동 — 사용자 요청 시 활성화
@@ -308,10 +358,107 @@ export default function Home() {
     }
   }, [state, setState, clearPersistedState]);
 
+  const handleStageChange = useCallback(
+    (stage: number) => {
+      if (stage <= maxStageReached) {
+        setState({ ...state, currentStage: stage as 1 | 2 | 3 | 4 });
+      }
+    },
+    [state, setState, maxStageReached]
+  );
+
+  const handleSaveSession = useCallback(async () => {
+    if (!state.article) return;
+    try {
+      const res = await fetch("/api/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: state.sessionId,
+          shopName: state.shop?.name ?? "",
+          category: state.category?.name ?? "",
+          topic: state.topic,
+          title: state.article.title,
+          mainKeyword: state.article.mainKeyword,
+          subKeyword1: state.article.subKeyword1,
+          subKeyword2: state.article.subKeyword2,
+          articleContent: state.article.content,
+        }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        toast.success("작업이 저장되었습니다.");
+        loadSavedSessions();
+      } else {
+        toast.error("저장 실패: " + (json.error ?? ""));
+      }
+    } catch {
+      toast.error("저장 중 오류가 발생했습니다.");
+    }
+  }, [state, loadSavedSessions]);
+
+  const handleLoadSession = useCallback(
+    (session: typeof savedSessions[number]) => {
+      const shop = shops.find((s) => s.name === session.shopName) ?? null;
+      const category = CATEGORIES.find((c) => c.name === session.category) ?? null;
+      const article: ArticleContent = {
+        title: session.title,
+        content: session.articleContent,
+        mainKeyword: session.mainKeyword,
+        subKeyword1: session.subKeyword1,
+        subKeyword2: session.subKeyword2,
+        shopName: session.shopName,
+        category: session.category,
+        validation: {
+          needsRevision: false,
+          prohibitedWords: [],
+          cautionPhrases: [],
+          overusedWords: [],
+          missingKeywords: [],
+          hasTable: true,
+          revisionReasons: [],
+        },
+      };
+      setState({
+        sessionId: session.id,
+        currentStage: 2,
+        shop,
+        category,
+        topic: session.topic,
+        selectedKeyword: {
+          title: session.title,
+          mainKeyword: session.mainKeyword,
+          subKeyword1: session.subKeyword1,
+          subKeyword2: session.subKeyword2,
+        },
+        article,
+        images: [],
+        naverDraftSaved: false,
+      });
+      setMaxStageReached(2);
+      toast.success("저장된 작업을 불러왔습니다.");
+    },
+    [shops, setState]
+  );
+
+  const handleDeleteSession = useCallback(
+    async (id: string) => {
+      try {
+        await fetch(`/api/sessions?id=${id}`, { method: "DELETE" });
+        loadSavedSessions();
+        toast.success("삭제되었습니다.");
+      } catch {
+        toast.error("삭제 실패");
+      }
+    },
+    [loadSavedSessions]
+  );
+
   const handleStartOver = useCallback(() => {
     clearPersistedState();
     setSavedPostId(undefined);
     setKeywordOptions([]);
+    setMaxStageReached(1);
     setState(makeInitialState());
   }, [clearPersistedState, setState]);
 
@@ -334,14 +481,49 @@ export default function Home() {
       {uiStage > 0 && (
         <div className="bg-white border-b border-gray-100">
           <div className="max-w-5xl mx-auto px-4">
-            <WorkflowStepper currentStage={state.currentStage} />
+            <WorkflowStepper currentStage={state.currentStage} maxStageReached={maxStageReached} onStageClick={handleStageChange} />
           </div>
         </div>
       )}
 
       <main className="max-w-5xl mx-auto px-4 py-8">
         {uiStage === 0 && (
-          <ShopSelector shops={shops} onStart={handleStart} isLoading={isLoading} />
+          <>
+            <ShopSelector shops={shops} onStart={handleStart} isLoading={isLoading} />
+
+            {savedSessions.length > 0 && (
+              <div className="mt-8 max-w-3xl mx-auto">
+                <h3 className="text-base font-semibold mb-3 text-gray-700">저장된 작업</h3>
+                <div className="space-y-2">
+                  {savedSessions.map((s) => (
+                    <div
+                      key={s.id}
+                      className="flex items-center justify-between bg-white rounded-lg border border-gray-200 px-4 py-3 hover:border-blue-300 transition-colors"
+                    >
+                      <div
+                        className="flex-1 cursor-pointer"
+                        onClick={() => handleLoadSession(s)}
+                      >
+                        <p className="text-sm font-medium text-gray-900 truncate">{s.title}</p>
+                        <p className="text-xs text-gray-500 mt-0.5">
+                          {s.shopName} · {s.category} · {new Date(s.savedAt).toLocaleDateString("ko-KR")}
+                        </p>
+                      </div>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteSession(s.id);
+                        }}
+                        className="ml-3 text-xs text-red-400 hover:text-red-600 transition-colors shrink-0"
+                      >
+                        삭제
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
         )}
 
         {uiStage === 1 && (
@@ -359,6 +541,7 @@ export default function Home() {
             onApprove={handleArticleApprove}
             onRewrite={handleArticleRewrite}
             onManualEdit={handleManualEdit}
+            onSave={handleSaveSession}
             isLoading={isLoading || isGeneratingImages}
           />
         )}

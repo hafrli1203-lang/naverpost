@@ -59,6 +59,49 @@ export async function cleanupSession(sessionId: string): Promise<void> {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Generation session params (avoids URL length limits for SSE endpoint)
+// ---------------------------------------------------------------------------
+
+const PARAMS_DIR = path.join(os.tmpdir(), "naverpost-params");
+
+export async function saveGenerationParams(params: {
+  sessionId: string;
+  articleContent: string;
+  title: string;
+  mainKeyword: string;
+}): Promise<string> {
+  await ensureDir(PARAMS_DIR);
+  const token = crypto.randomUUID();
+  const filePath = path.join(PARAMS_DIR, `${token}.json`);
+  await fs.writeFile(filePath, JSON.stringify(params), "utf-8");
+  return token;
+}
+
+export async function getGenerationParams(token: string): Promise<{
+  sessionId: string;
+  articleContent: string;
+  title: string;
+  mainKeyword: string;
+} | null> {
+  try {
+    const filePath = path.join(PARAMS_DIR, `${token}.json`);
+    const raw = await fs.readFile(filePath, "utf-8");
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+export async function deleteGenerationParams(token: string): Promise<void> {
+  try {
+    const filePath = path.join(PARAMS_DIR, `${token}.json`);
+    await fs.unlink(filePath);
+  } catch {
+    // Ignore if already deleted
+  }
+}
+
 export async function cleanupStale(): Promise<void> {
   try {
     await ensureDir(TEMP_DIR);

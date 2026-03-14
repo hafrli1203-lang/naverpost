@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { writeArticle, reviseArticle } from "@/lib/ai/claude";
 import { researchKeyword } from "@/lib/ai/perplexity";
 import { buildArticlePrompt } from "@/lib/prompts/articlePrompt";
+import { buildPromoPrompt } from "@/lib/prompts/promoPrompt";
 import { buildRevisionPrompt } from "@/lib/prompts/revisionPrompt";
 import { validateContent } from "@/lib/validation/contentValidator";
 import { CATEGORIES } from "@/lib/constants";
@@ -13,11 +14,32 @@ const MAX_REVISION_ATTEMPTS = 2;
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { keyword, shopId, categoryId, topic } = body as {
+    const {
+      keyword,
+      shopId,
+      categoryId,
+      topic,
+      articleType = "info",
+      charCount = 2000,
+      tone = "standard",
+      contentSubtype = "blog",
+      eventName,
+      eventPeriod,
+      benefitContent,
+      externalReference,
+    } = body as {
       keyword: KeywordOption;
       shopId: string;
       categoryId: string;
       topic: string;
+      articleType?: "info" | "promo";
+      charCount?: 1000 | 1500 | 2000 | 2500;
+      tone?: "standard" | "friendly" | "casual" | "business" | "expert";
+      contentSubtype?: "blog" | "event" | "season" | "short";
+      eventName?: string;
+      eventPeriod?: string;
+      benefitContent?: string;
+      externalReference?: string;
     };
 
     if (!keyword || !shopId || !categoryId) {
@@ -41,19 +63,48 @@ export async function POST(request: NextRequest) {
     const researchData = await researchKeyword(keyword.mainKeyword);
 
     // Build article prompt and generate via Claude
-    const prompt = buildArticlePrompt({
-      title: keyword.title,
+    const prompt =
+      articleType === "promo"
+        ? buildPromoPrompt({
+            title: keyword.title,
+            mainKeyword: keyword.mainKeyword,
+            subKeyword1: keyword.subKeyword1,
+            subKeyword2: keyword.subKeyword2,
+            shop,
+            category,
+            topic: topic || keyword.title,
+            researchData,
+            charCount,
+            tone: tone as "business" | "friendly" | "expert" | undefined,
+            externalReference,
+            contentSubtype,
+            eventName,
+            eventPeriod,
+            benefitContent,
+          })
+        : buildArticlePrompt({
+            title: keyword.title,
+            mainKeyword: keyword.mainKeyword,
+            subKeyword1: keyword.subKeyword1,
+            subKeyword2: keyword.subKeyword2,
+            shop,
+            category,
+            topic: topic || keyword.title,
+            researchData,
+            charCount,
+            tone: tone as "standard" | "friendly" | "casual" | undefined,
+            externalReference,
+          });
+
+    let content = await writeArticle(prompt);
+    // 본문에서 마크다운 볼드(**) 제거
+    content = content.replace(/\*\*([^*]+)\*\*/g, "$1");
+    const keywordsForValidation = {
       mainKeyword: keyword.mainKeyword,
       subKeyword1: keyword.subKeyword1,
       subKeyword2: keyword.subKeyword2,
-      shop,
-      category,
-      topic: topic || keyword.title,
-      researchData,
-    });
-
-    let content = await writeArticle(prompt);
-    let validation = validateContent(content);
+    };
+    let validation = validateContent(content, keywordsForValidation);
 
     // 검증 실패 시 자동 수정 (최대 2회)
     let revisionCount = 0;
@@ -61,9 +112,12 @@ export async function POST(request: NextRequest) {
       const revisionPrompt = buildRevisionPrompt({
         originalContent: content,
         validation,
+        mainKeyword: keyword.mainKeyword,
+        subKeyword1: keyword.subKeyword1,
+        subKeyword2: keyword.subKeyword2,
       });
       content = await reviseArticle(revisionPrompt);
-      validation = validateContent(content);
+      validation = validateContent(content, keywordsForValidation);
       revisionCount++;
     }
 

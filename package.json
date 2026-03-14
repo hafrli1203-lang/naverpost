@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -p 3100",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"
@@ -16,9 +16,11 @@
     "clsx": "^2.1.1",
     "googleapis": "^171.4.0",
     "lucide-react": "^0.577.0",
+    "mammoth": "^1.12.0",
     "next": "16.1.6",
     "next-themes": "^0.4.6",
     "openai": "^6.29.0",
+    "pdf-parse": "^2.4.5",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "rss-parser": "^3.13.0",
@@ -31,6 +33,7 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
+    "@types/pdf-parse": "^1.1.5",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",

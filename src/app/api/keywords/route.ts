@@ -53,6 +53,13 @@ export async function POST(request: NextRequest) {
 
     const options = await generateKeywords(prompt);
 
+    if (!Array.isArray(options) || options.length === 0) {
+      return NextResponse.json(
+        { success: false, error: "키워드 생성 결과가 비어 있습니다. 다시 시도해주세요." },
+        { status: 500 }
+      );
+    }
+
     // 키워드 7대 규칙 검증 결과 첨부
     const results = options.map((option) => ({
       ...option,

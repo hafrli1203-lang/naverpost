@@ -4,7 +4,7 @@
  * SDK가 아닌 REST API를 사용하여 imageConfig를 정확히 전달
  */
 
-const IMAGE_MODEL = "gemini-2.0-flash-exp-image-generation";
+const IMAGE_MODEL = "gemini-3-pro-image-preview";
 
 export async function generateBlogImage(
   prompt: string,
@@ -28,6 +28,8 @@ export async function generateBlogImage(
     });
 
     if (!res.ok) {
+      const errText = await res.text().catch(() => "");
+      console.error(`[imageGen] ${res.status} ${res.statusText}: ${errText}`);
       return null;
     }
 
