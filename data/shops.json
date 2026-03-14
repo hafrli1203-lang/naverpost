@@ -1,0 +1,38 @@
+[
+  {
+    "id": "top50jn",
+    "name": "으뜸50안경 장림시장점",
+    "blogId": "top50jn",
+    "rssUrl": "https://rss.blog.naver.com/top50jn.xml"
+  },
+  {
+    "id": "jinysgongju",
+    "name": "지니스안경 공주신관점",
+    "blogId": "jinysgongju",
+    "rssUrl": "https://rss.blog.naver.com/jinysgongju.xml"
+  },
+  {
+    "id": "attractiger",
+    "name": "지니스안경 김해장유점",
+    "blogId": "attractiger",
+    "rssUrl": "https://rss.blog.naver.com/attractiger.xml"
+  },
+  {
+    "id": "leesi7007",
+    "name": "지니스안경 대전충남대점",
+    "blogId": "leesi7007",
+    "rssUrl": "https://rss.blog.naver.com/leesi7007.xml"
+  },
+  {
+    "id": "kl1854",
+    "name": "지니스안경 심곡고가사거리점",
+    "blogId": "kl1854",
+    "rssUrl": "https://rss.blog.naver.com/kl1854.xml"
+  },
+  {
+    "id": "peace9486",
+    "name": "지니스안경 진해하나로마트점",
+    "blogId": "peace9486",
+    "rssUrl": "https://rss.blog.naver.com/peace9486.xml"
+  }
+]

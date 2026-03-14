@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__filesystem__directory_tree",
+      "WebSearch",
+      "mcp__filesystem__list_directory",
+      "WebFetch(domain:github.com)",
+      "Bash(wc -l * 2>/dev/null | tail -20)",
+      "Bash(cat \"./네이버 블로그 자동 작성 프로그램 \\(안경원\\).md\")",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(wc -l \"./네이버 블로그 자동 작성 프로그램 \\(안경원\\).md\")",
+      "Bash(head -300 \"./네이버 블로그 자동 작성 프로그램 \\(안경원\\).md\")",
+      "Bash(tail -n +300 \"./네이버 블로그 자동 작성 프로그램 \\(안경원\\).md\" | head -400)",
+      "Bash(tail -n +700 \"./네이버 블로그 자동 작성 프로그램 \\(안경원\\).md\")",
+      "WebFetch(domain:naver.github.io)",
+      "Bash(npx create-next-app@latest . --typescript --tailwind --eslint --app --src-dir --import-alias \"@/*\" --yes 2>&1 | tail -20)",
+      "Read(//c/project/**)",
+      "Bash(npx create-next-app@latest naverpost-app --typescript --tailwind --eslint --app --src-dir --import-alias \"@/*\" --yes)",
+      "Bash(cp -r /c/project/naverpost-app/src /c/project/naverpost/ && cp /c/project/naverpost-app/package.json /c/project/naverpost/ && cp /c/project/naverpost-app/tsconfig.json /c/project/naverpost/ && cp /c/project/naverpost-app/next.config.ts /c/project/naverpost/ && cp /c/project/naverpost-app/postcss.config.mjs /c/project/naverpost/ && cp /c/project/naverpost-app/next-env.d.ts /c/project/naverpost/ && cp /c/project/naverpost-app/.gitignore /c/project/naverpost/ && cp -r /c/project/naverpost-app/public /c/project/naverpost/ && cp -r /c/project/naverpost-app/node_modules /c/project/naverpost/ 2>/dev/null; echo \"COPY_DONE\")",
+      "Bash(npm install:*)",
+      "Bash(npx shadcn@latest init -y 2>&1 | tail -10)",
+      "Bash(npx shadcn@latest init --defaults 2>&1 | tail -10)"
+    ]
+  }
+}
