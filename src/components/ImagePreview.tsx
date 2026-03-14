@@ -19,12 +19,14 @@ import {
   ChevronDown,
   ChevronUp,
   Edit2,
+  Save,
 } from "lucide-react";
 
 interface ImagePreviewProps {
   images: BlogImage[];
   onRegenerate: (index: number, customPrompt?: string) => void;
   onApproveAll: () => void;
+  onSave?: () => void;
   isGenerating: boolean;
   progress: { current: number; total: number };
 }
@@ -216,6 +218,7 @@ export function ImagePreview({
   images,
   onRegenerate,
   onApproveAll,
+  onSave,
   isGenerating,
   progress,
 }: ImagePreviewProps) {
@@ -281,8 +284,19 @@ export function ImagePreview({
 
       <Separator />
 
-      {/* Approve all */}
-      <div className="flex justify-end">
+      {/* Actions */}
+      <div className="flex justify-end gap-3">
+        {onSave && (
+          <Button
+            variant="outline"
+            onClick={onSave}
+            disabled={isGenerating || successCount === 0}
+            className="gap-2 h-11 px-6 border-blue-300 text-blue-600 hover:bg-blue-50 hover:text-blue-700"
+          >
+            <Save className="w-4 h-4" />
+            저장
+          </Button>
+        )}
         <Button
           onClick={onApproveAll}
           disabled={isGenerating || successCount === 0}

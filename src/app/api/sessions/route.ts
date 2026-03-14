@@ -30,6 +30,7 @@ export async function POST(request: NextRequest) {
       subKeyword1: body.subKeyword1,
       subKeyword2: body.subKeyword2,
       articleContent: body.articleContent,
+      images: Array.isArray(body.images) ? body.images : undefined,
     };
     await saveSession(session);
     return NextResponse.json({ success: true, data: session });

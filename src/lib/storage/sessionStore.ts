@@ -8,6 +8,13 @@ async function ensureDir(): Promise<void> {
   await fs.mkdir(SESSIONS_DIR, { recursive: true });
 }
 
+export interface SavedImage {
+  index: number;
+  imageId: string;
+  prompt: string;
+  section: string;
+}
+
 export interface SavedSession {
   id: string;
   savedAt: string;
@@ -19,6 +26,7 @@ export interface SavedSession {
   subKeyword1: string;
   subKeyword2: string;
   articleContent: string;
+  images?: SavedImage[];
 }
 
 export async function saveSession(data: SavedSession): Promise<void> {

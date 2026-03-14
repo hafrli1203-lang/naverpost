@@ -56,6 +56,7 @@ export default function Home() {
     subKeyword1: string;
     subKeyword2: string;
     articleContent: string;
+    images?: { index: number; imageId: string; prompt: string; section: string }[];
   }>>([]);
 
   const loadSavedSessions = useCallback(() => {
@@ -370,6 +371,14 @@ export default function Home() {
   const handleSaveSession = useCallback(async () => {
     if (!state.article) return;
     try {
+      const savedImages = state.images
+        .filter((img) => img.status === "success")
+        .map((img) => ({
+          index: img.index,
+          imageId: img.imageId,
+          prompt: img.prompt,
+          section: img.section,
+        }));
       const res = await fetch("/api/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -383,6 +392,7 @@ export default function Home() {
           subKeyword1: state.article.subKeyword1,
           subKeyword2: state.article.subKeyword2,
           articleContent: state.article.content,
+          images: savedImages,
         }),
       });
       const json = await res.json();
@@ -419,9 +429,18 @@ export default function Home() {
           revisionReasons: [],
         },
       };
+      const restoredImages: BlogImage[] = (session.images ?? []).map((img) => ({
+        index: img.index,
+        imageId: img.imageId,
+        imageUrl: `/api/image/file/${img.imageId}`,
+        prompt: img.prompt,
+        section: img.section,
+        status: "success" as const,
+      }));
+      const hasImages = restoredImages.length > 0;
       setState({
         sessionId: session.id,
-        currentStage: 2,
+        currentStage: hasImages ? 3 : 2,
         shop,
         category,
         topic: session.topic,
@@ -432,10 +451,10 @@ export default function Home() {
           subKeyword2: session.subKeyword2,
         },
         article,
-        images: [],
+        images: restoredImages,
         naverDraftSaved: false,
       });
-      setMaxStageReached(2);
+      setMaxStageReached(hasImages ? 3 : 2);
       toast.success("저장된 작업을 불러왔습니다.");
     },
     [shops, setState]
@@ -551,6 +570,7 @@ export default function Home() {
             images={state.images}
             onRegenerate={handleImageRegenerate}
             onApproveAll={handleApproveAll}
+            onSave={handleSaveSession}
             isGenerating={isGeneratingImages}
             progress={imageProgress}
           />
