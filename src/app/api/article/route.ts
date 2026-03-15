@@ -115,8 +115,11 @@ export async function POST(request: NextRequest) {
         mainKeyword: keyword.mainKeyword,
         subKeyword1: keyword.subKeyword1,
         subKeyword2: keyword.subKeyword2,
+        charCount,
       });
       content = await reviseArticle(revisionPrompt);
+      // 수정본에서도 볼드(**) 제거
+      content = content.replace(/\*\*([^*]+)\*\*/g, "$1");
       validation = validateContent(content, keywordsForValidation);
       revisionCount++;
     }

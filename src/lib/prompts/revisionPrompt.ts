@@ -7,8 +7,9 @@ export function buildRevisionPrompt(params: {
   mainKeyword?: string;
   subKeyword1?: string;
   subKeyword2?: string;
+  charCount?: number;
 }): string {
-  const { originalContent, validation, mainKeyword, subKeyword1, subKeyword2 } = params;
+  const { originalContent, validation, mainKeyword, subKeyword1, subKeyword2, charCount = 2000 } = params;
 
   const problemLines: string[] = [];
 
@@ -77,7 +78,7 @@ ${subKeyword2 ? `서브 키워드2: "${subKeyword2}" — 반드시 원형 그대
 [수정 규칙]
 1. 위에 명시된 금지어와 주의 표현을 지정된 대체어로 반드시 교체 (누락 시 불합격)
 2. 키워드에 포함된 단어(예: 안경렌즈)는 절대 변경하지 마세요. 반복이 많더라도 키워드는 원형 유지.
-3. 글 길이 2000자 내외 유지
+3. 글 길이 ${charCount}자 내외 유지
 4. 자연스러운 문장 흐름 유지
 5. 숫자 나열(1. 2. 3.) 대신 문장으로 풀어서 작성
 6. 쉼표(,) 사용 금지 — 접속사와 연결 어미로 이어지게 작성

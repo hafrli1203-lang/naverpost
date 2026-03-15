@@ -201,7 +201,7 @@ export default function Home() {
 
     setIsGeneratingImages(true);
     setImageProgress({ current: 0, total: 10 });
-    setState({ ...state, currentStage: 3, images: [] });
+    setState((prev) => ({ ...prev, currentStage: 3, images: [] }));
     setMaxStageReached((prev) => Math.max(prev, 3));
 
     try {
@@ -284,7 +284,7 @@ export default function Home() {
       setIsGeneratingImages(false);
       toast.error(err instanceof Error ? err.message : "이미지 생성 중 오류가 발생했습니다.");
     }
-  }, [state, setState]);
+  }, [setState]);
 
   const handleImageRegenerate = useCallback(
     async (index: number, customPrompt?: string) => {
@@ -340,9 +340,9 @@ export default function Home() {
   );
 
   const handleApproveAll = useCallback(() => {
-    setState({ ...state, currentStage: 4 });
+    setState((prev) => ({ ...prev, currentStage: 4 }));
     setMaxStageReached((prev) => Math.max(prev, 4));
-  }, [state, setState]);
+  }, [setState]);
 
   // TODO: 네이버 연동 — 사용자 요청 시 활성화
   // 현재는 로컬 완료 처리만 수행 (네이버 API 호출 안 함)
@@ -562,6 +562,7 @@ export default function Home() {
             onManualEdit={handleManualEdit}
             onSave={handleSaveSession}
             isLoading={isLoading || isGeneratingImages}
+            targetCharCount={articleOptions?.charCount ?? 2000}
           />
         )}
 

@@ -28,40 +28,96 @@ interface ArticlePreviewProps {
   onManualEdit: (content: string) => void;
   onSave?: () => void;
   isLoading: boolean;
+  targetCharCount?: number;
 }
 
 function renderContent(content: string) {
-  return content.split("\n").map((line, i) => {
+  const lines = content.split("\n");
+  const elements: React.ReactNode[] = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    // Detect table: consecutive lines starting with |
+    if (line.trim().startsWith("|") && line.trim().endsWith("|")) {
+      const tableLines: string[] = [];
+      while (i < lines.length && lines[i].trim().startsWith("|") && lines[i].trim().endsWith("|")) {
+        tableLines.push(lines[i].trim());
+        i++;
+      }
+
+      if (tableLines.length >= 2) {
+        // Parse header
+        const headerCells = tableLines[0].split("|").filter((c) => c.trim() !== "").map((c) => c.trim());
+        // Skip separator row (| :--- | ... |)
+        const dataStartIndex = tableLines[1].match(/^[\s|:-]+$/) ? 2 : 1;
+        const dataRows = tableLines.slice(dataStartIndex).map((row) =>
+          row.split("|").filter((c) => c.trim() !== "").map((c) => c.trim())
+        );
+
+        elements.push(
+          <div key={`table-${i}`} className="my-4 overflow-x-auto">
+            <table className="w-full text-sm border-collapse border border-gray-200 rounded-lg">
+              <thead>
+                <tr className="bg-gray-50">
+                  {headerCells.map((cell, ci) => (
+                    <th key={ci} className="px-3 py-2 text-left font-semibold text-gray-700 border border-gray-200">
+                      {cell}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {dataRows.map((row, ri) => (
+                  <tr key={ri} className={ri % 2 === 0 ? "bg-white" : "bg-gray-50"}>
+                    {row.map((cell, ci) => (
+                      <td key={ci} className="px-3 py-2 text-gray-700 border border-gray-200">
+                        {cell}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+        continue;
+      }
+    }
+
+    // Existing rendering logic
     if (line.startsWith("# ")) {
-      return (
+      elements.push(
         <h2 key={i} className="text-xl font-bold mt-6 mb-2 text-gray-900">
           {line.slice(2)}
         </h2>
       );
-    }
-    if (line.startsWith("## ")) {
-      return (
+    } else if (line.startsWith("## ")) {
+      elements.push(
         <h3 key={i} className="text-lg font-semibold mt-5 mb-2 text-gray-800">
           {line.slice(3)}
         </h3>
       );
-    }
-    if (line.startsWith("### ")) {
-      return (
+    } else if (line.startsWith("### ")) {
+      elements.push(
         <h4 key={i} className="text-base font-semibold mt-4 mb-1 text-gray-700">
           {line.slice(4)}
         </h4>
       );
+    } else if (line.trim() === "") {
+      elements.push(<div key={i} className="h-3" />);
+    } else {
+      elements.push(
+        <p key={i} className="text-sm leading-7 text-gray-700">
+          {line}
+        </p>
+      );
     }
-    if (line.trim() === "") {
-      return <div key={i} className="h-3" />;
-    }
-    return (
-      <p key={i} className="text-sm leading-7 text-gray-700">
-        {line}
-      </p>
-    );
-  });
+    i++;
+  }
+
+  return elements;
 }
 
 export function ArticlePreview({
@@ -71,6 +127,7 @@ export function ArticlePreview({
   onManualEdit,
   onSave,
   isLoading,
+  targetCharCount = 2000,
 }: ArticlePreviewProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState(article.content);
@@ -258,18 +315,18 @@ export function ArticlePreview({
                   <span>글자 수</span>
                   <span
                     className={
-                      charCount >= 2000 ? "text-green-600 font-semibold" : "text-orange-500"
+                      charCount >= targetCharCount ? "text-green-600 font-semibold" : "text-orange-500"
                     }
                   >
-                    {charCount.toLocaleString()}자 / 2,000자 목표
+                    {charCount.toLocaleString()}자 / {targetCharCount.toLocaleString()}자 목표
                   </span>
                 </div>
                 <div className="w-full bg-gray-100 rounded-full h-1.5">
                   <div
                     className={`h-1.5 rounded-full transition-all ${
-                      charCount >= 2000 ? "bg-green-500" : "bg-orange-400"
+                      charCount >= targetCharCount ? "bg-green-500" : "bg-orange-400"
                     }`}
-                    style={{ width: `${Math.min((charCount / 2000) * 100, 100)}%` }}
+                    style={{ width: `${Math.min((charCount / targetCharCount) * 100, 100)}%` }}
                   />
                 </div>
               </div>
