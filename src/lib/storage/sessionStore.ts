@@ -1,13 +1,3 @@
-import fs from "fs/promises";
-import path from "path";
-import os from "os";
-
-const SESSIONS_DIR = path.join(os.tmpdir(), "naverpost-sessions");
-
-async function ensureDir(): Promise<void> {
-  await fs.mkdir(SESSIONS_DIR, { recursive: true });
-}
-
 export interface SavedImage {
   index: number;
   imageId: string;
@@ -29,49 +19,24 @@ export interface SavedSession {
   images?: SavedImage[];
 }
 
+// In-memory store (Vercel 서버리스 호환)
+// 같은 인스턴스 내에서 유지됨. 콜드 스타트 시 초기화됨.
+const sessions = new Map<string, SavedSession>();
+
 export async function saveSession(data: SavedSession): Promise<void> {
-  await ensureDir();
-  const filePath = path.join(SESSIONS_DIR, `${data.id}.json`);
-  await fs.writeFile(filePath, JSON.stringify(data, null, 2), "utf-8");
+  sessions.set(data.id, data);
 }
 
 export async function getSession(id: string): Promise<SavedSession | null> {
-  try {
-    const filePath = path.join(SESSIONS_DIR, `${id}.json`);
-    const raw = await fs.readFile(filePath, "utf-8");
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
+  return sessions.get(id) ?? null;
 }
 
 export async function listSessions(): Promise<SavedSession[]> {
-  await ensureDir();
-  try {
-    const files = await fs.readdir(SESSIONS_DIR);
-    const sessions: SavedSession[] = [];
-    for (const file of files) {
-      if (!file.endsWith(".json")) continue;
-      try {
-        const raw = await fs.readFile(path.join(SESSIONS_DIR, file), "utf-8");
-        sessions.push(JSON.parse(raw));
-      } catch {
-        // skip corrupted files
-      }
-    }
-    // Sort by savedAt descending (newest first)
-    sessions.sort((a, b) => new Date(b.savedAt).getTime() - new Date(a.savedAt).getTime());
-    return sessions;
-  } catch {
-    return [];
-  }
+  const all = Array.from(sessions.values());
+  all.sort((a, b) => new Date(b.savedAt).getTime() - new Date(a.savedAt).getTime());
+  return all;
 }
 
 export async function deleteSession(id: string): Promise<void> {
-  try {
-    const filePath = path.join(SESSIONS_DIR, `${id}.json`);
-    await fs.unlink(filePath);
-  } catch {
-    // ignore
-  }
+  sessions.delete(id);
 }

@@ -14,7 +14,7 @@ export async function generateKeywords(
 ): Promise<KeywordOption[]> {
   const message = await getClient().messages.create({
     model: MODEL,
-    max_tokens: 1024,
+    max_tokens: 4096,
     messages: [{ role: "user", content: prompt }],
   });
 
@@ -63,7 +63,7 @@ export async function reviseArticle(prompt: string): Promise<string> {
 export async function generateImagePrompts(prompt: string): Promise<string> {
   const message = await getClient().messages.create({
     model: MODEL,
-    max_tokens: 1024,
+    max_tokens: 2048,
     messages: [{ role: "user", content: prompt }],
   });
 
