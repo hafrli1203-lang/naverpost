@@ -4,7 +4,7 @@
  * SDK가 아닌 REST API를 사용하여 imageConfig를 정확히 전달
  */
 
-const IMAGE_MODEL = "gemini-3-pro-image-preview";
+const IMAGE_MODEL = "gemini-2.0-flash-exp-image-generation";
 
 export async function generateBlogImage(
   prompt: string,
