@@ -1,10 +1,10 @@
 /**
  * 나노바나나 프로 이미지 생성기
- * Google AI Studio REST API 직접 호출 (gemini-2.0-flash-exp-image-generation)
+ * Google AI Studio REST API 직접 호출 (gemini-3-pro-image-preview)
  * SDK가 아닌 REST API를 사용하여 imageConfig를 정확히 전달
  */
 
-const IMAGE_MODEL = "gemini-2.0-flash-exp-image-generation";
+const IMAGE_MODEL = "gemini-3-pro-image-preview";
 
 export async function generateBlogImage(
   prompt: string,
