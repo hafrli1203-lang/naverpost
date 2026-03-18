@@ -27,6 +27,7 @@ interface ImagePreviewProps {
   onRegenerate: (index: number, customPrompt?: string) => void;
   onApproveAll: () => void;
   onSave?: () => void;
+  onStartGeneration?: () => void;
   isGenerating: boolean;
   progress: { current: number; total: number };
 }
@@ -219,6 +220,7 @@ export function ImagePreview({
   onRegenerate,
   onApproveAll,
   onSave,
+  onStartGeneration,
   isGenerating,
   progress,
 }: ImagePreviewProps) {
@@ -267,7 +269,12 @@ export function ImagePreview({
       {images.length === 0 && !isGenerating ? (
         <div className="flex flex-col items-center justify-center py-20 text-muted-foreground gap-3">
           <ImageOff className="w-12 h-12 opacity-30" />
-          <p className="text-sm">생성된 이미지가 없습니다</p>
+          <p className="text-sm">이미지가 아직 생성되지 않았습니다.</p>
+          {onStartGeneration && (
+            <Button onClick={onStartGeneration} className="gap-2 bg-blue-600 hover:bg-blue-700 mt-2">
+              이미지 생성 시작
+            </Button>
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-2 md:grid-cols-3 gap-4">

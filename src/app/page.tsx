@@ -196,13 +196,17 @@ export default function Home() {
     [state, setState]
   );
 
-  const handleArticleApprove = useCallback(async () => {
+  const handleArticleApprove = useCallback(() => {
+    if (!state.article) return;
+    setState((prev) => ({ ...prev, currentStage: 3, images: [] }));
+    setMaxStageReached((prev) => Math.max(prev, 3));
+  }, [state.article, setState]);
+
+  const handleStartImageGeneration = useCallback(async () => {
     if (!state.article || !state.shop) return;
 
     setIsGeneratingImages(true);
     setImageProgress({ current: 0, total: 10 });
-    setState((prev) => ({ ...prev, currentStage: 3, images: [] }));
-    setMaxStageReached((prev) => Math.max(prev, 3));
 
     try {
       // POST the article params first to avoid URL length limits (articles can be 3000+ chars).
@@ -572,6 +576,7 @@ export default function Home() {
             onRegenerate={handleImageRegenerate}
             onApproveAll={handleApproveAll}
             onSave={handleSaveSession}
+            onStartGeneration={handleStartImageGeneration}
             isGenerating={isGeneratingImages}
             progress={imageProgress}
           />
