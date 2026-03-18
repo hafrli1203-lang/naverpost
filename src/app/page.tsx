@@ -284,7 +284,7 @@ export default function Home() {
       setIsGeneratingImages(false);
       toast.error(err instanceof Error ? err.message : "이미지 생성 중 오류가 발생했습니다.");
     }
-  }, [setState]);
+  }, [state.article, state.shop, state.sessionId, setState]);
 
   const handleImageRegenerate = useCallback(
     async (index: number, customPrompt?: string) => {
