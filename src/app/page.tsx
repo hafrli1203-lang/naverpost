@@ -228,6 +228,7 @@ export default function Home() {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
+      let receivedComplete = false;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -275,12 +276,17 @@ export default function Home() {
                 ),
               }));
             } else if (event.type === "complete") {
+              receivedComplete = true;
               setIsGeneratingImages(false);
               setImageProgress({
                 current: event.successCount ?? 0,
                 total: event.total ?? 10,
               });
-              toast.success(`이미지 생성 완료: 성공 ${event.successCount ?? 0}개, 실패 ${event.failCount ?? 0}개`);
+              if (event.error) {
+                toast.error(`이미지 생성 실패: ${event.error}`);
+              } else {
+                toast.success(`이미지 생성 완료: 성공 ${event.successCount ?? 0}개, 실패 ${event.failCount ?? 0}개`);
+              }
             }
           } catch {
             // Ignore SSE parse errors
@@ -288,6 +294,9 @@ export default function Home() {
         }
       }
 
+      if (!receivedComplete) {
+        toast.error("이미지 생성이 중단되었습니다. 서버 타임아웃일 수 있습니다.");
+      }
       setIsGeneratingImages(false);
     } catch (err) {
       setIsGeneratingImages(false);
