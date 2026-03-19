@@ -36,6 +36,9 @@ yarn-error.log*
 # vercel
 .vercel
 
+# session data (user-generated, persists locally)
+/data/sessions/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
