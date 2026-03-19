@@ -22,74 +22,105 @@ export interface SavedSession {
   images?: SavedImage[];
 }
 
-// 파일 기반 저장소: data/sessions/ 디렉토리에 JSON 파일로 저장
-// 서버 재시작/재배포해도 데이터가 유지됨
+// 하이브리드 저장소: 파일 기반 우선, 실패 시 인메모리 fallback
+// 로컬 개발: 파일 기반 (재시작해도 유지)
+// Vercel: 인메모리 fallback (읽기 전용 파일시스템)
 const SESSIONS_DIR = path.join(process.cwd(), "data", "sessions");
+const memoryFallback = new Map<string, SavedSession>();
+let useFileSystem = true;
 
-function ensureDir(): void {
+function ensureDir(): boolean {
+  if (!useFileSystem) return false;
   try {
     if (!fs.existsSync(SESSIONS_DIR)) {
       fs.mkdirSync(SESSIONS_DIR, { recursive: true });
     }
+    return true;
   } catch {
-    // Vercel 등 읽기 전용 파일시스템에서는 무시
+    useFileSystem = false;
+    return false;
   }
 }
 
 function sessionPath(id: string): string {
-  // 파일명에 안전하지 않은 문자 제거
   const safeId = id.replace(/[^a-zA-Z0-9_-]/g, "_");
   return path.join(SESSIONS_DIR, `${safeId}.json`);
 }
 
 export async function saveSession(data: SavedSession): Promise<void> {
-  ensureDir();
-  try {
-    fs.writeFileSync(sessionPath(data.id), JSON.stringify(data, null, 2), "utf-8");
-  } catch (err) {
-    console.error("[sessionStore] 파일 저장 실패:", err);
-    throw new Error("세션 저장에 실패했습니다.");
+  // 파일 저장 시도
+  if (ensureDir()) {
+    try {
+      fs.writeFileSync(sessionPath(data.id), JSON.stringify(data, null, 2), "utf-8");
+      return;
+    } catch {
+      // 파일 저장 실패 → 인메모리 fallback
+      useFileSystem = false;
+    }
   }
+  // 인메모리 fallback (에러 없이 저장)
+  memoryFallback.set(data.id, data);
 }
 
 export async function getSession(id: string): Promise<SavedSession | null> {
-  try {
-    const filePath = sessionPath(id);
-    if (!fs.existsSync(filePath)) return null;
-    const raw = fs.readFileSync(filePath, "utf-8");
-    return JSON.parse(raw) as SavedSession;
-  } catch {
-    return null;
+  // 파일에서 읽기 시도
+  if (useFileSystem) {
+    try {
+      const filePath = sessionPath(id);
+      if (fs.existsSync(filePath)) {
+        const raw = fs.readFileSync(filePath, "utf-8");
+        return JSON.parse(raw) as SavedSession;
+      }
+    } catch {
+      // 무시
+    }
   }
+  // 인메모리 fallback
+  return memoryFallback.get(id) ?? null;
 }
 
 export async function listSessions(): Promise<SavedSession[]> {
-  ensureDir();
-  try {
-    const files = fs.readdirSync(SESSIONS_DIR).filter((f) => f.endsWith(".json"));
-    const sessions: SavedSession[] = [];
-    for (const file of files) {
-      try {
-        const raw = fs.readFileSync(path.join(SESSIONS_DIR, file), "utf-8");
-        sessions.push(JSON.parse(raw) as SavedSession);
-      } catch {
-        // 손상된 파일 무시
+  const sessions: SavedSession[] = [];
+
+  // 파일에서 읽기
+  if (ensureDir()) {
+    try {
+      const files = fs.readdirSync(SESSIONS_DIR).filter((f) => f.endsWith(".json"));
+      for (const file of files) {
+        try {
+          const raw = fs.readFileSync(path.join(SESSIONS_DIR, file), "utf-8");
+          sessions.push(JSON.parse(raw) as SavedSession);
+        } catch {
+          // 손상된 파일 무시
+        }
       }
+    } catch {
+      // 무시
     }
-    sessions.sort((a, b) => new Date(b.savedAt).getTime() - new Date(a.savedAt).getTime());
-    return sessions;
-  } catch {
-    return [];
   }
+
+  // 인메모리 데이터 병합 (파일에 없는 것만)
+  const fileIds = new Set(sessions.map((s) => s.id));
+  for (const [id, session] of memoryFallback) {
+    if (!fileIds.has(id)) {
+      sessions.push(session);
+    }
+  }
+
+  sessions.sort((a, b) => new Date(b.savedAt).getTime() - new Date(a.savedAt).getTime());
+  return sessions;
 }
 
 export async function deleteSession(id: string): Promise<void> {
+  // 파일 삭제
   try {
     const filePath = sessionPath(id);
     if (fs.existsSync(filePath)) {
       fs.unlinkSync(filePath);
     }
   } catch {
-    // 삭제 실패 무시
+    // 무시
   }
+  // 인메모리에서도 삭제
+  memoryFallback.delete(id);
 }
