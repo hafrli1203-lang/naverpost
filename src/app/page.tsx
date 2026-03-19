@@ -196,11 +196,11 @@ export default function Home() {
     [state, setState]
   );
 
-  const handleArticleApprove = useCallback(() => {
-    if (!state.article) return;
+  const handleArticleApprove = useCallback(async () => {
+    if (!state.article || !state.shop) return;
     setState((prev) => ({ ...prev, currentStage: 3, images: [] }));
     setMaxStageReached((prev) => Math.max(prev, 3));
-  }, [state.article, setState]);
+  }, [state.article, state.shop, setState]);
 
   const handleStartImageGeneration = useCallback(async () => {
     if (!state.article || !state.shop) return;
@@ -209,7 +209,7 @@ export default function Home() {
     setImageProgress({ current: 0, total: 10 });
 
     try {
-      // 파라미터를 Base64로 인코딩하여 URL에 직접 전달 (세션 저장 불필요)
+      // Base64로 파라미터를 URL에 직접 전달 (Vercel 서버리스 인스턴스 분리 문제 해결)
       const params = JSON.stringify({
         sessionId: state.sessionId,
         articleContent: state.article.content,
