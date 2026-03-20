@@ -239,10 +239,15 @@ export default function Home() {
         if (event.type === "progress") {
           setImageProgress({ current: event.index ?? 0, total: event.total ?? 10 });
         } else if (event.type === "image-ready") {
+          // base64 data URL 우선 사용 (Vercel 서버리스에서 파일 접근 불가 대비)
+          const mimeType = event.mimeType || "image/jpeg";
+          const imageUrl = event.base64Data
+            ? `data:${mimeType};base64,${event.base64Data}`
+            : (event.imageUrl ?? "");
           const img: BlogImage = {
             index: event.index,
             imageId: event.imageId ?? "",
-            imageUrl: event.imageUrl ?? "",
+            imageUrl,
             prompt: event.prompt ?? "",
             section: `섹션 ${event.index + 1}`,
             status: "success",
@@ -327,6 +332,11 @@ export default function Home() {
         const json = await res.json();
         if (!res.ok || !json.success) throw new Error(json.error ?? "재생성 실패");
 
+        const regenMime = json.data.mimeType || "image/jpeg";
+        const regenUrl = json.data.base64Data
+          ? `data:${regenMime};base64,${json.data.base64Data}`
+          : json.data.imageUrl;
+
         setState((prev) => ({
           ...prev,
           images: prev.images.map((img) =>
@@ -334,7 +344,7 @@ export default function Home() {
               ? {
                   ...img,
                   status: "success" as const,
-                  imageUrl: json.data.imageUrl,
+                  imageUrl: regenUrl,
                   imageId: json.data.imageId,
                   ...(customPrompt ? { prompt: customPrompt } : {}),
                 }

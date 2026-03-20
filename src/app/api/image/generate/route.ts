@@ -87,6 +87,8 @@ function createImageStream(
                 index: i,
                 imageId: saved.imageId,
                 imageUrl: `/api/image/file/${saved.imageId}`,
+                base64Data: result.base64Data,
+                mimeType: result.mimeType,
                 prompt: prompts[i],
                 total,
               });

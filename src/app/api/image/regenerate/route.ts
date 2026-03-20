@@ -44,7 +44,12 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      data: { imageId: saved.imageId, imageUrl },
+      data: {
+        imageId: saved.imageId,
+        imageUrl,
+        base64Data: result.base64Data,
+        mimeType: result.mimeType,
+      },
     });
   } catch (err) {
     const message =
