@@ -73,6 +73,7 @@ interface ImageCardProps {
 function ImageCard({ image, onRegenerate, isGenerating }: ImageCardProps) {
   const [promptOpen, setPromptOpen] = useState(false);
   const [editedPrompt, setEditedPrompt] = useState(image.prompt);
+  const [imgError, setImgError] = useState(false);
 
   const isBusy =
     isGenerating ||
@@ -87,14 +88,14 @@ function ImageCard({ image, onRegenerate, isGenerating }: ImageCardProps) {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `blog-image-${image.index + 1}.png`;
+      a.download = `blog-image-${image.index + 1}.jpg`;
       a.click();
       URL.revokeObjectURL(url);
     } catch {
       // Fallback: open in new tab if fetch fails (e.g. cross-origin)
       const a = document.createElement("a");
       a.href = image.imageUrl;
-      a.download = `blog-image-${image.index + 1}.png`;
+      a.download = `blog-image-${image.index + 1}.jpg`;
       a.target = "_blank";
       a.click();
     }
@@ -111,20 +112,26 @@ function ImageCard({ image, onRegenerate, isGenerating }: ImageCardProps) {
   return (
     <Card className="overflow-hidden">
       {/* Image area */}
-      <div className="relative bg-gray-100 aspect-square">
-        {image.imageUrl && image.status === "success" ? (
+      <div className="relative bg-gray-100 aspect-[4/3]">
+        {image.imageUrl && image.status === "success" && !imgError ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={image.imageUrl}
             alt={`이미지 ${image.index + 1}`}
             className="w-full h-full object-cover"
+            onError={() => setImgError(true)}
           />
         ) : (
           <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-muted-foreground">
             {image.status === "generating" || image.status === "retrying" ? (
               <Loader2 className="w-8 h-8 animate-spin text-blue-400" />
-            ) : image.status === "failed" ? (
-              <XCircle className="w-8 h-8 text-red-400" />
+            ) : image.status === "failed" || imgError ? (
+              <>
+                <XCircle className="w-8 h-8 text-red-400" />
+                {imgError && (
+                  <p className="text-xs text-red-400">로드 실패 - 재생성하세요</p>
+                )}
+              </>
             ) : (
               <ImageOff className="w-8 h-8 opacity-30" />
             )}

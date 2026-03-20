@@ -11,17 +11,15 @@ const memoryParamsStore = new Map<string, {
   title: string;
   mainKeyword: string;
 }>();
-let useFileSystem = true;
 
 function ensureDir(): boolean {
-  if (!useFileSystem) return false;
   try {
     if (!fs.existsSync(IMAGES_DIR)) {
       fs.mkdirSync(IMAGES_DIR, { recursive: true });
     }
     return true;
-  } catch {
-    useFileSystem = false;
+  } catch (err) {
+    console.error("[imageStore] 디렉토리 생성 실패:", err);
     return false;
   }
 }
@@ -43,9 +41,10 @@ export async function saveImage(
     try {
       const filePath = imagePath(imageId);
       fs.writeFileSync(filePath, buffer);
+      console.log(`[imageStore] 이미지 저장 성공: ${filePath}`);
       return { imageId, filePath };
-    } catch {
-      useFileSystem = false;
+    } catch (err) {
+      console.error("[imageStore] 파일 쓰기 실패, 인메모리 fallback:", err);
     }
   }
 
@@ -55,16 +54,14 @@ export async function saveImage(
 }
 
 export async function getImage(imageId: string): Promise<Buffer | null> {
-  // 파일에서 읽기 시도
-  if (useFileSystem) {
-    try {
-      const filePath = imagePath(imageId);
-      if (fs.existsSync(filePath)) {
-        return fs.readFileSync(filePath);
-      }
-    } catch {
-      // 무시
+  // 항상 파일에서 먼저 읽기 시도 (useFileSystem 플래그 제거 — 매번 시도)
+  try {
+    const filePath = imagePath(imageId);
+    if (fs.existsSync(filePath)) {
+      return fs.readFileSync(filePath);
     }
+  } catch (err) {
+    console.error("[imageStore] 파일 읽기 실패:", err);
   }
 
   // 인메모리 fallback

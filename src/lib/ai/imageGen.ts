@@ -9,7 +9,7 @@ const IMAGE_MODEL = "gemini-3-pro-image-preview";
 export async function generateBlogImage(
   prompt: string,
   apiKey: string
-): Promise<{ base64Data: string } | null> {
+): Promise<{ base64Data: string; mimeType: string } | null> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${IMAGE_MODEL}:generateContent?key=${apiKey}`;
 
   const body = {
@@ -37,7 +37,10 @@ export async function generateBlogImage(
     if (data.candidates?.[0]?.content?.parts) {
       for (const part of data.candidates[0].content.parts) {
         if (part.inlineData?.data) {
-          return { base64Data: part.inlineData.data };
+          return {
+            base64Data: part.inlineData.data,
+            mimeType: part.inlineData.mimeType || "image/jpeg",
+          };
         }
       }
     }

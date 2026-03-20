@@ -38,6 +38,7 @@ yarn-error.log*
 
 # session data (user-generated, persists locally)
 /data/sessions/
+/data/images/
 
 # typescript
 *.tsbuildinfo
