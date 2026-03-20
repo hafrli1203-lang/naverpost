@@ -1,3 +1,4 @@
+import { kv } from "@vercel/kv";
 import fs from "fs";
 import path from "path";
 
@@ -22,22 +23,25 @@ export interface SavedSession {
   images?: SavedImage[];
 }
 
-// 하이브리드 저장소: 파일 기반 우선, 실패 시 인메모리 fallback
-// 로컬 개발: 파일 기반 (재시작해도 유지)
-// Vercel: 인메모리 fallback (읽기 전용 파일시스템)
+// KV 키 패턴
+const SESSION_PREFIX = "session:";
+const SESSION_INDEX_KEY = "session:index";
+
+// 로컬 개발 파일 저장소 (KV 미설정 시 fallback)
 const SESSIONS_DIR = path.join(process.cwd(), "data", "sessions");
-const memoryFallback = new Map<string, SavedSession>();
-let useFileSystem = true;
+
+function isKvAvailable(): boolean {
+  return !!(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
+}
 
 function ensureDir(): boolean {
-  if (!useFileSystem) return false;
   try {
     if (!fs.existsSync(SESSIONS_DIR)) {
       fs.mkdirSync(SESSIONS_DIR, { recursive: true });
     }
     return true;
-  } catch {
-    useFileSystem = false;
+  } catch (err) {
+    console.error("[sessionStore] 디렉토리 생성 실패:", err);
     return false;
   }
 }
@@ -47,72 +51,87 @@ function sessionPath(id: string): string {
   return path.join(SESSIONS_DIR, `${safeId}.json`);
 }
 
-export async function saveSession(data: SavedSession): Promise<void> {
-  // 파일 저장 시도
-  if (ensureDir()) {
-    try {
-      fs.writeFileSync(sessionPath(data.id), JSON.stringify(data, null, 2), "utf-8");
-      return;
-    } catch {
-      // 파일 저장 실패 → 인메모리 fallback
-      useFileSystem = false;
-    }
+// ─── KV 기반 저장 ───
+
+async function kvSave(data: SavedSession): Promise<void> {
+  await kv.set(`${SESSION_PREFIX}${data.id}`, JSON.stringify(data));
+  // 인덱스에 세션 ID 추가
+  const index: string[] = (await kv.get(SESSION_INDEX_KEY)) ?? [];
+  if (!index.includes(data.id)) {
+    index.push(data.id);
+    await kv.set(SESSION_INDEX_KEY, index);
   }
-  // 인메모리 fallback (에러 없이 저장)
-  memoryFallback.set(data.id, data);
 }
 
-export async function getSession(id: string): Promise<SavedSession | null> {
-  // 파일에서 읽기 시도
-  if (useFileSystem) {
-    try {
-      const filePath = sessionPath(id);
-      if (fs.existsSync(filePath)) {
-        const raw = fs.readFileSync(filePath, "utf-8");
-        return JSON.parse(raw) as SavedSession;
-      }
-    } catch {
-      // 무시
-    }
-  }
-  // 인메모리 fallback
-  return memoryFallback.get(id) ?? null;
+async function kvGet(id: string): Promise<SavedSession | null> {
+  const raw = await kv.get<string>(`${SESSION_PREFIX}${id}`);
+  if (!raw) return null;
+  return typeof raw === "string" ? JSON.parse(raw) : raw as unknown as SavedSession;
 }
 
-export async function listSessions(): Promise<SavedSession[]> {
+async function kvList(): Promise<SavedSession[]> {
+  const index: string[] = (await kv.get(SESSION_INDEX_KEY)) ?? [];
   const sessions: SavedSession[] = [];
-
-  // 파일에서 읽기
-  if (ensureDir()) {
-    try {
-      const files = fs.readdirSync(SESSIONS_DIR).filter((f) => f.endsWith(".json"));
-      for (const file of files) {
-        try {
-          const raw = fs.readFileSync(path.join(SESSIONS_DIR, file), "utf-8");
-          sessions.push(JSON.parse(raw) as SavedSession);
-        } catch {
-          // 손상된 파일 무시
-        }
-      }
-    } catch {
-      // 무시
-    }
+  for (const id of index) {
+    const session = await kvGet(id);
+    if (session) sessions.push(session);
   }
-
-  // 인메모리 데이터 병합 (파일에 없는 것만)
-  const fileIds = new Set(sessions.map((s) => s.id));
-  for (const [id, session] of memoryFallback) {
-    if (!fileIds.has(id)) {
-      sessions.push(session);
-    }
-  }
-
   sessions.sort((a, b) => new Date(b.savedAt).getTime() - new Date(a.savedAt).getTime());
   return sessions;
 }
 
-export async function deleteSession(id: string): Promise<void> {
-  // 파일 삭제
+async function kvDelete(id: string): Promise<void> {
+  await kv.del(`${SESSION_PREFIX}${id}`);
+  const index: string[] = (await kv.get(SESSION_INDEX_KEY)) ?? [];
+  const updated = index.filter((i) => i !== id);
+  await kv.set(SESSION_INDEX_KEY, updated);
+}
+
+// ─── 파일 기반 저장 (로컬 개발 fallback) ───
+
+async function fileSave(data: SavedSession): Promise<void> {
+  if (!ensureDir()) return;
+  try {
+    fs.writeFileSync(sessionPath(data.id), JSON.stringify(data, null, 2), "utf-8");
+  } catch (err) {
+    console.error("[sessionStore] 파일 저장 실패:", err);
+  }
+}
+
+async function fileGet(id: string): Promise<SavedSession | null> {
+  try {
+    const filePath = sessionPath(id);
+    if (fs.existsSync(filePath)) {
+      const raw = fs.readFileSync(filePath, "utf-8");
+      return JSON.parse(raw) as SavedSession;
+    }
+  } catch (err) {
+    console.error("[sessionStore] 파일 읽기 실패:", err);
+  }
+  return null;
+}
+
+async function fileList(): Promise<SavedSession[]> {
+  if (!ensureDir()) return [];
+  const sessions: SavedSession[] = [];
+  try {
+    const files = fs.readdirSync(SESSIONS_DIR).filter((f) => f.endsWith(".json"));
+    for (const file of files) {
+      try {
+        const raw = fs.readFileSync(path.join(SESSIONS_DIR, file), "utf-8");
+        sessions.push(JSON.parse(raw) as SavedSession);
+      } catch {
+        // 손상된 파일 무시
+      }
+    }
+  } catch {
+    // 무시
+  }
+  sessions.sort((a, b) => new Date(b.savedAt).getTime() - new Date(a.savedAt).getTime());
+  return sessions;
+}
+
+async function fileDelete(id: string): Promise<void> {
   try {
     const filePath = sessionPath(id);
     if (fs.existsSync(filePath)) {
@@ -121,6 +140,54 @@ export async function deleteSession(id: string): Promise<void> {
   } catch {
     // 무시
   }
-  // 인메모리에서도 삭제
-  memoryFallback.delete(id);
+}
+
+// ─── 공개 API (KV 우선, 파일 fallback) ───
+
+export async function saveSession(data: SavedSession): Promise<void> {
+  if (isKvAvailable()) {
+    try {
+      await kvSave(data);
+      console.log(`[sessionStore] KV 저장 성공: ${data.id}`);
+      return;
+    } catch (err) {
+      console.error("[sessionStore] KV 저장 실패, 파일 fallback:", err);
+    }
+  }
+  await fileSave(data);
+}
+
+export async function getSession(id: string): Promise<SavedSession | null> {
+  if (isKvAvailable()) {
+    try {
+      return await kvGet(id);
+    } catch (err) {
+      console.error("[sessionStore] KV 읽기 실패, 파일 fallback:", err);
+    }
+  }
+  return fileGet(id);
+}
+
+export async function listSessions(): Promise<SavedSession[]> {
+  if (isKvAvailable()) {
+    try {
+      return await kvList();
+    } catch (err) {
+      console.error("[sessionStore] KV 목록 실패, 파일 fallback:", err);
+    }
+  }
+  return fileList();
+}
+
+export async function deleteSession(id: string): Promise<void> {
+  if (isKvAvailable()) {
+    try {
+      await kvDelete(id);
+      console.log(`[sessionStore] KV 삭제 성공: ${id}`);
+      return;
+    } catch (err) {
+      console.error("[sessionStore] KV 삭제 실패, 파일 fallback:", err);
+    }
+  }
+  await fileDelete(id);
 }
