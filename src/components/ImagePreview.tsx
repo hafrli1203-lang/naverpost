@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -21,6 +21,7 @@ import {
   ChevronUp,
   Edit2,
   Save,
+  Upload,
 } from "lucide-react";
 
 interface ImagePreviewProps {
@@ -244,6 +245,22 @@ export function ImagePreview({
   const [customArticle, setCustomArticle] = useState("");
   const [customTitle, setCustomTitle] = useState("");
   const [customKeyword, setCustomKeyword] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const text = event.target?.result;
+      if (typeof text === "string") {
+        setCustomArticle(text);
+      }
+    };
+    reader.readAsText(file, "utf-8");
+    // input 초기화 (같은 파일 다시 선택 가능)
+    e.target.value = "";
+  }, []);
 
   const handleGenerate = useCallback(() => {
     if (!onStartGeneration) return;
@@ -318,11 +335,31 @@ export function ImagePreview({
                 </div>
               </div>
               <div className="space-y-1">
-                <label className="text-xs font-medium text-gray-600">원고 내용</label>
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-medium text-gray-600">원고 내용</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept=".txt,.md,.html,.doc,.docx"
+                      onChange={handleFileUpload}
+                      className="hidden"
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-xs gap-1"
+                      onClick={() => fileInputRef.current?.click()}
+                    >
+                      <Upload className="w-3 h-3" />
+                      파일 첨부
+                    </Button>
+                  </div>
+                </div>
                 <Textarea
                   value={customArticle}
                   onChange={(e) => setCustomArticle(e.target.value)}
-                  placeholder="이미지를 생성할 원고 내용을 붙여넣으세요"
+                  placeholder="이미지를 생성할 원고 내용을 붙여넣거나 파일을 첨부하세요"
                   className="min-h-[150px] resize-y text-sm"
                 />
                 <p className="text-xs text-muted-foreground text-right">
