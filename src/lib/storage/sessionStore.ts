@@ -1,6 +1,11 @@
-import { kv } from "@vercel/kv";
 import fs from "fs";
 import path from "path";
+
+// @vercel/kv는 런타임에만 로드 (빌드 타임 에러 방지)
+async function getKv() {
+  const { kv } = await import("@vercel/kv");
+  return kv;
+}
 
 export interface SavedImage {
   index: number;
@@ -54,6 +59,7 @@ function sessionPath(id: string): string {
 // ─── KV 기반 저장 ───
 
 async function kvSave(data: SavedSession): Promise<void> {
+  const kv = await getKv();
   await kv.set(`${SESSION_PREFIX}${data.id}`, JSON.stringify(data));
   // 인덱스에 세션 ID 추가
   const index: string[] = (await kv.get(SESSION_INDEX_KEY)) ?? [];
@@ -64,12 +70,14 @@ async function kvSave(data: SavedSession): Promise<void> {
 }
 
 async function kvGet(id: string): Promise<SavedSession | null> {
+  const kv = await getKv();
   const raw = await kv.get<string>(`${SESSION_PREFIX}${id}`);
   if (!raw) return null;
   return typeof raw === "string" ? JSON.parse(raw) : raw as unknown as SavedSession;
 }
 
 async function kvList(): Promise<SavedSession[]> {
+  const kv = await getKv();
   const index: string[] = (await kv.get(SESSION_INDEX_KEY)) ?? [];
   const sessions: SavedSession[] = [];
   for (const id of index) {
@@ -81,6 +89,7 @@ async function kvList(): Promise<SavedSession[]> {
 }
 
 async function kvDelete(id: string): Promise<void> {
+  const kv = await getKv();
   await kv.del(`${SESSION_PREFIX}${id}`);
   const index: string[] = (await kv.get(SESSION_INDEX_KEY)) ?? [];
   const updated = index.filter((i) => i !== id);
