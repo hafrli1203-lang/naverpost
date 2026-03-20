@@ -35,7 +35,7 @@ function makeInitialState(): WorkflowState {
 export default function Home() {
   const [state, setState, clearPersistedState] = usePersistedWorkflow(makeInitialState());
 
-  const uiStage: 0 | 1 | 2 | 3 | 4 = state.shop === null ? 0 : (state.currentStage as 1 | 2 | 3 | 4);
+  const uiStage: 0 | 1 | 2 | 3 | 4 = state.shop === null && state.currentStage <= 1 ? 0 : (state.currentStage as 1 | 2 | 3 | 4);
 
   const [maxStageReached, setMaxStageReached] = useState<number>(state.currentStage);
   const [isLoading, setIsLoading] = useState(false);
@@ -203,7 +203,6 @@ export default function Home() {
   }, [state.article, state.shop, setState]);
 
   const handleStartImageGeneration = useCallback(async (customContent?: { articleContent: string; title: string; mainKeyword: string }) => {
-    if (!state.shop) return;
     if (!customContent && !state.article) return;
 
     const articleContent = customContent?.articleContent ?? state.article!.content;
@@ -497,6 +496,11 @@ export default function Home() {
     setState(makeInitialState());
   }, [clearPersistedState, setState]);
 
+  const handleImageOnly = useCallback(() => {
+    setState((prev) => ({ ...prev, currentStage: 3 as 1 | 2 | 3 | 4, images: [] }));
+    setMaxStageReached(3);
+  }, [setState]);
+
   return (
     <div className="min-h-screen bg-gray-50">
       <header className="bg-white border-b border-gray-200 sticky top-0 z-50">
@@ -525,6 +529,15 @@ export default function Home() {
         {uiStage === 0 && (
           <>
             <ShopSelector shops={shops} onStart={handleStart} isLoading={isLoading} />
+
+            <div className="max-w-3xl mx-auto mt-6">
+              <button
+                onClick={handleImageOnly}
+                className="w-full py-3 px-4 bg-white border-2 border-dashed border-gray-300 rounded-lg text-sm text-gray-600 hover:border-blue-400 hover:text-blue-600 transition-colors"
+              >
+                이미지만 생성 (수동 원고 입력)
+              </button>
+            </div>
 
             {savedSessions.length > 0 && (
               <div className="mt-8 max-w-3xl mx-auto">
