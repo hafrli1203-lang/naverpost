@@ -202,12 +202,17 @@ export default function Home() {
     setMaxStageReached((prev) => Math.max(prev, 3));
   }, [state.article, state.shop, setState]);
 
-  const handleStartImageGeneration = useCallback(async (customContent?: { articleContent: string; title: string; mainKeyword: string }) => {
+  const handleStartImageGeneration = useCallback(async (customContent?: { articleContent: string }) => {
     if (!customContent && !state.article) return;
 
     const articleContent = customContent?.articleContent ?? state.article!.content;
-    const title = customContent?.title ?? state.article!.title;
-    const mainKeyword = customContent?.mainKeyword ?? state.article!.mainKeyword;
+    // 수동 입력 시 원고 첫 줄에서 제목 추출, 키워드는 "블로그 이미지"로 기본값
+    const title = customContent
+      ? (articleContent.split("\n")[0].trim().slice(0, 30) || "블로그 이미지")
+      : state.article!.title;
+    const mainKeyword = customContent
+      ? "블로그 이미지"
+      : state.article!.mainKeyword;
 
     setIsGeneratingImages(true);
     setImageProgress({ current: 0, total: 10 });

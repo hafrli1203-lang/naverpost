@@ -29,7 +29,7 @@ interface ImagePreviewProps {
   onRegenerate: (index: number, customPrompt?: string) => void;
   onApproveAll: () => void;
   onSave?: () => void;
-  onStartGeneration?: (customContent?: { articleContent: string; title: string; mainKeyword: string }) => void;
+  onStartGeneration?: (customContent?: { articleContent: string }) => void;
   isGenerating: boolean;
   progress: { current: number; total: number };
   hasArticle?: boolean;
@@ -243,8 +243,6 @@ export function ImagePreview({
   // 수동 원고 입력 상태
   const [useCustomContent, setUseCustomContent] = useState(false);
   const [customArticle, setCustomArticle] = useState("");
-  const [customTitle, setCustomTitle] = useState("");
-  const [customKeyword, setCustomKeyword] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -265,19 +263,17 @@ export function ImagePreview({
   const handleGenerate = useCallback(() => {
     if (!onStartGeneration) return;
     if (useCustomContent) {
-      if (!customArticle.trim() || !customTitle.trim() || !customKeyword.trim()) return;
+      if (!customArticle.trim()) return;
       onStartGeneration({
         articleContent: customArticle,
-        title: customTitle,
-        mainKeyword: customKeyword,
       });
     } else {
       onStartGeneration();
     }
-  }, [onStartGeneration, useCustomContent, customArticle, customTitle, customKeyword]);
+  }, [onStartGeneration, useCustomContent, customArticle]);
 
   const canGenerate = useCustomContent
-    ? customArticle.trim().length > 0 && customTitle.trim().length > 0 && customKeyword.trim().length > 0
+    ? customArticle.trim().length > 0
     : hasArticle !== false;
 
   return (
@@ -314,26 +310,6 @@ export function ImagePreview({
 
           {useCustomContent && (
             <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-gray-600">제목</label>
-                  <Input
-                    value={customTitle}
-                    onChange={(e) => setCustomTitle(e.target.value)}
-                    placeholder="블로그 제목을 입력하세요"
-                    className="h-9"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-gray-600">메인 키워드</label>
-                  <Input
-                    value={customKeyword}
-                    onChange={(e) => setCustomKeyword(e.target.value)}
-                    placeholder="메인 키워드 입력"
-                    className="h-9"
-                  />
-                </div>
-              </div>
               <div className="space-y-1">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-medium text-gray-600">원고 내용</label>
