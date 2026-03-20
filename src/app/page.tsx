@@ -308,7 +308,6 @@ export default function Home() {
 
   const handleImageRegenerate = useCallback(
     async (index: number, customPrompt?: string) => {
-      if (!state.shop) return;
 
       setState({
         ...state,
