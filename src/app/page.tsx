@@ -202,8 +202,13 @@ export default function Home() {
     setMaxStageReached((prev) => Math.max(prev, 3));
   }, [state.article, state.shop, setState]);
 
-  const handleStartImageGeneration = useCallback(async () => {
-    if (!state.article || !state.shop) return;
+  const handleStartImageGeneration = useCallback(async (customContent?: { articleContent: string; title: string; mainKeyword: string }) => {
+    if (!state.shop) return;
+    if (!customContent && !state.article) return;
+
+    const articleContent = customContent?.articleContent ?? state.article!.content;
+    const title = customContent?.title ?? state.article!.title;
+    const mainKeyword = customContent?.mainKeyword ?? state.article!.mainKeyword;
 
     setIsGeneratingImages(true);
     setImageProgress({ current: 0, total: 10 });
@@ -215,9 +220,9 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           sessionId: state.sessionId,
-          articleContent: state.article.content,
-          title: state.article.title,
-          mainKeyword: state.article.mainKeyword,
+          articleContent,
+          title,
+          mainKeyword,
         }),
       });
 
@@ -586,6 +591,7 @@ export default function Home() {
             onStartGeneration={handleStartImageGeneration}
             isGenerating={isGeneratingImages}
             progress={imageProgress}
+            hasArticle={!!state.article}
           />
         )}
 

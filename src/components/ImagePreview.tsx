@@ -4,6 +4,7 @@ import { useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
@@ -27,9 +28,10 @@ interface ImagePreviewProps {
   onRegenerate: (index: number, customPrompt?: string) => void;
   onApproveAll: () => void;
   onSave?: () => void;
-  onStartGeneration?: () => void;
+  onStartGeneration?: (customContent?: { articleContent: string; title: string; mainKeyword: string }) => void;
   isGenerating: boolean;
   progress: { current: number; total: number };
+  hasArticle?: boolean;
 }
 
 function ImageStatusBadge({ status }: { status: BlogImage["status"] }) {
@@ -230,11 +232,36 @@ export function ImagePreview({
   onStartGeneration,
   isGenerating,
   progress,
+  hasArticle,
 }: ImagePreviewProps) {
   const successCount = images.filter((img) => img.status === "success").length;
   const failCount = images.filter((img) => img.status === "failed").length;
   const progressPercent =
     progress.total > 0 ? (progress.current / progress.total) * 100 : 0;
+
+  // 수동 원고 입력 상태
+  const [useCustomContent, setUseCustomContent] = useState(false);
+  const [customArticle, setCustomArticle] = useState("");
+  const [customTitle, setCustomTitle] = useState("");
+  const [customKeyword, setCustomKeyword] = useState("");
+
+  const handleGenerate = useCallback(() => {
+    if (!onStartGeneration) return;
+    if (useCustomContent) {
+      if (!customArticle.trim() || !customTitle.trim() || !customKeyword.trim()) return;
+      onStartGeneration({
+        articleContent: customArticle,
+        title: customTitle,
+        mainKeyword: customKeyword,
+      });
+    } else {
+      onStartGeneration();
+    }
+  }, [onStartGeneration, useCustomContent, customArticle, customTitle, customKeyword]);
+
+  const canGenerate = useCustomContent
+    ? customArticle.trim().length > 0 && customTitle.trim().length > 0 && customKeyword.trim().length > 0
+    : hasArticle !== false;
 
   return (
     <div className="w-full max-w-5xl mx-auto space-y-5">
@@ -242,6 +269,82 @@ export function ImagePreview({
         <h2 className="text-xl font-semibold">이미지 생성</h2>
         <p className="text-sm text-muted-foreground">블로그에 사용될 이미지를 확인하세요</p>
       </div>
+
+      {/* 원고 소스 선택 */}
+      {onStartGeneration && !isGenerating && images.length === 0 && (
+        <Card className="p-4 space-y-4">
+          <div className="flex gap-2">
+            <Button
+              variant={useCustomContent ? "outline" : "default"}
+              size="sm"
+              onClick={() => setUseCustomContent(false)}
+              className="gap-1.5"
+              disabled={hasArticle === false}
+            >
+              <CheckCheck className="w-3.5 h-3.5" />
+              생성된 원고 사용
+            </Button>
+            <Button
+              variant={useCustomContent ? "default" : "outline"}
+              size="sm"
+              onClick={() => setUseCustomContent(true)}
+              className="gap-1.5"
+            >
+              <Edit2 className="w-3.5 h-3.5" />
+              수동 입력
+            </Button>
+          </div>
+
+          {useCustomContent && (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-gray-600">제목</label>
+                  <Input
+                    value={customTitle}
+                    onChange={(e) => setCustomTitle(e.target.value)}
+                    placeholder="블로그 제목을 입력하세요"
+                    className="h-9"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-gray-600">메인 키워드</label>
+                  <Input
+                    value={customKeyword}
+                    onChange={(e) => setCustomKeyword(e.target.value)}
+                    placeholder="메인 키워드 입력"
+                    className="h-9"
+                  />
+                </div>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-gray-600">원고 내용</label>
+                <Textarea
+                  value={customArticle}
+                  onChange={(e) => setCustomArticle(e.target.value)}
+                  placeholder="이미지를 생성할 원고 내용을 붙여넣으세요"
+                  className="min-h-[150px] resize-y text-sm"
+                />
+                <p className="text-xs text-muted-foreground text-right">
+                  {customArticle.length}자
+                </p>
+              </div>
+            </div>
+          )}
+
+          {!useCustomContent && hasArticle !== false && (
+            <p className="text-sm text-muted-foreground">
+              이전 단계에서 생성된 원고를 기반으로 이미지를 생성합니다.
+            </p>
+          )}
+
+          {!useCustomContent && hasArticle === false && (
+            <p className="text-sm text-orange-500">
+              생성된 원고가 없습니다. 수동 입력을 사용해주세요.
+            </p>
+          )}
+        </Card>
+      )}
 
       {/* Progress bar */}
       {isGenerating && (
@@ -274,11 +377,11 @@ export function ImagePreview({
 
       {/* Image grid */}
       {images.length === 0 && !isGenerating ? (
-        <div className="flex flex-col items-center justify-center py-20 text-muted-foreground gap-3">
+        <div className="flex flex-col items-center justify-center py-12 text-muted-foreground gap-3">
           <ImageOff className="w-12 h-12 opacity-30" />
           <p className="text-sm">이미지가 아직 생성되지 않았습니다.</p>
           {onStartGeneration && (
-            <Button onClick={onStartGeneration} className="gap-2 bg-blue-600 hover:bg-blue-700 mt-2">
+            <Button onClick={handleGenerate} disabled={!canGenerate} className="gap-2 bg-blue-600 hover:bg-blue-700 mt-2">
               이미지 생성 시작
             </Button>
           )}
