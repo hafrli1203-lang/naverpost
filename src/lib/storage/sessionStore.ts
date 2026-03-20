@@ -1,12 +1,6 @@
 import fs from "fs";
 import path from "path";
 
-// @vercel/kv는 런타임에만 로드 (빌드 타임 에러 방지)
-async function getKv() {
-  const { kv } = await import("@vercel/kv");
-  return kv;
-}
-
 export interface SavedImage {
   index: number;
   imageId: string;
@@ -35,9 +29,90 @@ const SESSION_INDEX_KEY = "session:index";
 // 로컬 개발 파일 저장소 (KV 미설정 시 fallback)
 const SESSIONS_DIR = path.join(process.cwd(), "data", "sessions");
 
-function isKvAvailable(): boolean {
-  return !!(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
+// ─── Upstash REST API (fetch 기반, 추가 패키지 불필요) ───
+
+function getKvConfig(): { url: string; token: string } | null {
+  const url = process.env.KV_REST_API_URL;
+  const token = process.env.KV_REST_API_TOKEN;
+  if (!url || !token) return null;
+  return { url, token };
 }
+
+async function kvCommand(...args: string[]): Promise<unknown> {
+  const config = getKvConfig();
+  if (!config) throw new Error("KV not configured");
+
+  const res = await fetch(`${config.url}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${config.token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(args),
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`KV error ${res.status}: ${text}`);
+  }
+
+  const data = await res.json();
+  return data.result;
+}
+
+async function kvSet(key: string, value: string): Promise<void> {
+  await kvCommand("SET", key, value);
+}
+
+async function kvGet(key: string): Promise<string | null> {
+  const result = await kvCommand("GET", key);
+  return result as string | null;
+}
+
+async function kvDel(key: string): Promise<void> {
+  await kvCommand("DEL", key);
+}
+
+// ─── KV 기반 저장 ───
+
+async function kvSaveSession(data: SavedSession): Promise<void> {
+  await kvSet(`${SESSION_PREFIX}${data.id}`, JSON.stringify(data));
+  // 인덱스에 세션 ID 추가
+  const rawIndex = await kvGet(SESSION_INDEX_KEY);
+  const index: string[] = rawIndex ? JSON.parse(rawIndex) : [];
+  if (!index.includes(data.id)) {
+    index.push(data.id);
+    await kvSet(SESSION_INDEX_KEY, JSON.stringify(index));
+  }
+}
+
+async function kvGetSession(id: string): Promise<SavedSession | null> {
+  const raw = await kvGet(`${SESSION_PREFIX}${id}`);
+  if (!raw) return null;
+  return JSON.parse(raw) as SavedSession;
+}
+
+async function kvListSessions(): Promise<SavedSession[]> {
+  const rawIndex = await kvGet(SESSION_INDEX_KEY);
+  const index: string[] = rawIndex ? JSON.parse(rawIndex) : [];
+  const sessions: SavedSession[] = [];
+  for (const id of index) {
+    const session = await kvGetSession(id);
+    if (session) sessions.push(session);
+  }
+  sessions.sort((a, b) => new Date(b.savedAt).getTime() - new Date(a.savedAt).getTime());
+  return sessions;
+}
+
+async function kvDeleteSession(id: string): Promise<void> {
+  await kvDel(`${SESSION_PREFIX}${id}`);
+  const rawIndex = await kvGet(SESSION_INDEX_KEY);
+  const index: string[] = rawIndex ? JSON.parse(rawIndex) : [];
+  const updated = index.filter((i) => i !== id);
+  await kvSet(SESSION_INDEX_KEY, JSON.stringify(updated));
+}
+
+// ─── 파일 기반 저장 (로컬 개발 fallback) ───
 
 function ensureDir(): boolean {
   try {
@@ -55,48 +130,6 @@ function sessionPath(id: string): string {
   const safeId = id.replace(/[^a-zA-Z0-9_-]/g, "_");
   return path.join(SESSIONS_DIR, `${safeId}.json`);
 }
-
-// ─── KV 기반 저장 ───
-
-async function kvSave(data: SavedSession): Promise<void> {
-  const kv = await getKv();
-  await kv.set(`${SESSION_PREFIX}${data.id}`, JSON.stringify(data));
-  // 인덱스에 세션 ID 추가
-  const index: string[] = (await kv.get(SESSION_INDEX_KEY)) ?? [];
-  if (!index.includes(data.id)) {
-    index.push(data.id);
-    await kv.set(SESSION_INDEX_KEY, index);
-  }
-}
-
-async function kvGet(id: string): Promise<SavedSession | null> {
-  const kv = await getKv();
-  const raw = await kv.get<string>(`${SESSION_PREFIX}${id}`);
-  if (!raw) return null;
-  return typeof raw === "string" ? JSON.parse(raw) : raw as unknown as SavedSession;
-}
-
-async function kvList(): Promise<SavedSession[]> {
-  const kv = await getKv();
-  const index: string[] = (await kv.get(SESSION_INDEX_KEY)) ?? [];
-  const sessions: SavedSession[] = [];
-  for (const id of index) {
-    const session = await kvGet(id);
-    if (session) sessions.push(session);
-  }
-  sessions.sort((a, b) => new Date(b.savedAt).getTime() - new Date(a.savedAt).getTime());
-  return sessions;
-}
-
-async function kvDelete(id: string): Promise<void> {
-  const kv = await getKv();
-  await kv.del(`${SESSION_PREFIX}${id}`);
-  const index: string[] = (await kv.get(SESSION_INDEX_KEY)) ?? [];
-  const updated = index.filter((i) => i !== id);
-  await kv.set(SESSION_INDEX_KEY, updated);
-}
-
-// ─── 파일 기반 저장 (로컬 개발 fallback) ───
 
 async function fileSave(data: SavedSession): Promise<void> {
   if (!ensureDir()) return;
@@ -154,9 +187,9 @@ async function fileDelete(id: string): Promise<void> {
 // ─── 공개 API (KV 우선, 파일 fallback) ───
 
 export async function saveSession(data: SavedSession): Promise<void> {
-  if (isKvAvailable()) {
+  if (getKvConfig()) {
     try {
-      await kvSave(data);
+      await kvSaveSession(data);
       console.log(`[sessionStore] KV 저장 성공: ${data.id}`);
       return;
     } catch (err) {
@@ -167,9 +200,9 @@ export async function saveSession(data: SavedSession): Promise<void> {
 }
 
 export async function getSession(id: string): Promise<SavedSession | null> {
-  if (isKvAvailable()) {
+  if (getKvConfig()) {
     try {
-      return await kvGet(id);
+      return await kvGetSession(id);
     } catch (err) {
       console.error("[sessionStore] KV 읽기 실패, 파일 fallback:", err);
     }
@@ -178,9 +211,9 @@ export async function getSession(id: string): Promise<SavedSession | null> {
 }
 
 export async function listSessions(): Promise<SavedSession[]> {
-  if (isKvAvailable()) {
+  if (getKvConfig()) {
     try {
-      return await kvList();
+      return await kvListSessions();
     } catch (err) {
       console.error("[sessionStore] KV 목록 실패, 파일 fallback:", err);
     }
@@ -189,9 +222,9 @@ export async function listSessions(): Promise<SavedSession[]> {
 }
 
 export async function deleteSession(id: string): Promise<void> {
-  if (isKvAvailable()) {
+  if (getKvConfig()) {
     try {
-      await kvDelete(id);
+      await kvDeleteSession(id);
       console.log(`[sessionStore] KV 삭제 성공: ${id}`);
       return;
     } catch (err) {
