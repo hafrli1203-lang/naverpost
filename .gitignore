@@ -30,8 +30,21 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# env files (API keys - never commit)
 .env*
+
+# internal reference docs & fonts
+/자료/
+*.pdf
+*.docx
+*.ttf
+*.otf
+*.woff
+*.woff2
+
+# omc state (session-scoped, not shareable)
+.omc/state/
+.omc/project-memory.json
 
 # vercel
 .vercel

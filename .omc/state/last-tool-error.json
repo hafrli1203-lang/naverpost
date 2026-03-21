@@ -1,7 +1,0 @@
-{
-  "tool_name": "Bash",
-  "tool_input_preview": "{\"command\":\"cat > /tmp/project-summary.txt << 'EOF'\\n# PROJECT EXPLORATION SUMMARY: C:\\\\project\\\\naverpost\\n\\n## DIRECTORY STRUCTURE\\n/c/project/naverpost/\\n├── .claude/\\n│   └── settings.local.json\\n...",
-  "error": "Exit code 2\n/usr/bin/bash: -c: line 218: unexpected EOF while looking for matching `''",
-  "timestamp": "2026-03-14T04:40:26.465Z",
-  "retry_count": 1
-}
