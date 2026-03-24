@@ -6,6 +6,8 @@ import { validateKeywordOption } from "@/lib/validation/keywordRules";
 import { CATEGORIES } from "@/lib/constants";
 import { getShopById } from "@/lib/data/shops";
 
+export const maxDuration = 120;
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();

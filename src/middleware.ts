@@ -17,6 +17,13 @@ export function middleware(request: NextRequest) {
   const authToken = request.cookies.get("auth_token")?.value;
 
   if (!authToken || authToken !== process.env.AUTH_TOKEN_SECRET) {
+    // API 라우트는 JSON 401 응답 반환 (리다이렉트 시 JSON 파싱 실패 방지)
+    if (pathname.startsWith("/api/")) {
+      return NextResponse.json(
+        { success: false, error: "인증이 만료되었습니다. 다시 로그인해주세요." },
+        { status: 401 }
+      );
+    }
     const loginUrl = new URL("/login", request.url);
     return NextResponse.redirect(loginUrl);
   }

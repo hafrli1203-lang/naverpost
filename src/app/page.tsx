@@ -13,6 +13,23 @@ import { CATEGORIES } from "@/lib/constants";
 import type { ArticleOptions } from "@/components/ShopSelector";
 import type { WorkflowState, KeywordOption, ArticleContent, BlogImage, Shop } from "@/types";
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function safeJson(res: Response): Promise<any> {
+  if (res.status === 401) {
+    window.location.href = "/login";
+    return { success: false, error: "인증이 만료되었습니다." };
+  }
+  const text = await res.text();
+  if (!text) {
+    return { success: false, error: "서버 응답이 비어있습니다. 다시 시도해주세요." };
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { success: false, error: "서버 응답을 처리할 수 없습니다. 다시 시도해주세요." };
+  }
+}
+
 const INITIAL_STATE: WorkflowState = {
   sessionId: "",
   currentStage: 1,
@@ -92,7 +109,7 @@ export default function Home() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ shopId, categoryId, topic }),
         });
-        const json = await res.json();
+        const json = await safeJson(res);
         if (!res.ok || !json.success) {
           throw new Error(json.error ?? "키워드 생성에 실패했습니다.");
         }
@@ -134,7 +151,7 @@ export default function Home() {
           topic: state.topic,
         }),
       });
-      const json = await res.json();
+      const json = await safeJson(res);
       if (!res.ok || !json.success) {
         throw new Error(json.error ?? "키워드 재생성에 실패했습니다.");
       }
@@ -162,7 +179,7 @@ export default function Home() {
             ...(articleOptions ?? {}),
           }),
         });
-        const json = await res.json();
+        const json = await safeJson(res);
         if (!res.ok || !json.success) {
           throw new Error(json.error ?? "본문 작성에 실패했습니다.");
         }
@@ -333,7 +350,7 @@ export default function Home() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
         });
-        const json = await res.json();
+        const json = await safeJson(res);
         if (!res.ok || !json.success) throw new Error(json.error ?? "재생성 실패");
 
         const regenMime = json.data.mimeType || "image/jpeg";
@@ -424,7 +441,7 @@ export default function Home() {
           images: savedImages,
         }),
       });
-      const json = await res.json();
+      const json = await safeJson(res);
       if (json.success) {
         toast.success("작업이 저장되었습니다.");
         loadSavedSessions();

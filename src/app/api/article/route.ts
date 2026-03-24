@@ -9,6 +9,8 @@ import { CATEGORIES } from "@/lib/constants";
 import { getShopById } from "@/lib/data/shops";
 import type { KeywordOption, ArticleContent } from "@/types";
 
+export const maxDuration = 300;
+
 const MAX_REVISION_ATTEMPTS = 2;
 
 export async function POST(request: NextRequest) {
