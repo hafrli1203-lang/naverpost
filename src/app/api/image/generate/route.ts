@@ -62,6 +62,13 @@ function createImageStream(
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
       }
 
+      console.log("[image.generate] start", {
+        provider: "gemini",
+        promptModel: "gemini-2.0-flash",
+        imageModel: "gemini-3-pro-image-preview",
+        sessionId,
+      });
+
       try {
         const promptText = buildImagePrompts({ articleContent, title, mainKeyword });
         const rawPrompts = await generateImagePrompts(promptText);
@@ -72,6 +79,16 @@ function createImageStream(
           .filter((p) => p.length > 0)
           .slice(0, 10);
 
+        console.log("[image.generate] prompts", {
+          sessionId,
+          promptCount: prompts.length,
+          samplePrompt: prompts[0]?.slice(0, 120) ?? "",
+        });
+
+        if (prompts.length === 0) {
+          throw new Error("Image prompt generation returned 0 prompts.");
+        }
+
         const total = prompts.length;
         let successCount = 0;
         let failCount = 0;
@@ -80,34 +97,39 @@ function createImageStream(
           send({ type: "progress", index: i, total });
           try {
             const result = await generateBlogImage(prompts[i], apiKey);
-            if (result) {
-              const saved = await saveImage(sessionId, i, result.base64Data);
-              send({
-                type: "image-ready",
-                index: i,
-                imageId: saved.imageId,
-                imageUrl: `/api/image/file/${saved.imageId}`,
-                base64Data: result.base64Data,
-                mimeType: result.mimeType,
-                prompt: prompts[i],
-                total,
-              });
-              successCount++;
-            } else {
-              send({ type: "image-failed", index: i, total });
-              failCount++;
-            }
-          } catch {
-            send({ type: "image-failed", index: i, total });
+            const saved = await saveImage(sessionId, i, result.base64Data);
+            send({
+              type: "image-ready",
+              index: i,
+              imageId: saved.imageId,
+              imageUrl: `/api/image/file/${saved.imageId}`,
+              base64Data: result.base64Data,
+              mimeType: result.mimeType,
+              prompt: prompts[i],
+              total,
+            });
+            successCount++;
+          } catch (error) {
+            const message = error instanceof Error ? error.message : "Unknown image generation error";
+            console.error("[image.generate] image-failed", {
+              sessionId,
+              index: i,
+              prompt: prompts[i],
+              error: message,
+            });
+            send({ type: "image-failed", index: i, total, error: message });
             failCount++;
           }
         }
+        console.log("[image.generate] complete", { sessionId, successCount, failCount, total });
         send({ type: "complete", successCount, failCount, total });
       } catch (err) {
+        const message = err instanceof Error ? err.message : "Unknown error";
+        console.error("[image.generate] fatal", { sessionId, error: message });
         send({
           type: "complete",
           successCount: 0, failCount: 0, total: 0,
-          error: err instanceof Error ? err.message : "Unknown error",
+          error: message,
         });
       }
       controller.close();
