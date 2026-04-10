@@ -1,4 +1,4 @@
-const TEXT_MODEL = "gemini-2.0-flash";
+const TEXT_MODEL = "gemini-2.5-flash";
 
 type GeminiGenerateContentResponse = {
   candidates?: Array<{
