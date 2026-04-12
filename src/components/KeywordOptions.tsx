@@ -39,7 +39,7 @@ export function KeywordOptions({
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editedOptions, setEditedOptions] = useState<Record<number, KeywordOption>>({});
   const [editDraft, setEditDraft] = useState<KeywordOption | null>(null);
-  const safeOptions = Array.isArray(options) ? options : [];
+  const safeOptions = options;
 
   const getDisplayOption = useCallback(
     (idx: number) => editedOptions[idx] ?? safeOptions[idx],

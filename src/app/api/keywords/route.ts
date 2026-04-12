@@ -112,7 +112,7 @@ function getKeywordPriorityScore(params: {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { shopId, categoryId, topic } = body as {
+    const { shopId, categoryId } = body as {
       shopId: string;
       categoryId: string;
       topic: string;
@@ -188,7 +188,11 @@ export async function POST(request: NextRequest) {
 
     const results = analyzedResults
       .sort((a, b) => b._priorityScore - a._priorityScore)
-      .map(({ _priorityScore, ...rest }) => rest);
+      .map((item) => {
+        const { _priorityScore, ...rest } = item;
+        void _priorityScore;
+        return rest;
+      });
 
     return NextResponse.json({
       success: true,

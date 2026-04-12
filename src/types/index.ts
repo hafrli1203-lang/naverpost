@@ -235,7 +235,6 @@ export interface WorkflowState {
   selectedKeyword: KeywordOption | null;
   article: ArticleContent | null;
   images: BlogImage[];
-  naverDraftSaved: boolean;
 }
 
 // ===== API Response Types =====

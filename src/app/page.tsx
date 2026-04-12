@@ -1,32 +1,39 @@
-"use client";
+﻿"use client";
 
-import { useState, useCallback, useEffect } from "react";
-import { WorkflowStepper } from "@/components/WorkflowStepper";
-import { ShopSelector } from "@/components/ShopSelector";
-import { KeywordOptions } from "@/components/KeywordOptions";
-import { ArticlePreview } from "@/components/ArticlePreview";
-import { ImagePreview } from "@/components/ImagePreview";
-import { FinalConfirm } from "@/components/FinalConfirm";
-import { usePersistedWorkflow } from "@/hooks/usePersistedWorkflow";
+import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { CATEGORIES } from "@/lib/constants";
+import { ArticlePreview } from "@/components/ArticlePreview";
+import { FinalConfirm } from "@/components/FinalConfirm";
+import { ImagePreview } from "@/components/ImagePreview";
+import { KeywordOptions } from "@/components/KeywordOptions";
+import { ShopSelector } from "@/components/ShopSelector";
 import type { ArticleOptions } from "@/components/ShopSelector";
-import type { WorkflowState, KeywordOption, ArticleContent, BlogImage, Shop } from "@/types";
+import { WorkflowStepper } from "@/components/WorkflowStepper";
+import { usePersistedWorkflow } from "@/hooks/usePersistedWorkflow";
+import { CATEGORIES } from "@/lib/constants";
+import type { ArticleContent, BlogImage, KeywordOption, Shop, WorkflowState } from "@/types";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function safeJson(res: Response): Promise<any> {
+type LooseApiResponse = {
+  success?: boolean;
+  error?: string;
+  data?: unknown;
+};
+
+async function safeJson(res: Response): Promise<LooseApiResponse> {
   if (res.status === 401) {
     window.location.href = "/login";
-    return { success: false, error: "인증이 만료되었습니다." };
+    return { success: false, error: "인증이 필요합니다." };
   }
+
   const text = await res.text();
   if (!text) {
-    return { success: false, error: "서버 응답이 비어있습니다. 다시 시도해주세요." };
+    return { success: false, error: "빈 응답이 반환되었습니다." };
   }
+
   try {
     return JSON.parse(text);
   } catch {
-    return { success: false, error: "서버 응답을 처리할 수 없습니다. 다시 시도해주세요." };
+    return { success: false, error: "응답을 JSON으로 해석하지 못했습니다." };
   }
 }
 
@@ -39,7 +46,6 @@ const INITIAL_STATE: WorkflowState = {
   selectedKeyword: null,
   article: null,
   images: [],
-  naverDraftSaved: false,
 };
 
 function makeInitialState(): WorkflowState {
@@ -51,14 +57,13 @@ function makeInitialState(): WorkflowState {
 
 export default function Home() {
   const [state, setState, clearPersistedState] = usePersistedWorkflow(makeInitialState());
-
-  const uiStage: 0 | 1 | 2 | 3 | 4 = state.shop === null && state.currentStage <= 1 ? 0 : (state.currentStage as 1 | 2 | 3 | 4);
+  const uiStage: 0 | 1 | 2 | 3 | 4 =
+    state.shop === null && state.currentStage <= 1 ? 0 : (state.currentStage as 1 | 2 | 3 | 4);
 
   const [maxStageReached, setMaxStageReached] = useState<number>(state.currentStage);
   const [isLoading, setIsLoading] = useState(false);
   const [isGeneratingImages, setIsGeneratingImages] = useState(false);
   const [imageProgress, setImageProgress] = useState({ current: 0, total: 0 });
-  const [savedPostId, setSavedPostId] = useState<string | undefined>(undefined);
   const [keywordOptions, setKeywordOptions] = useState<KeywordOption[]>([]);
   const [shops, setShops] = useState<Shop[]>([]);
   const [articleOptions, setArticleOptions] = useState<ArticleOptions | null>(null);
@@ -80,7 +85,7 @@ export default function Home() {
     fetch("/api/sessions")
       .then((r) => r.json())
       .then((json) => {
-        if (json.success) setSavedSessions(json.data);
+        if (json.success) setSavedSessions((json.data as typeof savedSessions) ?? []);
       })
       .catch(() => {});
   }, []);
@@ -89,7 +94,7 @@ export default function Home() {
     fetch("/api/shops")
       .then((r) => r.json())
       .then((json) => {
-        if (json.success) setShops(json.data);
+        if (json.success) setShops((json.data as Shop[]) ?? []);
       })
       .catch(() => {});
     loadSavedSessions();
@@ -114,7 +119,7 @@ export default function Home() {
           throw new Error(json.error ?? "키워드 생성에 실패했습니다.");
         }
 
-        const raw = json.data?.results;
+        const raw = (json.data as { results?: unknown } | undefined)?.results;
         const options: KeywordOption[] = Array.isArray(raw) ? raw : [];
         setKeywordOptions(options);
         setState({
@@ -127,7 +132,6 @@ export default function Home() {
           selectedKeyword: null,
           article: null,
           images: [],
-          naverDraftSaved: false,
         });
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "키워드 생성 중 오류가 발생했습니다.");
@@ -135,7 +139,7 @@ export default function Home() {
         setIsLoading(false);
       }
     },
-    [state, setState, shops]
+    [shops, state, setState]
   );
 
   const handleKeywordRegenerate = useCallback(async () => {
@@ -155,8 +159,8 @@ export default function Home() {
       if (!res.ok || !json.success) {
         throw new Error(json.error ?? "키워드 재생성에 실패했습니다.");
       }
-      const rawResults = json.data?.results;
-      setKeywordOptions(Array.isArray(rawResults) ? rawResults : []);
+      const rawResults = (json.data as { results?: unknown } | undefined)?.results;
+      setKeywordOptions(Array.isArray(rawResults) ? (rawResults as KeywordOption[]) : []);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "키워드 재생성 중 오류가 발생했습니다.");
     } finally {
@@ -181,7 +185,7 @@ export default function Home() {
         });
         const json = await safeJson(res);
         if (!res.ok || !json.success) {
-          throw new Error(json.error ?? "본문 작성에 실패했습니다.");
+          throw new Error(json.error ?? "본문 생성에 실패했습니다.");
         }
 
         setState({
@@ -192,12 +196,12 @@ export default function Home() {
         });
         setMaxStageReached((prev) => Math.max(prev, 2));
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "본문 작성 중 오류가 발생했습니다.");
+        toast.error(err instanceof Error ? err.message : "본문 생성 중 오류가 발생했습니다.");
       } finally {
         setIsLoading(false);
       }
     },
-    [state, setState]
+    [articleOptions, state, setState]
   );
 
   const handleArticleRewrite = useCallback(async () => {
@@ -213,124 +217,115 @@ export default function Home() {
     [state, setState]
   );
 
-  const handleArticleApprove = useCallback(async () => {
+  const handleArticleApprove = useCallback(() => {
     if (!state.article || !state.shop) return;
     setState((prev) => ({ ...prev, currentStage: 3, images: [] }));
     setMaxStageReached((prev) => Math.max(prev, 3));
   }, [state.article, state.shop, setState]);
 
-  const handleStartImageGeneration = useCallback(async (customContent?: { articleContent: string }) => {
-    if (!customContent && !state.article) return;
+  const handleStartImageGeneration = useCallback(
+    async (customContent?: { articleContent: string }) => {
+      if (!customContent && !state.article) return;
 
-    const articleContent = customContent?.articleContent ?? state.article!.content;
-    // 수동 입력 시 원고 첫 줄에서 제목 추출, 키워드는 "블로그 이미지"로 기본값
-    const title = customContent
-      ? (articleContent.split("\n")[0].trim().slice(0, 30) || "블로그 이미지")
-      : state.article!.title;
-    const mainKeyword = customContent
-      ? "블로그 이미지"
-      : state.article!.mainKeyword;
+      const articleContent = customContent?.articleContent ?? state.article!.content;
+      const title = customContent
+        ? articleContent.split("\n")[0].trim().slice(0, 30) || "이미지 생성"
+        : state.article!.title;
+      const mainKeyword = customContent ? "이미지 생성" : state.article!.mainKeyword;
 
-    setIsGeneratingImages(true);
-    setImageProgress({ current: 0, total: 10 });
+      setIsGeneratingImages(true);
+      setImageProgress({ current: 0, total: 10 });
 
-    try {
-      // POST로 파라미터 직접 전달 + SSE 스트림 읽기 (Vercel 서버리스 호환)
-      const res = await fetch("/api/image/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sessionId: state.sessionId,
-          articleContent,
-          title,
-          mainKeyword,
-        }),
-      });
+      try {
+        const res = await fetch("/api/image/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sessionId: state.sessionId,
+            articleContent,
+            title,
+            mainKeyword,
+          }),
+        });
 
-      if (!res.ok || !res.body) {
-        throw new Error("이미지 생성을 시작하지 못했습니다.");
-      }
+        if (!res.ok || !res.body) {
+          throw new Error("이미지 생성 응답을 받지 못했습니다.");
+        }
 
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let sseBuffer = "";
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let sseBuffer = "";
 
-      const handleEvent = (line: string) => {
-        if (!line.startsWith("data: ")) return;
-        const event = JSON.parse(line.slice(6));
-        if (event.type === "progress") {
-          setImageProgress({ current: event.index ?? 0, total: event.total ?? 10 });
-        } else if (event.type === "image-ready") {
-          // base64 data URL 우선 사용 (Vercel 서버리스에서 파일 접근 불가 대비)
-          const mimeType = event.mimeType || "image/jpeg";
-          const imageUrl = event.base64Data
-            ? `data:${mimeType};base64,${event.base64Data}`
-            : (event.imageUrl ?? "");
-          const img: BlogImage = {
-            index: event.index,
-            imageId: event.imageId ?? "",
-            imageUrl,
-            prompt: event.prompt ?? "",
-            section: `섹션 ${event.index + 1}`,
-            status: "success",
-          };
-          setState((prev) => ({
-            ...prev,
-            images: [...prev.images.filter((i) => i.index !== event.index), img].sort(
-              (a, b) => a.index - b.index
-            ),
-          }));
-        } else if (event.type === "image-failed") {
-          const img: BlogImage = {
-            index: event.index,
-            imageId: "",
-            imageUrl: "",
-            prompt: "",
-            section: `섹션 ${event.index + 1}`,
-            status: "failed",
-          };
-          setState((prev) => ({
-            ...prev,
-            images: [...prev.images.filter((i) => i.index !== event.index), img].sort(
-              (a, b) => a.index - b.index
-            ),
-          }));
-        } else if (event.type === "complete") {
-          setIsGeneratingImages(false);
-          setImageProgress({
-            current: event.successCount ?? 0,
-            total: event.total ?? 10,
-          });
-          if (event.error) {
-            toast.error(`이미지 생성 실패: ${event.error}`);
-          } else {
-            toast.success(`이미지 생성 완료: 성공 ${event.successCount ?? 0}개, 실패 ${event.failCount ?? 0}개`);
+        const handleEvent = (line: string) => {
+          if (!line.startsWith("data: ")) return;
+          const event = JSON.parse(line.slice(6));
+          if (event.type === "progress") {
+            setImageProgress({ current: event.index ?? 0, total: event.total ?? 10 });
+          } else if (event.type === "image-ready") {
+            const mimeType = event.mimeType || "image/jpeg";
+            const imageUrl = event.base64Data
+              ? `data:${mimeType};base64,${event.base64Data}`
+              : (event.imageUrl ?? "");
+            const img: BlogImage = {
+              index: event.index,
+              imageId: event.imageId ?? "",
+              imageUrl,
+              prompt: event.prompt ?? "",
+              section: `섹션 ${event.index + 1}`,
+              status: "success",
+            };
+            setState((prev) => ({
+              ...prev,
+              images: [...prev.images.filter((i) => i.index !== event.index), img].sort((a, b) => a.index - b.index),
+            }));
+          } else if (event.type === "image-failed") {
+            const img: BlogImage = {
+              index: event.index,
+              imageId: "",
+              imageUrl: "",
+              prompt: "",
+              section: `섹션 ${event.index + 1}`,
+              status: "failed",
+            };
+            setState((prev) => ({
+              ...prev,
+              images: [...prev.images.filter((i) => i.index !== event.index), img].sort((a, b) => a.index - b.index),
+            }));
+          } else if (event.type === "complete") {
+            setIsGeneratingImages(false);
+            setImageProgress({ current: event.successCount ?? 0, total: event.total ?? 10 });
+            if (event.error) {
+              toast.error(`이미지 생성 실패: ${event.error}`);
+            } else {
+              toast.success(`이미지 생성 완료: ${event.successCount ?? 0}개 성공`);
+            }
+          }
+        };
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          sseBuffer += decoder.decode(value, { stream: true });
+          const lines = sseBuffer.split("\n");
+          sseBuffer = lines.pop() ?? "";
+          for (const line of lines) {
+            try {
+              handleEvent(line);
+            } catch {
+              // ignore malformed SSE chunks
+            }
           }
         }
-      };
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        sseBuffer += decoder.decode(value, { stream: true });
-        const lines = sseBuffer.split("\n");
-        sseBuffer = lines.pop() ?? "";
-        for (const line of lines) {
-          try { handleEvent(line); } catch { /* ignore */ }
-        }
+      } catch (err) {
+        setIsGeneratingImages(false);
+        toast.error(err instanceof Error ? err.message : "이미지 생성 중 오류가 발생했습니다.");
       }
-      if (sseBuffer.trim()) {
-        try { handleEvent(sseBuffer.trim()); } catch { /* ignore */ }
-      }
-    } catch (err) {
-      setIsGeneratingImages(false);
-      toast.error(err instanceof Error ? err.message : "이미지 생성 중 오류가 발생했습니다.");
-    }
-  }, [state.article, state.shop, state.sessionId, setState]);
+    },
+    [state.article, state.sessionId, setState]
+  );
 
   const handleImageRegenerate = useCallback(
     async (index: number, customPrompt?: string) => {
-
       setState({
         ...state,
         images: state.images.map((img) =>
@@ -351,12 +346,18 @@ export default function Home() {
           body: JSON.stringify(body),
         });
         const json = await safeJson(res);
-        if (!res.ok || !json.success) throw new Error(json.error ?? "재생성 실패");
+        if (!res.ok || !json.success) throw new Error(json.error ?? "이미지 재생성 실패");
 
-        const regenMime = json.data.mimeType || "image/jpeg";
-        const regenUrl = json.data.base64Data
-          ? `data:${regenMime};base64,${json.data.base64Data}`
-          : json.data.imageUrl;
+        const regenData = (json.data as {
+          mimeType?: string;
+          base64Data?: string;
+          imageUrl?: string;
+          imageId?: string;
+        }) ?? { imageUrl: "" };
+        const regenMime = regenData.mimeType || "image/jpeg";
+        const regenUrl = regenData.base64Data
+          ? `data:${regenMime};base64,${regenData.base64Data}`
+          : (regenData.imageUrl ?? "");
 
         setState((prev) => ({
           ...prev,
@@ -366,7 +367,7 @@ export default function Home() {
                   ...img,
                   status: "success" as const,
                   imageUrl: regenUrl,
-                  imageId: json.data.imageId,
+                  imageId: regenData.imageId ?? "",
                   ...(customPrompt ? { prompt: customPrompt } : {}),
                 }
               : img
@@ -390,28 +391,13 @@ export default function Home() {
     setMaxStageReached((prev) => Math.max(prev, 4));
   }, [setState]);
 
-  // TODO: 네이버 연동 — 사용자 요청 시 활성화
-  // 현재는 로컬 완료 처리만 수행 (네이버 API 호출 안 함)
-  const handleSaveDraft = useCallback(async () => {
-    if (!state.shop) return;
-    setIsLoading(true);
-    try {
-      setSavedPostId("local-preview");
-      setState({ ...state, naverDraftSaved: true });
-      clearPersistedState();
-      toast.success("작성 완료! 네이버 연동은 아직 비활성 상태입니다.");
-    } finally {
-      setIsLoading(false);
-    }
-  }, [state, setState, clearPersistedState]);
-
   const handleStageChange = useCallback(
     (stage: number) => {
       if (stage <= maxStageReached) {
         setState({ ...state, currentStage: stage as 1 | 2 | 3 | 4 });
       }
     },
-    [state, setState, maxStageReached]
+    [maxStageReached, state, setState]
   );
 
   const handleSaveSession = useCallback(async () => {
@@ -443,18 +429,18 @@ export default function Home() {
       });
       const json = await safeJson(res);
       if (json.success) {
-        toast.success("작업이 저장되었습니다.");
+        toast.success("세션을 저장했습니다.");
         loadSavedSessions();
       } else {
-        toast.error("저장 실패: " + (json.error ?? ""));
+        toast.error("세션 저장 실패: " + (json.error ?? ""));
       }
     } catch {
-      toast.error("저장 중 오류가 발생했습니다.");
+      toast.error("세션 저장 중 오류가 발생했습니다.");
     }
-  }, [state, loadSavedSessions]);
+  }, [loadSavedSessions, state]);
 
   const handleLoadSession = useCallback(
-    (session: typeof savedSessions[number]) => {
+    (session: (typeof savedSessions)[number]) => {
       const shop = shops.find((s) => s.name === session.shopName) ?? null;
       const category = CATEGORIES.find((c) => c.name === session.category) ?? null;
       const article: ArticleContent = {
@@ -498,12 +484,11 @@ export default function Home() {
         },
         article,
         images: restoredImages,
-        naverDraftSaved: false,
       });
       setMaxStageReached(hasImages ? 3 : 2);
-      toast.success("저장된 작업을 불러왔습니다.");
+      toast.success("저장된 세션을 불러왔습니다.");
     },
-    [shops, setState]
+    [setState, shops]
   );
 
   const handleDeleteSession = useCallback(
@@ -511,9 +496,9 @@ export default function Home() {
       try {
         await fetch(`/api/sessions?id=${id}`, { method: "DELETE" });
         loadSavedSessions();
-        toast.success("삭제되었습니다.");
+        toast.success("세션을 삭제했습니다.");
       } catch {
-        toast.error("삭제 실패");
+        toast.error("세션 삭제 실패");
       }
     },
     [loadSavedSessions]
@@ -521,7 +506,6 @@ export default function Home() {
 
   const handleStartOver = useCallback(() => {
     clearPersistedState();
-    setSavedPostId(undefined);
     setKeywordOptions([]);
     setMaxStageReached(1);
     setState(makeInitialState());
@@ -534,57 +518,58 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <header className="bg-white border-b border-gray-200 sticky top-0 z-50">
-        <div className="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between">
-          <h1 className="text-lg font-bold text-gray-900">네이버 블로그 자동 작성</h1>
+      <header className="sticky top-0 z-50 border-b border-gray-200 bg-white">
+        <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-4">
+          <h1 className="text-lg font-bold text-gray-900">네이버 블로그 콘텐츠 생성기</h1>
           {uiStage > 0 && (
             <button
               onClick={handleStartOver}
-              className="text-sm text-muted-foreground hover:text-gray-700 transition-colors"
+              className="text-sm text-muted-foreground transition-colors hover:text-gray-700"
             >
-              처음으로
+              새로 시작
             </button>
           )}
         </div>
       </header>
 
       {uiStage > 0 && (
-        <div className="bg-white border-b border-gray-100">
-          <div className="max-w-5xl mx-auto px-4">
-            <WorkflowStepper currentStage={state.currentStage} maxStageReached={maxStageReached} onStageClick={handleStageChange} />
+        <div className="border-b border-gray-100 bg-white">
+          <div className="mx-auto max-w-5xl px-4">
+            <WorkflowStepper
+              currentStage={state.currentStage}
+              maxStageReached={maxStageReached}
+              onStageClick={handleStageChange}
+            />
           </div>
         </div>
       )}
 
-      <main className="max-w-5xl mx-auto px-4 py-8">
+      <main className="mx-auto max-w-5xl px-4 py-8">
         {uiStage === 0 && (
           <>
             <ShopSelector shops={shops} onStart={handleStart} isLoading={isLoading} />
 
-            <div className="max-w-3xl mx-auto mt-6">
+            <div className="mx-auto mt-6 max-w-3xl">
               <button
                 onClick={handleImageOnly}
-                className="w-full py-3 px-4 bg-white border-2 border-dashed border-gray-300 rounded-lg text-sm text-gray-600 hover:border-blue-400 hover:text-blue-600 transition-colors"
+                className="w-full rounded-lg border-2 border-dashed border-gray-300 bg-white px-4 py-3 text-sm text-gray-600 transition-colors hover:border-blue-400 hover:text-blue-600"
               >
-                이미지만 생성 (수동 원고 입력)
+                이미지 생성만 진행
               </button>
             </div>
 
             {savedSessions.length > 0 && (
-              <div className="mt-8 max-w-3xl mx-auto">
-                <h3 className="text-base font-semibold mb-3 text-gray-700">저장된 작업</h3>
+              <div className="mx-auto mt-8 max-w-3xl">
+                <h3 className="mb-3 text-base font-semibold text-gray-700">저장된 세션</h3>
                 <div className="space-y-2">
                   {savedSessions.map((s) => (
                     <div
                       key={s.id}
-                      className="flex items-center justify-between bg-white rounded-lg border border-gray-200 px-4 py-3 hover:border-blue-300 transition-colors"
+                      className="flex items-center justify-between rounded-lg border border-gray-200 bg-white px-4 py-3 transition-colors hover:border-blue-300"
                     >
-                      <div
-                        className="flex-1 cursor-pointer"
-                        onClick={() => handleLoadSession(s)}
-                      >
-                        <p className="text-sm font-medium text-gray-900 truncate">{s.title}</p>
-                        <p className="text-xs text-gray-500 mt-0.5">
+                      <div className="flex-1 cursor-pointer" onClick={() => handleLoadSession(s)}>
+                        <p className="truncate text-sm font-medium text-gray-900">{s.title}</p>
+                        <p className="mt-0.5 text-xs text-gray-500">
                           {s.shopName} · {s.category} · {new Date(s.savedAt).toLocaleDateString("ko-KR")}
                         </p>
                       </div>
@@ -593,7 +578,7 @@ export default function Home() {
                           e.stopPropagation();
                           handleDeleteSession(s.id);
                         }}
-                        className="ml-3 text-xs text-red-400 hover:text-red-600 transition-colors shrink-0"
+                        className="ml-3 shrink-0 text-xs text-red-400 transition-colors hover:text-red-600"
                       >
                         삭제
                       </button>
@@ -639,15 +624,7 @@ export default function Home() {
           />
         )}
 
-        {uiStage === 4 && (
-          <FinalConfirm
-            state={state}
-            onSaveDraft={handleSaveDraft}
-            onStartOver={handleStartOver}
-            isLoading={isLoading}
-            savedPostId={savedPostId}
-          />
-        )}
+        {uiStage === 4 && <FinalConfirm state={state} onStartOver={handleStartOver} />}
       </main>
     </div>
   );

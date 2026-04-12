@@ -45,6 +45,7 @@ yarn-error.log*
 # omc state (session-scoped, not shareable)
 .omc/state/
 .omc/project-memory.json
+.codex-push/
 
 # vercel
 .vercel

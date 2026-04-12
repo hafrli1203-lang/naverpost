@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { WorkflowState } from "@/types";
 
 const STORAGE_KEY = "naverpost_workflow_state";
@@ -14,7 +14,6 @@ export function usePersistedWorkflow(
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isFirstMount = useRef(true);
 
-  // Load from localStorage on mount
   useEffect(() => {
     if (!isFirstMount.current) return;
     isFirstMount.current = false;
@@ -24,14 +23,15 @@ export function usePersistedWorkflow(
       if (!stored) return;
 
       const parsed: WorkflowState = JSON.parse(stored);
-
-      // Only recover if the session is incomplete (not fully done)
-      if (parsed && !parsed.naverDraftSaved && parsed.currentStage >= 1) {
+      if (parsed && parsed.currentStage >= 1) {
         const confirmed = window.confirm(
-          "이전에 진행 중이던 작업이 있습니다. 이어서 진행하시겠습니까?\n\n취소하면 새로 시작합니다."
+          "이전에 진행하던 작업이 있습니다. 이어서 작업하시겠습니까?\n\n취소를 누르면 저장된 진행 상태가 삭제됩니다."
         );
+
         if (confirmed) {
-          setStateInternal(parsed);
+          setTimeout(() => {
+            setStateInternal(parsed);
+          }, 0);
         } else {
           localStorage.removeItem(STORAGE_KEY);
         }
@@ -39,26 +39,22 @@ export function usePersistedWorkflow(
     } catch {
       localStorage.removeItem(STORAGE_KEY);
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   const persist = useCallback((newState: WorkflowState) => {
     if (debounceTimer.current) {
       clearTimeout(debounceTimer.current);
     }
+
     debounceTimer.current = setTimeout(() => {
       try {
-        if (newState.naverDraftSaved) {
-          localStorage.removeItem(STORAGE_KEY);
-        } else {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(newState));
-        }
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(newState));
       } catch {
-        // Ignore storage errors (e.g., quota exceeded)
+        // Ignore storage errors such as quota exceeded.
       }
     }, 500);
   }, []);
 
-  // Supports both direct value and functional updater
   const setState = useCallback(
     (action: SetStateAction) => {
       setStateInternal((prev) => {
@@ -77,7 +73,6 @@ export function usePersistedWorkflow(
     localStorage.removeItem(STORAGE_KEY);
   }, []);
 
-  // Cleanup debounce on unmount
   useEffect(() => {
     return () => {
       if (debounceTimer.current) {
