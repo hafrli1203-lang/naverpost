@@ -1,4 +1,4 @@
-import type { Shop, Category } from "@/types";
+import type { Shop, Category, ArticleBrief } from "@/types";
 
 /**
  * 정보성 글 프롬프트 (개선판 v2)
@@ -82,6 +82,7 @@ export function buildArticlePrompt(params: {
   charCount?: CharCountType;
   tone?: ToneType;
   externalReference?: string;
+  brief?: ArticleBrief;
 }): string {
   const {
     title,
@@ -95,6 +96,7 @@ export function buildArticlePrompt(params: {
     charCount = 2000,
     tone = "standard",
     externalReference,
+    brief,
   } = params;
 
   const sectionCount = getSectionCount(charCount);
@@ -103,6 +105,14 @@ export function buildArticlePrompt(params: {
 
   const externalRefSection = externalReference
     ? `\n[외부 참고 자료]\n${externalReference}\n※ 위 자료의 내용을 참고하되 그대로 복사하지 말고 안경원 관점에서 재해석하여 활용하세요.\n`
+    : "";
+
+  const internalBriefSection = brief
+    ? `\n[내부 작성 브리프]\n- 이번 글의 검색의도 축: ${brief.title}\n- 제목 활성화 규칙:\n${brief.titleMorphologyGuide
+        .map((item) => `  - ${item}`)
+        .join("\n")}\n- 중복 회피 규칙:\n${brief.duplicateAvoidanceRules
+        .map((item) => `  - ${item}`)
+        .join("\n")}\n- 조사 자료 요약:\n${brief.researchSummary}\n`
     : "";
 
   return `[역할 설정]
@@ -122,6 +132,7 @@ export function buildArticlePrompt(params: {
 [조사 자료]
 ${researchData}
 ${externalRefSection}
+${internalBriefSection}
 ────────────────────────────────────
 [작성 지침]
 ────────────────────────────────────

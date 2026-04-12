@@ -1,6 +1,10 @@
 import type { ValidationResult } from "@/types";
 import { PROHIBITED_WORDS, CAUTION_PHRASES } from "./prohibitedWords";
 import { findOverusedWords } from "./repetitionCheck";
+import { analyzeMorphology } from "./morphologyAnalyzer";
+import { analyzeLanguageRisk } from "./contentSignalAnalyzer";
+import { analyzeTitleBodyAlignment } from "./titleBodyAlignment";
+import { analyzeNetworkDuplicateRisk } from "./networkDuplicateAnalyzer";
 
 /**
  * 금지어가 다른 단어의 일부로 사용될 때 오탐을 방지하는 허용 복합어 목록.
@@ -45,7 +49,14 @@ function isProhibitedWordPresent(content: string, word: string): boolean {
  */
 export function validateContent(
   content: string,
-  keywords?: { mainKeyword: string; subKeyword1: string; subKeyword2: string }
+  keywords?: {
+    title?: string;
+    mainKeyword: string;
+    subKeyword1: string;
+    subKeyword2: string;
+    forbiddenList?: string[];
+    referenceList?: string[];
+  }
 ): ValidationResult {
   const foundProhibited = PROHIBITED_WORDS.filter((word) =>
     isProhibitedWordPresent(content, word)
@@ -74,12 +85,53 @@ export function validateContent(
     }
   }
 
+  const keywordCandidates = keywords
+    ? [keywords.mainKeyword, keywords.subKeyword1, keywords.subKeyword2].filter(Boolean)
+    : [];
+  const title = keywords?.title ?? keywords?.mainKeyword ?? "";
+  const morphology = analyzeMorphology({
+    title,
+    content,
+    keywords: keywordCandidates,
+  });
+  const languageRisk = analyzeLanguageRisk(content);
+  const structure = analyzeTitleBodyAlignment({
+    title,
+    content,
+    keywords: keywordCandidates,
+  });
+  const duplicateRisk = keywords
+    ? analyzeNetworkDuplicateRisk({
+        option: {
+          title,
+          mainKeyword: keywords.mainKeyword,
+          subKeyword1: keywords.subKeyword1,
+          subKeyword2: keywords.subKeyword2,
+        },
+        forbiddenList: keywords.forbiddenList ?? [],
+        referenceList: keywords.referenceList ?? [],
+      })
+    : {
+        titlePatternOverlap: [],
+        keywordCombinationOverlap: [],
+        sectionOrderOverlap: [],
+        tableStructureOverlap: [],
+        expressionOverlap: [],
+        conclusionOverlap: [],
+        informationOrderOverlap: [],
+        issues: [],
+      };
+
   const needsRevision =
     foundProhibited.length > 0 ||
     foundCaution.length > 0 ||
     overusedWords.length > 0 ||
     !hasTable ||
-    missingKeywords.length > 0;
+    missingKeywords.length > 0 ||
+    languageRisk.profanity.length > 0 ||
+    languageRisk.abuse.length > 0 ||
+    languageRisk.adult.length > 0 ||
+    structure.missingTitleKeywordCoverage.length > 0;
 
   const revisionReasons: string[] = [];
   if (foundProhibited.length > 0) {
@@ -100,6 +152,43 @@ export function validateContent(
   if (missingKeywords.length > 0) {
     revisionReasons.push(`키워드 원형 누락: ${missingKeywords.join(", ")}`);
   }
+  if (morphology.missingTitleMorphemesInBody.length > 0) {
+    revisionReasons.push(
+      `제목 형태소 활성화 부족: ${morphology.missingTitleMorphemesInBody.join(", ")}`
+    );
+  }
+  if (languageRisk.profanity.length > 0) {
+    revisionReasons.push(`비속어 검출: ${languageRisk.profanity.join(", ")}`);
+  }
+  if (languageRisk.abuse.length > 0) {
+    revisionReasons.push(`비하 표현 검출: ${languageRisk.abuse.join(", ")}`);
+  }
+  if (languageRisk.adult.length > 0) {
+    revisionReasons.push(`민감 표현 검출: ${languageRisk.adult.join(", ")}`);
+  }
+  if (languageRisk.commercial.length > 0) {
+    revisionReasons.push(`상업어 사용: ${languageRisk.commercial.join(", ")}`);
+  }
+  if (languageRisk.emphasis.length > 0) {
+    revisionReasons.push(`강조어 사용: ${languageRisk.emphasis.join(", ")}`);
+  }
+  if (structure.missingTitleKeywordCoverage.length > 0) {
+    revisionReasons.push(
+      `제목-본문 일치 보강 필요: ${structure.missingTitleKeywordCoverage.join(", ")}`
+    );
+  }
+  if (duplicateRisk.titlePatternOverlap.length > 0) {
+    revisionReasons.push(
+      `제목 패턴 중복 위험: ${duplicateRisk.titlePatternOverlap.slice(0, 2).join(", ")}`
+    );
+  }
+  if (duplicateRisk.keywordCombinationOverlap.length > 0) {
+    revisionReasons.push(
+      `키워드 조합 중복 위험: ${duplicateRisk.keywordCombinationOverlap
+        .slice(0, 2)
+        .join(", ")}`
+    );
+  }
 
   return {
     needsRevision,
@@ -109,5 +198,15 @@ export function validateContent(
     missingKeywords,
     hasTable,
     revisionReasons,
+    morphology,
+    languageRisk,
+    structure,
+    duplicateRisk,
+    issues: [
+      ...morphology.issues,
+      ...languageRisk.issues,
+      ...structure.issues,
+      ...duplicateRisk.issues,
+    ],
   };
 }

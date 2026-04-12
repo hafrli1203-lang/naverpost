@@ -5,13 +5,15 @@ import { buildArticlePrompt } from "@/lib/prompts/articlePrompt";
 import { buildPromoPrompt } from "@/lib/prompts/promoPrompt";
 import { buildRevisionPrompt } from "@/lib/prompts/revisionPrompt";
 import { validateContent } from "@/lib/validation/contentValidator";
+import { fetchBlogTitles } from "@/lib/naver/rssParser";
+import { buildArticleBrief } from "@/lib/briefs/articleBrief";
 import { CATEGORIES } from "@/lib/constants";
 import { getShopById } from "@/lib/data/shops";
 import type { KeywordOption, ArticleContent } from "@/types";
 
 export const maxDuration = 300;
 
-const MAX_REVISION_ATTEMPTS = 2;
+const MAX_REVISION_ATTEMPTS = 1;
 
 export async function POST(request: NextRequest) {
   try {
@@ -64,6 +66,30 @@ export async function POST(request: NextRequest) {
     // Research keyword via Perplexity
     const researchData = await researchKeyword(keyword.mainKeyword);
 
+    let sameStoreHistory: string[] = [];
+    let crossBlogTitles: string[] = [];
+    try {
+      const rssResult = await fetchBlogTitles(shopId);
+      sameStoreHistory = rssResult.forbiddenList.slice(0, 10);
+      crossBlogTitles = rssResult.referenceList.slice(0, 20);
+    } catch {
+      // RSS failure should not block article generation.
+    }
+
+    const brief = buildArticleBrief({
+      keyword,
+      shop,
+      category,
+      topic: topic || keyword.title,
+      articleType,
+      charCount,
+      tone,
+      contentSubtype,
+      researchData,
+      sameStoreHistory,
+      crossBlogTitles,
+    });
+
     // Build article prompt and generate via Claude
     const prompt =
       articleType === "promo"
@@ -83,6 +109,7 @@ export async function POST(request: NextRequest) {
             eventName,
             eventPeriod,
             benefitContent,
+            brief,
           })
         : buildArticlePrompt({
             title: keyword.title,
@@ -96,15 +123,19 @@ export async function POST(request: NextRequest) {
             charCount,
             tone: tone as "standard" | "friendly" | "casual" | undefined,
             externalReference,
+            brief,
           });
 
     let content = await writeArticle(prompt);
     // 본문에서 마크다운 볼드(**) 제거
     content = content.replace(/\*\*([^*]+)\*\*/g, "$1");
     const keywordsForValidation = {
+      title: keyword.title,
       mainKeyword: keyword.mainKeyword,
       subKeyword1: keyword.subKeyword1,
       subKeyword2: keyword.subKeyword2,
+      forbiddenList: sameStoreHistory,
+      referenceList: crossBlogTitles,
     };
     let validation = validateContent(content, keywordsForValidation);
 
@@ -135,6 +166,7 @@ export async function POST(request: NextRequest) {
       shopName: shop.name,
       category: category.name,
       validation,
+      brief,
     };
 
     return NextResponse.json({ success: true, data: article });

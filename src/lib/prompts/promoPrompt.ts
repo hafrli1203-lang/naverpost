@@ -1,4 +1,4 @@
-import type { Shop, Category } from "@/types";
+import type { Shop, Category, ArticleBrief } from "@/types";
 
 /**
  * 홍보글 프롬프트
@@ -176,6 +176,7 @@ export function buildPromoPrompt(params: {
   eventPeriod?: string;
   benefitContent?: string;
   externalReference?: string;
+  brief?: ArticleBrief;
 }): string {
   const {
     title,
@@ -193,6 +194,7 @@ export function buildPromoPrompt(params: {
     eventPeriod,
     benefitContent,
     externalReference,
+    brief,
   } = params;
 
   const toneGuide = getPromoToneGuide(tone);
@@ -216,6 +218,18 @@ ${benefitContent ? `혜택 내용: ${benefitContent}` : "혜택 내용: [확인 
 ${externalReference}
 ※ 위 자료의 내용을 참고하되 그대로 복사하지 말고 안경원 홍보 관점에서 재해석하여 활용하세요.
 ※ 자료에 없는 가격/할인율/기간/사은품 등 사실 정보는 임의로 추가하지 마세요.
+`
+    : "";
+
+  const internalBriefSection = brief
+    ? `
+[내부 작성 브리프]
+- 제목 활성화 규칙:
+${brief.titleMorphologyGuide.map((item) => `  - ${item}`).join("\n")}
+- 중복 회피 규칙:
+${brief.duplicateAvoidanceRules.map((item) => `  - ${item}`).join("\n")}
+- 조사 자료 요약:
+${brief.researchSummary}
 `
     : "";
 
@@ -243,6 +257,7 @@ ${eventInfoBlock}
 [조사 자료]
 ${researchData}
 ${externalRefSection}
+${internalBriefSection}
 ────────────────────────────────────
 [핵심 목표]
 ────────────────────────────────────

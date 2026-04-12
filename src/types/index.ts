@@ -18,6 +18,7 @@ export interface KeywordOption {
   mainKeyword: string;
   subKeyword1: string;
   subKeyword2: string;
+  analysis?: KeywordOptionAnalysis;
 }
 
 export interface KeywordGenerationResult {
@@ -31,6 +32,126 @@ export interface KeywordValidationResult {
   failures: { rule: string; reason: string }[];
 }
 
+// ===== Blai Analysis Types =====
+
+export type BlaiSignalSource =
+  | "document-rule"
+  | "local-content"
+  | "rss-history"
+  | "perplexity"
+  | "naver-search"
+  | "manual-input";
+
+export interface AnalysisIssue {
+  code: string;
+  label: string;
+  reason: string;
+  severity: "low" | "medium" | "high";
+  source: BlaiSignalSource;
+}
+
+export interface MorphemeStat {
+  token: string;
+  count: number;
+  source: "title" | "body";
+}
+
+export interface MorphologyAnalysis {
+  titleMorphemes: string[];
+  repeatedBodyMorphemes: MorphemeStat[];
+  uniqueBodyMorphemeCount: number;
+  titleMorphemesActivatedInBody: string[];
+  missingTitleMorphemesInBody: string[];
+  topicAlignmentNotes: string[];
+  issues: AnalysisIssue[];
+}
+
+export interface LanguageRiskAnalysis {
+  profanity: string[];
+  abuse: string[];
+  adult: string[];
+  commercial: string[];
+  emphasis: string[];
+  advertising: string[];
+  issues: AnalysisIssue[];
+}
+
+export interface StructureActivationAnalysis {
+  titleKeywordCoverage: string[];
+  missingTitleKeywordCoverage: string[];
+  hasTableText: boolean;
+  hasQuoteText: boolean;
+  hasCaptionText: boolean;
+  hasAttachmentText: boolean;
+  alignmentNotes: string[];
+  issues: AnalysisIssue[];
+}
+
+export interface DuplicatePatternAnalysis {
+  titlePatternOverlap: string[];
+  keywordCombinationOverlap: string[];
+  sectionOrderOverlap: string[];
+  tableStructureOverlap: string[];
+  expressionOverlap: string[];
+  conclusionOverlap: string[];
+  informationOrderOverlap: string[];
+  issues: AnalysisIssue[];
+}
+
+export interface KeywordOptionAnalysis {
+  morphology?: MorphologyAnalysis;
+  languageRisk?: LanguageRiskAnalysis;
+  structure?: StructureActivationAnalysis;
+  duplicateRisk?: DuplicatePatternAnalysis;
+  externalSignals?: ExternalSearchSignals;
+  searchIntentAxis?: string;
+  bodyExpansionFit?: {
+    isLikelyExpandable: boolean;
+    reason: string;
+  };
+  issues: AnalysisIssue[];
+}
+
+export interface SearchVolumeSignal {
+  keyword: string;
+  trend?: "rising" | "steady" | "falling" | "unknown";
+  rawValue?: number | null;
+  source: BlaiSignalSource;
+}
+
+export interface RelatedKeywordSignal {
+  keyword: string;
+  relationType:
+    | "autocomplete"
+    | "related-search"
+    | "smartblock-topic"
+    | "unknown";
+  source: BlaiSignalSource;
+}
+
+export interface ExposureSignal {
+  area:
+    | "smartblock"
+    | "popular"
+    | "blog-tab"
+    | "influencer-tab"
+    | "integrated"
+    | "unknown";
+  rank?: number | null;
+  competitionLabel?: string;
+  source: BlaiSignalSource;
+}
+
+export interface ExternalSearchSignals {
+  status: "available" | "unavailable";
+  provider: string;
+  checkedAt?: string;
+  searchVolume?: SearchVolumeSignal[];
+  relatedKeywords?: RelatedKeywordSignal[];
+  exposures?: ExposureSignal[];
+  notes: string[];
+}
+
 // ===== Validation Types =====
 
 export interface ValidationResult {
@@ -41,9 +162,42 @@ export interface ValidationResult {
   missingKeywords: string[];
   hasTable: boolean;
   revisionReasons: string[];
+  morphology?: MorphologyAnalysis;
+  languageRisk?: LanguageRiskAnalysis;
+  structure?: StructureActivationAnalysis;
+  duplicateRisk?: DuplicatePatternAnalysis;
+  issues?: AnalysisIssue[];
 }
 
 // ===== Article Types =====
+
+export interface ArticleBrief {
+  title: string;
+  topic: string;
+  articleType: "info" | "promo";
+  charCount: 1000 | 1500 | 2000 | 2500;
+  tone:
+    | "standard"
+    | "friendly"
+    | "casual"
+    | "business"
+    | "expert";
+  contentSubtype?: "blog" | "event" | "season" | "short";
+  shop: Shop;
+  category: Category;
+  mainKeyword: string;
+  subKeyword1: string;
+  subKeyword2: string;
+  researchSummary: string;
+  titleMorphologyGuide: string[];
+  duplicateAvoidanceRules: string[];
+  networkContext: {
+    currentBlogId: string;
+    sameStoreHistory: string[];
+    crossBlogStoreAngles: string[];
+  };
+  sources: BlaiSignalSource[];
+}
 
 export interface ArticleContent {
   title: string;
@@ -54,6 +208,7 @@ export interface ArticleContent {
   shopName: string;
   category: string;
   validation: ValidationResult;
+  brief?: ArticleBrief;
 }
 
 // ===== Image Types =====

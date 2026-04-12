@@ -62,6 +62,36 @@ export function buildRevisionPrompt(params: {
     );
   }
 
+  if (validation.morphology?.missingTitleMorphemesInBody?.length) {
+    problemLines.push(
+      `- 제목 활성화 보강: 본문에서 빠진 제목 핵심 요소를 자연스럽게 설명에 녹여주세요. 누락 요소: ${validation.morphology.missingTitleMorphemesInBody.join(", ")}`
+    );
+  }
+
+  if (validation.structure?.missingTitleKeywordCoverage?.length) {
+    problemLines.push(
+      `- 제목-본문 일치율 보강: 제목 또는 목표 키워드가 본문에서 실제 정보와 연결되도록 보완하세요. 누락 요소: ${validation.structure.missingTitleKeywordCoverage.join(", ")}`
+    );
+  }
+
+  if (validation.languageRisk?.commercial?.length) {
+    problemLines.push(
+      `- 상업어 완화: 아래 상업어는 정보형 문체로 완화하세요. ${validation.languageRisk.commercial.join(", ")}`
+    );
+  }
+
+  if (validation.languageRisk?.emphasis?.length) {
+    problemLines.push(
+      `- 강조어 완화: 아래 강조어는 단정적 뉘앙스가 약한 표현으로 바꾸세요. ${validation.languageRisk.emphasis.join(", ")}`
+    );
+  }
+
+  if (validation.duplicateRisk?.titlePatternOverlap?.length) {
+    problemLines.push(
+      `- 중복 회피: 같은 매장 또는 다른 블로그와 유사한 전개가 감지되었습니다. 도입부와 결론의 설명 방식, 정보 순서, 비교 포인트를 바꿔주세요. 참고 중복 패턴: ${validation.duplicateRisk.titlePatternOverlap.slice(0, 2).join(", ")}`
+    );
+  }
+
   return `당신은 광고법을 준수하는 블로그 에디터입니다.
 아래 글에서 발견된 문제를 수정해주세요.
 
@@ -83,6 +113,9 @@ ${subKeyword2 ? `서브 키워드2: "${subKeyword2}" — 반드시 원형 그대
 5. 숫자 나열(1. 2. 3.) 대신 문장으로 풀어서 작성
 6. 쉼표(,) 사용 금지 — 접속사와 연결 어미로 이어지게 작성
 7. 본문에 Markdown 표가 없으면 반드시 1개 추가하세요.
+8. 제목의 핵심 요소가 본문에서 실제 정보와 연결되도록 보강하세요.
+9. 상업어, 강조어, 광고성 문구는 정보형 블로그 문체로 완화하세요.
+10. 기존 글과 비슷해 보이는 도입부/결론/정보 배열은 한 번만 다르게 정리하세요.
 
 [원본 글]
 ${originalContent}
