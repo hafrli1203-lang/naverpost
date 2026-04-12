@@ -5,48 +5,17 @@ import type {
   SearchVolumeSignal,
 } from "@/types";
 
-function unavailableSignals(reason: string): ExternalSearchSignals {
-  return {
-    status: "unavailable",
-    provider: "naver-search-placeholder",
-    notes: [reason],
-  };
+export class NaverSearchDependencyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "NaverSearchDependencyError";
+  }
 }
 
 function uniqueTokens(source: string): string[] {
   return Array.from(
-    new Set(
-      (source.match(/[가-힣A-Za-z0-9]{2,}/g) ?? []).map((token) => token.trim())
-    )
+    new Set((source.match(/[A-Za-z0-9\u3131-\u318E\uAC00-\uD7A3]{2,}/g) ?? []).map((token) => token.trim()))
   ).slice(0, 8);
-}
-
-function buildPlaceholderRelatedKeywords(tokens: string[]): RelatedKeywordSignal[] {
-  return tokens.map((keyword) => ({
-    keyword,
-    relationType: "unknown",
-    source: "manual-input",
-  }));
-}
-
-function buildPlaceholderVolumes(tokens: string[]): SearchVolumeSignal[] {
-  return tokens.map((keyword) => ({
-    keyword,
-    trend: "unknown",
-    rawValue: null,
-    source: "manual-input",
-  }));
-}
-
-function buildPlaceholderExposure(): ExposureSignal[] {
-  return [
-    {
-      area: "integrated",
-      rank: null,
-      competitionLabel: "unknown",
-      source: "manual-input",
-    },
-  ];
 }
 
 function normalizeNaverCredential(value: string | undefined): string {
@@ -67,9 +36,7 @@ function hasWorkingCredentials(): boolean {
 function getHeaders(): HeadersInit {
   return {
     "X-Naver-Client-Id": normalizeNaverCredential(process.env.NAVER_CLIENT_ID),
-    "X-Naver-Client-Secret": normalizeNaverCredential(
-      process.env.NAVER_CLIENT_SECRET
-    ),
+    "X-Naver-Client-Secret": normalizeNaverCredential(process.env.NAVER_CLIENT_SECRET),
     "Content-Type": "application/json",
   };
 }
@@ -92,14 +59,12 @@ async function fetchBlogSearch(keyword: string): Promise<{
     method: "GET",
     headers: {
       "X-Naver-Client-Id": normalizeNaverCredential(process.env.NAVER_CLIENT_ID),
-      "X-Naver-Client-Secret": normalizeNaverCredential(
-        process.env.NAVER_CLIENT_SECRET
-      ),
+      "X-Naver-Client-Secret": normalizeNaverCredential(process.env.NAVER_CLIENT_SECRET),
     },
   });
 
   if (!response.ok) {
-    throw new Error(`Naver blog search failed: ${response.status}`);
+    throw new NaverSearchDependencyError(`네이버 블로그 검색 API 호출에 실패했습니다. (${response.status})`);
   }
 
   const json = (await response.json()) as {
@@ -128,18 +93,16 @@ function buildTrendLabel(ratios: number[]): "rising" | "steady" | "falling" | "u
   const midpoint = Math.floor(ratios.length / 2);
   const firstHalf = ratios.slice(0, midpoint);
   const secondHalf = ratios.slice(midpoint);
-  const avg = (values: number[]) =>
+  const average = (values: number[]) =>
     values.reduce((sum, value) => sum + value, 0) / values.length;
-  const diff = avg(secondHalf) - avg(firstHalf);
+  const diff = average(secondHalf) - average(firstHalf);
 
   if (diff >= 8) return "rising";
   if (diff <= -8) return "falling";
   return "steady";
 }
 
-async function fetchSearchTrend(
-  keywords: string[]
-): Promise<SearchVolumeSignal[]> {
+async function fetchSearchTrend(keywords: string[]): Promise<SearchVolumeSignal[]> {
   const endDate = new Date();
   const startDate = new Date();
   startDate.setDate(endDate.getDate() - 28);
@@ -161,7 +124,7 @@ async function fetchSearchTrend(
   });
 
   if (!response.ok) {
-    throw new Error(`Naver datalab search failed: ${response.status}`);
+    throw new NaverSearchDependencyError(`네이버 데이터랩 API 호출에 실패했습니다. (${response.status})`);
   }
 
   const json = (await response.json()) as {
@@ -191,8 +154,7 @@ function buildExposureFromBlogSearch(total: number): ExposureSignal[] {
     {
       area: "blog-tab",
       rank: null,
-      competitionLabel:
-        total >= 10000 ? "high" : total >= 1000 ? "medium" : "low",
+      competitionLabel: total >= 10000 ? "high" : total >= 1000 ? "medium" : "low",
       source: "naver-search",
     },
   ];
@@ -218,7 +180,7 @@ function buildRelatedFromBlogItems(
 
   return Array.from(collected).map((keyword) => ({
     keyword,
-    relationType: "unknown",
+    relationType: "related-search",
     source: "naver-search",
   }));
 }
@@ -230,53 +192,56 @@ export async function getExternalSearchSignals(params: {
   subKeyword2: string;
 }): Promise<ExternalSearchSignals> {
   const { title, mainKeyword, subKeyword1, subKeyword2 } = params;
+
   if (!hasWorkingCredentials()) {
-    return unavailableSignals(
-      "네이버 검색 실데이터 연동 정보가 아직 설정되지 않아 외부 신호는 플레이스홀더 상태로 유지합니다."
+    throw new NaverSearchDependencyError(
+      "네이버 API 설정이 없어 실데이터 기반 키워드 분석을 진행할 수 없습니다."
     );
   }
 
-  const tokens = uniqueTokens(`${title} ${mainKeyword} ${subKeyword1} ${subKeyword2}`);
+  const tokens = uniqueTokens(`${title} ${mainKeyword} ${subKeyword1} ${subKeyword2}`).slice(0, 5);
 
-  try {
-    const [blogSearch, searchVolume] = await Promise.all([
-      fetchBlogSearch(mainKeyword),
-      fetchSearchTrend(tokens.slice(0, 5)),
-    ]);
-
-    return {
-      status: "available",
-      provider: "naver-openapi",
-      checkedAt: new Date().toISOString(),
-      searchVolume:
-        searchVolume.length > 0 ? searchVolume : buildPlaceholderVolumes(tokens),
-      relatedKeywords:
-        blogSearch.items.length > 0
-          ? buildRelatedFromBlogItems(title, blogSearch.items)
-          : buildPlaceholderRelatedKeywords(tokens),
-      exposures: buildExposureFromBlogSearch(blogSearch.total),
-      notes: [
-        "블로그 검색 API와 데이터랩 검색어 트렌드 API 기준으로 수집한 실제 신호입니다.",
-        "자동완성, 스마트블록, 인기글, 통합검색 노출 영역 파서는 아직 연결되지 않았습니다.",
-      ],
-    };
-  } catch (error) {
-    const message =
-      error instanceof Error
-        ? error.message
-        : "네이버 외부 신호 수집 중 알 수 없는 오류가 발생했습니다.";
-
-    return {
-      status: "unavailable",
-      provider: "naver-openapi",
-      checkedAt: new Date().toISOString(),
-      searchVolume: buildPlaceholderVolumes(tokens),
-      relatedKeywords: buildPlaceholderRelatedKeywords(tokens),
-      exposures: buildPlaceholderExposure(),
-      notes: [
-        "네이버 외부 신호 호출을 시도했지만 실제 응답을 확보하지 못했습니다.",
-        message,
-      ],
-    };
+  if (tokens.length === 0) {
+    throw new NaverSearchDependencyError(
+      "네이버 실데이터 조회에 사용할 키워드 토큰을 만들지 못했습니다."
+    );
   }
+
+  const [blogSearch, searchVolume] = await Promise.all([
+    fetchBlogSearch(mainKeyword),
+    fetchSearchTrend(tokens),
+  ]);
+  const relatedKeywords = buildRelatedFromBlogItems(title, blogSearch.items);
+  const exposures = buildExposureFromBlogSearch(blogSearch.total);
+
+  if (searchVolume.length === 0) {
+    throw new NaverSearchDependencyError(
+      "네이버 검색량/트렌드 데이터를 확보하지 못해 키워드 분석을 진행할 수 없습니다."
+    );
+  }
+
+  if (relatedKeywords.length === 0) {
+    throw new NaverSearchDependencyError(
+      "네이버 연관 검색 신호를 확보하지 못해 키워드 분석을 진행할 수 없습니다."
+    );
+  }
+
+  if (exposures.length === 0) {
+    throw new NaverSearchDependencyError(
+      "네이버 노출 경쟁 신호를 확보하지 못해 키워드 분석을 진행할 수 없습니다."
+    );
+  }
+
+  return {
+    status: "available",
+    provider: "naver-openapi",
+    checkedAt: new Date().toISOString(),
+    searchVolume,
+    relatedKeywords,
+    exposures,
+    notes: [
+      "네이버 블로그 검색 API와 데이터랩 검색어 트렌드 API 기준으로 수집한 실데이터입니다.",
+      "검색량, 연관 검색 신호, 노출 경쟁 신호를 모두 확보한 뒤에만 결과를 반환합니다.",
+    ],
+  };
 }

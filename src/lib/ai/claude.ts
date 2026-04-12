@@ -21,22 +21,20 @@ export async function generateKeywords(
   const text =
     message.content[0].type === "text" ? message.content[0].text : "";
 
-  // Strip markdown code fences if present
-  const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/) ;
+  const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
   const jsonText = jsonMatch ? jsonMatch[1].trim() : text.trim();
 
   const parsed = JSON.parse(jsonText);
-  // Claude returns { results: [...] } format per titlePrompt spec
   const rawResults = Array.isArray(parsed) ? parsed : parsed.results;
   if (!Array.isArray(rawResults)) {
-    throw new Error("키워드 생성 응답 형식이 올바르지 않습니다.");
+    throw new Error("Keyword generation returned an unexpected response shape.");
   }
-  // Map snake_case JSON keys to camelCase TypeScript fields
-  return rawResults.map((r: Record<string, string>) => ({
-    title: r.title,
-    mainKeyword: r.mainKeyword || r.main_keyword || "",
-    subKeyword1: r.subKeyword1 || r.sub_keyword_1 || "",
-    subKeyword2: r.subKeyword2 || r.sub_keyword_2 || "",
+
+  return rawResults.map((result: Record<string, string>) => ({
+    title: result.title,
+    mainKeyword: result.mainKeyword || result.main_keyword || "",
+    subKeyword1: result.subKeyword1 || result.sub_keyword_1 || "",
+    subKeyword2: result.subKeyword2 || result.sub_keyword_2 || "",
   }));
 }
 

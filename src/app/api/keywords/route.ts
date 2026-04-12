@@ -1,15 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateKeywords } from "@/lib/ai/claude";
-import { buildTitleGenerationPrompt } from "@/lib/prompts/titlePrompt";
-import { fetchBlogTitles } from "@/lib/naver/rssParser";
-import { getExternalSearchSignals } from "@/lib/naver/searchSignals";
-import { validateKeywordOption } from "@/lib/validation/keywordRules";
-import { analyzeMorphology } from "@/lib/validation/morphologyAnalyzer";
-import { analyzeLanguageRisk } from "@/lib/validation/contentSignalAnalyzer";
-import { analyzeTitleBodyAlignment } from "@/lib/validation/titleBodyAlignment";
-import { analyzeNetworkDuplicateRisk } from "@/lib/validation/networkDuplicateAnalyzer";
 import { CATEGORIES } from "@/lib/constants";
 import { getShopById } from "@/lib/data/shops";
+import { fetchBlogTitles } from "@/lib/naver/rssParser";
+import {
+  getExternalSearchSignals,
+  NaverSearchDependencyError,
+} from "@/lib/naver/searchSignals";
+import { buildTitleGenerationPrompt } from "@/lib/prompts/titlePrompt";
+import { analyzeLanguageRisk } from "@/lib/validation/contentSignalAnalyzer";
+import { analyzeMorphology } from "@/lib/validation/morphologyAnalyzer";
+import { analyzeNetworkDuplicateRisk } from "@/lib/validation/networkDuplicateAnalyzer";
+import { validateKeywordOption } from "@/lib/validation/keywordRules";
+import { analyzeTitleBodyAlignment } from "@/lib/validation/titleBodyAlignment";
 import type { KeywordOption, KeywordOptionAnalysis } from "@/types";
 
 export const maxDuration = 120;
@@ -17,10 +20,10 @@ export const maxDuration = 120;
 function inferSearchIntentAxis(option: KeywordOption): string {
   const source = `${option.title} ${option.mainKeyword} ${option.subKeyword1} ${option.subKeyword2}`;
 
-  if (/가격|비용|가성비|혜택|할인/.test(source)) return "price";
-  if (/후기|리뷰|경험|추천/.test(source)) return "review";
-  if (/방법|정리|가이드|팁|비교/.test(source)) return "guide";
-  if (/위치|주차|영업|예약|방문/.test(source)) return "visit";
+  if (/가격|비용|얼마|후기/.test(source)) return "price";
+  if (/리뷰|추천|비교|후기/.test(source)) return "review";
+  if (/방법|가이드|정리|체크리스트/.test(source)) return "guide";
+  if (/위치|방문|예약|주차|운영/.test(source)) return "visit";
   return "info";
 }
 
@@ -78,8 +81,8 @@ async function buildKeywordAnalysis(params: {
         duplicateRisk.titlePatternOverlap.length === 0,
       reason:
         structure.missingTitleKeywordCoverage.length === 0
-          ? "제목과 키워드 요소를 본문에 자연스럽게 활성화할 기본 구성이 확보되어 있습니다."
-          : "제목 요소 일부가 본문으로 확장되기 어려운 조합입니다.",
+          ? "제목과 키워드가 본문 확장에 필요한 기본 구조를 충족합니다."
+          : "제목 키워드가 본문 구조에서 충분히 확인되지 않아 확장성이 낮습니다.",
     },
     issues,
   };
@@ -95,11 +98,11 @@ function getKeywordPriorityScore(params: {
   if (validation.isValid) score += 100;
   score -= validation.failures.length * 15;
   score -= analysis.issues.length * 8;
-  score -= analysis.duplicateRisk?.titlePatternOverlap.length ?? 0 * 10;
-  score -= analysis.duplicateRisk?.keywordCombinationOverlap.length ?? 0 * 8;
-  score -= analysis.languageRisk?.commercial.length ?? 0 * 5;
-  score -= analysis.languageRisk?.emphasis.length ?? 0 * 5;
-  score -= analysis.structure?.missingTitleKeywordCoverage.length ?? 0 * 8;
+  score -= (analysis.duplicateRisk?.titlePatternOverlap.length ?? 0) * 10;
+  score -= (analysis.duplicateRisk?.keywordCombinationOverlap.length ?? 0) * 8;
+  score -= (analysis.languageRisk?.commercial.length ?? 0) * 5;
+  score -= (analysis.languageRisk?.emphasis.length ?? 0) * 5;
+  score -= (analysis.structure?.missingTitleKeywordCoverage.length ?? 0) * 8;
 
   if (analysis.bodyExpansionFit?.isLikelyExpandable) score += 12;
   if (analysis.searchIntentAxis === "guide" || analysis.searchIntentAxis === "info") {
@@ -120,22 +123,21 @@ export async function POST(request: NextRequest) {
 
     if (!shopId || !categoryId) {
       return NextResponse.json(
-        { success: false, error: "shopId, categoryId는 필수입니다." },
+        { success: false, error: "shopId와 categoryId가 필요합니다." },
         { status: 400 }
       );
     }
 
     const shop = await getShopById(shopId);
-    const category = CATEGORIES.find((c) => c.id === categoryId);
+    const category = CATEGORIES.find((item) => item.id === categoryId);
 
     if (!shop || !category) {
       return NextResponse.json(
-        { success: false, error: "잘못된 shopId 또는 categoryId입니다." },
+        { success: false, error: "유효한 상점 또는 카테고리를 찾지 못했습니다." },
         { status: 400 }
       );
     }
 
-    // RSS에서 기존 글 제목 수집 (중복 방지)
     let forbiddenList: string[] = [];
     let referenceList: string[] = [];
     try {
@@ -143,7 +145,7 @@ export async function POST(request: NextRequest) {
       forbiddenList = rssResult.forbiddenList;
       referenceList = rssResult.referenceList;
     } catch {
-      // RSS 실패 시 빈 목록으로 진행 (키워드 생성은 계속)
+      // RSS 이력은 보조 신호이므로 실패해도 키워드 분석은 계속 진행한다.
     }
 
     const prompt = buildTitleGenerationPrompt({
@@ -158,19 +160,14 @@ export async function POST(request: NextRequest) {
 
     if (!Array.isArray(options) || options.length === 0) {
       return NextResponse.json(
-        { success: false, error: "키워드 생성 결과가 비어 있습니다. 다시 시도해주세요." },
+        { success: false, error: "키워드 후보를 생성하지 못했습니다. 입력 조건을 다시 확인해주세요." },
         { status: 500 }
       );
     }
 
-    // 키워드 7대 규칙 검증 결과 첨부
     const analyzedResults = await Promise.all(
       options.map(async (option) => {
-        const validation = validateKeywordOption(
-          option,
-          forbiddenList,
-          referenceList
-        );
+        const validation = validateKeywordOption(option, forbiddenList, referenceList);
         const analysis = await buildKeywordAnalysis({
           option,
           forbiddenList,
@@ -198,12 +195,14 @@ export async function POST(request: NextRequest) {
       success: true,
       data: { results },
     });
-  } catch (err) {
+  } catch (error) {
     const message =
-      err instanceof Error ? err.message : "키워드 생성 중 오류가 발생했습니다.";
+      error instanceof Error ? error.message : "키워드 분석 중 알 수 없는 오류가 발생했습니다.";
+    const status = error instanceof NaverSearchDependencyError ? 503 : 500;
+
     return NextResponse.json(
       { success: false, error: message },
-      { status: 500 }
+      { status }
     );
   }
 }
