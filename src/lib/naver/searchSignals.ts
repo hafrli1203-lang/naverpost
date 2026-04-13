@@ -4,6 +4,7 @@ import type {
   RelatedKeywordSignal,
   SearchVolumeSignal,
 } from "@/types";
+import { generateRelatedKeywords } from "@/lib/nlp/nounExtractor";
 
 export class NaverSearchDependencyError extends Error {
   constructor(message: string) {
@@ -269,7 +270,7 @@ export async function getExternalSearchSignals(params: {
     )
   );
 
-  const [blogSearch, searchVolume, relatedKeywords] = await Promise.all([
+  const [blogSearch, searchVolume, autocompleteRelated] = await Promise.all([
     fetchBlogSearch(mainKeyword),
     fetchSearchTrend(tokens),
     buildRelatedFromAutocomplete(autocompleteSeeds),
@@ -282,10 +283,27 @@ export async function getExternalSearchSignals(params: {
     );
   }
 
+  let relatedKeywords: RelatedKeywordSignal[] = autocompleteRelated;
+  const notes: string[] = [
+    "네이버 블로그 검색 API와 데이터랩 검색어 트렌드 API로 수집한 실데이터입니다.",
+  ];
+
   if (relatedKeywords.length === 0) {
-    throw new NaverSearchDependencyError(
-      "네이버 연관 검색 신호를 확보하지 못해 키워드 분석을 진행할 수 없습니다."
-    );
+    try {
+      const fallback = await generateRelatedKeywords(autocompleteSeeds, title);
+      relatedKeywords = fallback.map((keyword) => ({
+        keyword,
+        relationType: "related-search",
+        source: "claude-haiku",
+      }));
+      notes.push(
+        "자동완성 신호를 확보하지 못해 Claude Haiku 추론 연관어로 보완했습니다."
+      );
+    } catch {
+      notes.push("자동완성과 Haiku 보완 모두 실패하여 연관 검색 신호가 비어 있습니다.");
+    }
+  } else {
+    notes.push("자동완성 엔드포인트로 연관 검색 신호를 수집했습니다.");
   }
 
   if (exposures.length === 0) {
@@ -301,9 +319,6 @@ export async function getExternalSearchSignals(params: {
     searchVolume,
     relatedKeywords,
     exposures,
-    notes: [
-      "네이버 블로그 검색 API, 데이터랩 검색어 트렌드 API, 자동완성 엔드포인트로 수집한 실데이터입니다.",
-      "검색량, 자동완성 기반 연관 검색 신호, 노출 경쟁 신호를 모두 확보한 뒤에만 결과를 반환합니다.",
-    ],
+    notes,
   };
 }

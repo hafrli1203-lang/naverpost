@@ -51,6 +51,33 @@ export async function extractContentNouns(text: string): Promise<ContentNoun[]> 
     .sort((a, b) => b.count - a.count);
 }
 
+export async function generateRelatedKeywords(
+  seeds: string[],
+  domainHint?: string
+): Promise<string[]> {
+  const cleanedSeeds = seeds.map((s) => s.trim()).filter(Boolean);
+  if (cleanedSeeds.length === 0) return [];
+
+  const domainLine = domainHint ? `\n도메인: ${domainHint}` : "";
+  const prompt = `다음 시드 키워드들과 함께 한국 사용자가 네이버에서 자주 함께 검색하는 연관 키워드를 추론한다.${domainLine}\n\n시드:\n${cleanedSeeds.map((s) => `- ${s}`).join("\n")}\n\n작업:\n- 시드 자체는 결과에 포함하지 않는다.\n- 실제 검색 의도(추천, 가격, 후기, 비교, 종류, 관리 등)와 결합된 형태를 우선한다.\n- 한국어, 2~4어절.\n- 최대 12개.\n- 결과를 JSON 으로만 반환한다.\n\n출력 형식:\n\`\`\`json\n{ "keywords": ["안경테 추천", "티타늄 안경테 가격"] }\n\`\`\``;
+
+  const message = await getClient().messages.create({
+    model: MODEL,
+    max_tokens: 1024,
+    messages: [{ role: "user", content: prompt }],
+  });
+
+  const out = message.content[0].type === "text" ? message.content[0].text : "";
+  const jsonMatch = out.match(/```(?:json)?\s*([\s\S]*?)```/);
+  const jsonText = jsonMatch ? jsonMatch[1].trim() : out.trim();
+  const parsed = JSON.parse(jsonText) as { keywords?: unknown };
+
+  if (!Array.isArray(parsed.keywords)) return [];
+  return parsed.keywords
+    .filter((k): k is string => typeof k === "string" && k.trim().length >= 2)
+    .map((k) => k.trim());
+}
+
 export async function extractCompetitorNouns(
   samples: CompetitorBlogSample[]
 ): Promise<CompetitorNounResult> {

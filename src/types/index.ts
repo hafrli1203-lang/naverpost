@@ -40,6 +40,7 @@ export type BlaiSignalSource =
   | "rss-history"
   | "perplexity"
   | "naver-search"
+  | "claude-haiku"
   | "manual-input";
 
 export interface AnalysisIssue {
