@@ -237,85 +237,82 @@ export default function Home() {
       setImageProgress({ current: 0, total: 10 });
 
       try {
-        const res = await fetch("/api/image/generate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sessionId: state.sessionId,
-            articleContent,
-            title,
-            mainKeyword,
-          }),
+        const params = JSON.stringify({
+          sessionId: state.sessionId,
+          articleContent,
+          title,
+          mainKeyword,
         });
+        const encoded = btoa(unescape(encodeURIComponent(params)));
+        const eventSource = new EventSource(
+          `/api/image/generate?params=${encodeURIComponent(encoded)}`
+        );
 
-        if (!res.ok || !res.body) {
-          throw new Error("이미지 생성 응답을 받지 못했습니다.");
-        }
+        eventSource.onmessage = (e) => {
+          try {
+            const event = JSON.parse(e.data);
 
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let sseBuffer = "";
-
-        const handleEvent = (line: string) => {
-          if (!line.startsWith("data: ")) return;
-          const event = JSON.parse(line.slice(6));
-          if (event.type === "progress") {
-            setImageProgress({ current: event.index ?? 0, total: event.total ?? 10 });
-          } else if (event.type === "image-ready") {
-            const mimeType = event.mimeType || "image/jpeg";
-            const imageUrl = event.base64Data
-              ? `data:${mimeType};base64,${event.base64Data}`
-              : (event.imageUrl ?? "");
-            const img: BlogImage = {
-              index: event.index,
-              imageId: event.imageId ?? "",
-              imageUrl,
-              prompt: event.prompt ?? "",
-              section: `섹션 ${event.index + 1}`,
-              status: "success",
-            };
-            setState((prev) => ({
-              ...prev,
-              images: [...prev.images.filter((i) => i.index !== event.index), img].sort((a, b) => a.index - b.index),
-            }));
-          } else if (event.type === "image-failed") {
-            const img: BlogImage = {
-              index: event.index,
-              imageId: "",
-              imageUrl: "",
-              prompt: "",
-              section: `섹션 ${event.index + 1}`,
-              status: "failed",
-            };
-            setState((prev) => ({
-              ...prev,
-              images: [...prev.images.filter((i) => i.index !== event.index), img].sort((a, b) => a.index - b.index),
-            }));
-          } else if (event.type === "complete") {
-            setIsGeneratingImages(false);
-            setImageProgress({ current: event.successCount ?? 0, total: event.total ?? 10 });
-            if (event.error) {
-              toast.error(`이미지 생성 실패: ${event.error}`);
-            } else {
-              toast.success(`이미지 생성 완료: ${event.successCount ?? 0}개 성공`);
+            if (event.type === "progress") {
+              setImageProgress({ current: event.index ?? 0, total: event.total ?? 10 });
+            } else if (event.type === "image-ready") {
+              const mimeType = event.mimeType || "image/jpeg";
+              const imageUrl = event.base64Data
+                ? `data:${mimeType};base64,${event.base64Data}`
+                : (event.imageUrl ?? "");
+              const img: BlogImage = {
+                index: event.index,
+                imageId: event.imageId ?? "",
+                imageUrl,
+                prompt: event.prompt ?? "",
+                section: `섹션 ${event.index + 1}`,
+                status: "success",
+              };
+              setState((prev) => ({
+                ...prev,
+                images: [...prev.images.filter((i) => i.index !== event.index), img].sort(
+                  (a, b) => a.index - b.index
+                ),
+              }));
+            } else if (event.type === "image-failed") {
+              const img: BlogImage = {
+                index: event.index,
+                imageId: "",
+                imageUrl: "",
+                prompt: "",
+                section: `섹션 ${event.index + 1}`,
+                status: "failed",
+              };
+              setState((prev) => ({
+                ...prev,
+                images: [...prev.images.filter((i) => i.index !== event.index), img].sort(
+                  (a, b) => a.index - b.index
+                ),
+              }));
+            } else if (event.type === "complete") {
+              eventSource.close();
+              setIsGeneratingImages(false);
+              setImageProgress({
+                current: event.successCount ?? 0,
+                total: event.total ?? 10,
+              });
+              if (event.error) {
+                toast.error(`이미지 생성 실패: ${event.error}`);
+              } else {
+                toast.success(
+                  `이미지 생성 완료: 성공 ${event.successCount ?? 0}개, 실패 ${event.failCount ?? 0}개`
+                );
+              }
             }
+          } catch {
+            // Ignore SSE parse errors
           }
         };
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          sseBuffer += decoder.decode(value, { stream: true });
-          const lines = sseBuffer.split("\n");
-          sseBuffer = lines.pop() ?? "";
-          for (const line of lines) {
-            try {
-              handleEvent(line);
-            } catch {
-              // ignore malformed SSE chunks
-            }
-          }
-        }
+        eventSource.onerror = () => {
+          eventSource.close();
+          setIsGeneratingImages(false);
+          toast.error("이미지 생성 중 연결 오류가 발생했습니다.");
+        };
       } catch (err) {
         setIsGeneratingImages(false);
         toast.error(err instanceof Error ? err.message : "이미지 생성 중 오류가 발생했습니다.");

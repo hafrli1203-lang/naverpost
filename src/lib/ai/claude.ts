@@ -8,6 +8,7 @@ function getClient(): Anthropic {
 }
 
 const MODEL = "claude-opus-4-6";
+const PROMPT_MODEL = "claude-sonnet-4-6";
 
 export async function generateKeywords(
   prompt: string
@@ -60,7 +61,7 @@ export async function reviseArticle(prompt: string): Promise<string> {
 
 export async function generateImagePrompts(prompt: string): Promise<string> {
   const message = await getClient().messages.create({
-    model: MODEL,
+    model: PROMPT_MODEL,
     max_tokens: 2048,
     messages: [{ role: "user", content: prompt }],
   });

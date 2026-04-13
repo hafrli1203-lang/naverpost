@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { generateImagePrompts } from "@/lib/ai/gemini";
+import { generateImagePrompts } from "@/lib/ai/claude";
 import { generateBlogImage } from "@/lib/ai/imageGen";
 import { saveImage, getGenerationParams, deleteGenerationParams } from "@/lib/storage/imageStore";
 import { buildImagePrompts } from "@/lib/prompts/imagePrompt";
