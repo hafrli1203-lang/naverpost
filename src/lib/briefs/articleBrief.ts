@@ -63,6 +63,12 @@ export function buildArticleBrief(params: {
   researchData: string;
   sameStoreHistory: string[];
   crossBlogTitles: string[];
+  competitorMorphology?: {
+    status: "available" | "unavailable";
+    sampleSize: number;
+    commonNouns: string[];
+    titleNouns: string[];
+  };
 }): ArticleBrief {
   const {
     keyword,
@@ -76,6 +82,7 @@ export function buildArticleBrief(params: {
     researchData,
     sameStoreHistory,
     crossBlogTitles,
+    competitorMorphology,
   } = params;
 
   return {
@@ -102,6 +109,9 @@ export function buildArticleBrief(params: {
       sameStoreHistory,
       crossBlogStoreAngles: crossBlogTitles.slice(0, 5),
     },
-    sources: ["perplexity", "rss-history", "local-content", "document-rule"],
+    competitorMorphology,
+    sources: competitorMorphology?.status === "available"
+      ? ["perplexity", "rss-history", "local-content", "document-rule", "naver-search"]
+      : ["perplexity", "rss-history", "local-content", "document-rule"],
   };
 }

@@ -7,6 +7,7 @@ import { buildRevisionPrompt } from "@/lib/prompts/revisionPrompt";
 import { validateContent } from "@/lib/validation/contentValidator";
 import { fetchBlogTitles } from "@/lib/naver/rssParser";
 import { buildArticleBrief } from "@/lib/briefs/articleBrief";
+import { analyzeCompetitorMorphology } from "@/lib/analysis/competitorMorphology";
 import { CATEGORIES } from "@/lib/constants";
 import { getShopById } from "@/lib/data/shops";
 import type { KeywordOption, ArticleContent } from "@/types";
@@ -76,6 +77,26 @@ export async function POST(request: NextRequest) {
       // RSS failure should not block article generation.
     }
 
+    let competitorMorphology:
+      | {
+          status: "available" | "unavailable";
+          sampleSize: number;
+          commonNouns: string[];
+          titleNouns: string[];
+        }
+      | undefined;
+    try {
+      const result = await analyzeCompetitorMorphology(keyword.mainKeyword);
+      competitorMorphology = {
+        status: result.status,
+        sampleSize: result.sampleSize,
+        commonNouns: result.commonNouns.map((entry) => entry.noun),
+        titleNouns: result.titleNouns.map((entry) => entry.noun),
+      };
+    } catch {
+      // Competitor morphology analysis failure should not block article generation.
+    }
+
     const brief = buildArticleBrief({
       keyword,
       shop,
@@ -88,6 +109,7 @@ export async function POST(request: NextRequest) {
       researchData,
       sameStoreHistory,
       crossBlogTitles,
+      competitorMorphology,
     });
 
     // Build article prompt and generate via Claude

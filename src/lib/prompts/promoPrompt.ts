@@ -221,6 +221,16 @@ ${externalReference}
 `
     : "";
 
+  const competitorBlock =
+    brief?.competitorMorphology?.status === "available" &&
+    (brief.competitorMorphology.commonNouns.length > 0 ||
+      brief.competitorMorphology.titleNouns.length > 0)
+      ? `- 상위 노출 블로그 공통 명사 (${brief.competitorMorphology.sampleSize}건): ${brief.competitorMorphology.commonNouns.slice(0, 15).join(", ")}
+- 상위 노출 블로그 제목 명사: ${brief.competitorMorphology.titleNouns.slice(0, 10).join(", ")}
+- 위 명사 중 주제에 맞는 항목만 골라 본문에 자연스럽게 녹이되 문장을 그대로 베끼지 않는다.
+`
+      : "";
+
   const internalBriefSection = brief
     ? `
 [내부 작성 브리프]
@@ -230,7 +240,7 @@ ${brief.titleMorphologyGuide.map((item) => `  - ${item}`).join("\n")}
 ${brief.duplicateAvoidanceRules.map((item) => `  - ${item}`).join("\n")}
 - 조사 자료 요약:
 ${brief.researchSummary}
-`
+${competitorBlock}`
     : "";
 
   // 신뢰 요소 목록 (콘텐츠 유형에 따라 최소 포함 수 다름)

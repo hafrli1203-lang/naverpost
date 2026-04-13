@@ -196,6 +196,12 @@ export interface ArticleBrief {
     sameStoreHistory: string[];
     crossBlogStoreAngles: string[];
   };
+  competitorMorphology?: {
+    status: "available" | "unavailable";
+    sampleSize: number;
+    commonNouns: string[];
+    titleNouns: string[];
+  };
   sources: BlaiSignalSource[];
 }
 

@@ -107,12 +107,23 @@ export function buildArticlePrompt(params: {
     ? `\n[외부 참고 자료]\n${externalReference}\n※ 위 자료의 내용을 참고하되 그대로 복사하지 말고 안경원 관점에서 재해석하여 활용하세요.\n`
     : "";
 
+  const competitorSection =
+    brief?.competitorMorphology?.status === "available" &&
+    (brief.competitorMorphology.commonNouns.length > 0 ||
+      brief.competitorMorphology.titleNouns.length > 0)
+      ? `\n- 상위 노출 블로그 공통 명사 (${brief.competitorMorphology.sampleSize}건 분석): ${brief.competitorMorphology.commonNouns
+          .slice(0, 15)
+          .join(", ")}\n- 상위 노출 블로그 제목 명사: ${brief.competitorMorphology.titleNouns
+          .slice(0, 10)
+          .join(", ")}\n- 위 명사 중 주제와 자연스럽게 맞는 항목을 본문 설명에 녹여 경쟁 글과 주제 정합성을 맞추되, 문장을 그대로 베끼지 않는다.`
+      : "";
+
   const internalBriefSection = brief
     ? `\n[내부 작성 브리프]\n- 이번 글의 검색의도 축: ${brief.title}\n- 제목 활성화 규칙:\n${brief.titleMorphologyGuide
         .map((item) => `  - ${item}`)
         .join("\n")}\n- 중복 회피 규칙:\n${brief.duplicateAvoidanceRules
         .map((item) => `  - ${item}`)
-        .join("\n")}\n- 조사 자료 요약:\n${brief.researchSummary}\n`
+        .join("\n")}\n- 조사 자료 요약:\n${brief.researchSummary}${competitorSection}\n`
     : "";
 
   return `[역할 설정]

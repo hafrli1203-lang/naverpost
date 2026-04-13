@@ -5,6 +5,35 @@
 
 ---
 
+## v1.3 (2026-04-13)
+
+### ETRI 형태소 분석 + 경쟁 상위 블로그 공통 명사 주입
+
+**새 기능:**
+- `lib/nlp/etri.ts`: ETRI 공공 형태소 분석 API 클라이언트 (`ETRI_API_KEY` 필요)
+- `lib/analysis/competitorMorphology.ts`: 메인 키워드로 네이버 블로그 검색 상위 10건 수집 후 제목+요약을 ETRI로 분석, 2건 이상 블로그에 공통 출현한 명사를 빈도순 집계
+- 결과를 `ArticleBrief.competitorMorphology`에 실어 `articlePrompt` / `promoPrompt`의 내부 브리프 블록에 주입
+
+**이유:**
+- 상위 노출 블로그의 주제 정합 명사를 본문에 반영해야 검색 엔진 유사도·적합도 신호에서 동등 이상 전개 가능
+- 표면 토큰 기반 분석으로는 "티타늄" / "안경테" 같은 복합명사 분리가 부정확
+
+**동작:**
+- `ETRI_API_KEY` 미설정 시 해당 블록 자동 생략 (다른 파이프라인은 정상 동작)
+- 네이버 블로그 검색 실패 / ETRI 실패 시 본문 생성은 계속 진행
+- 프롬프트에 주입된 공통 명사는 "문장 그대로 복제 금지" 규칙과 함께 전달
+
+**변경 파일:**
+- `src/lib/nlp/etri.ts` (신규)
+- `src/lib/analysis/competitorMorphology.ts` (신규)
+- `src/types/index.ts`
+- `src/lib/briefs/articleBrief.ts`
+- `src/lib/prompts/articlePrompt.ts`
+- `src/lib/prompts/promoPrompt.ts`
+- `src/app/api/article/route.ts`
+
+---
+
 ## v1.2 (2026-04-13)
 
 ### 네이버 자동완성 기반 연관 키워드 실연결
