@@ -253,7 +253,7 @@ export default function Home() {
         let completed = 0;
         let successCount = 0;
         let failCount = 0;
-        const concurrency = 2;
+        const concurrency = 1;
         let cursor = 0;
 
         const worker = async () => {
