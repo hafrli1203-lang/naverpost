@@ -5,6 +5,23 @@
 
 ---
 
+## v1.4 (2026-04-13)
+
+### ETRI 종료 대응: Claude Haiku로 경쟁 명사 추출 전환
+
+**변경사항:**
+- ETRI 공공 API 서비스 종료로 `lib/nlp/etri.ts` 제거
+- `lib/nlp/nounExtractor.ts` 신규: `claude-haiku-4-5-20251001` 단일 호출로 상위 블로그 제목+요약의 제목/본문 명사 및 빈도/blogCount 추출
+- `competitorMorphology.ts`가 새 추출기를 사용하도록 교체. 호출 실패/API 키 없음 시 기존과 동일하게 자동 unavailable 처리
+- Vercel 서버리스에서 그대로 동작 (외부 의존 0, 기존 Anthropic SDK 재사용)
+
+**이유:**
+- ETRI 접속 불가 및 공식 종료
+- Node 용 한국어 형태소 라이브러리 대안은 번들 크기 / Windows 네이티브 빌드 이슈로 Vercel 배포 난항
+- 이미 쓰는 Claude 인프라 활용이 가장 안정적이고 도메인 복합명사 정확도도 충분
+
+---
+
 ## v1.3 (2026-04-13)
 
 ### ETRI 형태소 분석 + 경쟁 상위 블로그 공통 명사 주입

@@ -1,4 +1,4 @@
-import { analyzeMorphemes, extractNouns, isEtriConfigured } from "@/lib/nlp/etri";
+import { extractCompetitorNouns } from "@/lib/nlp/nounExtractor";
 
 export interface CompetitorMorphologyResult {
   status: "available" | "unavailable";
@@ -51,10 +51,11 @@ async function fetchTopBlogs(keyword: string): Promise<BlogItem[]> {
 export async function analyzeCompetitorMorphology(
   keyword: string
 ): Promise<CompetitorMorphologyResult> {
-  if (!isEtriConfigured()) {
+  const apiKey = (process.env.ANTHROPIC_API_KEY ?? "").trim();
+  if (!apiKey) {
     return {
       status: "unavailable",
-      reason: "ETRI API 키가 설정되지 않았습니다.",
+      reason: "ANTHROPIC_API_KEY 미설정",
       sampleSize: 0,
       commonNouns: [],
       titleNouns: [],
@@ -84,70 +85,34 @@ export async function analyzeCompetitorMorphology(
     };
   }
 
-  const titleNounCounts = new Map<string, number>();
-  const bodyNounCounts = new Map<string, number>();
-  const bodyBlogPresence = new Map<string, Set<number>>();
+  try {
+    const { titleNouns, commonNouns } = await extractCompetitorNouns(
+      blogs.map((blog) => ({ title: blog.title, description: blog.description }))
+    );
 
-  const results = await Promise.allSettled(
-    blogs.map(async (blog, index) => {
-      const [titleMorphs, bodyMorphs] = await Promise.all([
-        analyzeMorphemes(blog.title),
-        analyzeMorphemes(blog.description),
-      ]);
+    if (titleNouns.length === 0 && commonNouns.length === 0) {
       return {
-        index,
-        titleNouns: extractNouns(titleMorphs),
-        bodyNouns: extractNouns(bodyMorphs),
+        status: "unavailable",
+        reason: "명사 추출 결과가 비어 있습니다.",
+        sampleSize: blogs.length,
+        commonNouns: [],
+        titleNouns: [],
       };
-    })
-  );
-
-  let successCount = 0;
-  for (const outcome of results) {
-    if (outcome.status !== "fulfilled") continue;
-    successCount += 1;
-    const { index, titleNouns, bodyNouns } = outcome.value;
-
-    for (const noun of titleNouns) {
-      titleNounCounts.set(noun, (titleNounCounts.get(noun) ?? 0) + 1);
     }
-    for (const noun of bodyNouns) {
-      bodyNounCounts.set(noun, (bodyNounCounts.get(noun) ?? 0) + 1);
-      const presence = bodyBlogPresence.get(noun) ?? new Set<number>();
-      presence.add(index);
-      bodyBlogPresence.set(noun, presence);
-    }
-  }
 
-  if (successCount === 0) {
+    return {
+      status: "available",
+      sampleSize: blogs.length,
+      commonNouns: commonNouns.slice(0, 20),
+      titleNouns: titleNouns.slice(0, 15),
+    };
+  } catch {
     return {
       status: "unavailable",
-      reason: "ETRI 분석 결과가 비어 있습니다.",
-      sampleSize: 0,
+      reason: "Claude 명사 추출 호출 실패",
+      sampleSize: blogs.length,
       commonNouns: [],
       titleNouns: [],
     };
   }
-
-  const commonNouns = Array.from(bodyNounCounts.entries())
-    .map(([noun, occurrences]) => ({
-      noun,
-      occurrences,
-      blogCount: bodyBlogPresence.get(noun)?.size ?? 0,
-    }))
-    .filter((entry) => entry.blogCount >= 2)
-    .sort((a, b) => b.blogCount - a.blogCount || b.occurrences - a.occurrences)
-    .slice(0, 20);
-
-  const titleNouns = Array.from(titleNounCounts.entries())
-    .map(([noun, occurrences]) => ({ noun, occurrences }))
-    .sort((a, b) => b.occurrences - a.occurrences)
-    .slice(0, 15);
-
-  return {
-    status: "available",
-    sampleSize: successCount,
-    commonNouns,
-    titleNouns,
-  };
 }
