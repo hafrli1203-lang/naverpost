@@ -159,7 +159,7 @@ export async function POST(request: NextRequest) {
       forbiddenList: sameStoreHistory,
       referenceList: crossBlogTitles,
     };
-    let validation = validateContent(content, keywordsForValidation);
+    let validation = await validateContent(content, keywordsForValidation);
 
     // 검증 실패 시 자동 수정 (최대 2회)
     let revisionCount = 0;
@@ -175,7 +175,7 @@ export async function POST(request: NextRequest) {
       content = await reviseArticle(revisionPrompt);
       // 수정본에서도 볼드(**) 제거
       content = content.replace(/\*\*([^*]+)\*\*/g, "$1");
-      validation = validateContent(content, keywordsForValidation);
+      validation = await validateContent(content, keywordsForValidation);
       revisionCount++;
     }
 

@@ -1,7 +1,7 @@
 import type { ValidationResult } from "@/types";
 import { PROHIBITED_WORDS, CAUTION_PHRASES } from "./prohibitedWords";
 import { findOverusedWords } from "./repetitionCheck";
-import { analyzeMorphology } from "./morphologyAnalyzer";
+import { analyzeMorphologyAsync } from "./morphologyAnalyzer";
 import { analyzeLanguageRisk } from "./contentSignalAnalyzer";
 import { analyzeTitleBodyAlignment } from "./titleBodyAlignment";
 import { analyzeNetworkDuplicateRisk } from "./networkDuplicateAnalyzer";
@@ -47,7 +47,7 @@ function isProhibitedWordPresent(content: string, word: string): boolean {
  * - Markdown table presence
  * - Keyword original form inclusion
  */
-export function validateContent(
+export async function validateContent(
   content: string,
   keywords?: {
     title?: string;
@@ -57,7 +57,7 @@ export function validateContent(
     forbiddenList?: string[];
     referenceList?: string[];
   }
-): ValidationResult {
+): Promise<ValidationResult> {
   const foundProhibited = PROHIBITED_WORDS.filter((word) =>
     isProhibitedWordPresent(content, word)
   );
@@ -89,7 +89,7 @@ export function validateContent(
     ? [keywords.mainKeyword, keywords.subKeyword1, keywords.subKeyword2].filter(Boolean)
     : [];
   const title = keywords?.title ?? keywords?.mainKeyword ?? "";
-  const morphology = analyzeMorphology({
+  const morphology = await analyzeMorphologyAsync({
     title,
     content,
     keywords: keywordCandidates,

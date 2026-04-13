@@ -13,7 +13,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const validation = validateContent(content);
+    const validation = await validateContent(content);
 
     return NextResponse.json({ success: true, data: validation });
   } catch (err) {

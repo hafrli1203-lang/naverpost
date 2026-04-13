@@ -3,6 +3,7 @@ import type {
   MorphologyAnalysis,
   MorphemeStat,
 } from "@/types";
+import { extractContentNouns } from "@/lib/nlp/nounExtractor";
 
 const TOKEN_REGEX = /[가-힣A-Za-z0-9]{2,}/g;
 const STOPWORDS = new Set([
@@ -74,6 +75,16 @@ function buildAvailabilityIssue(): AnalysisIssue {
   };
 }
 
+function buildHaikuFallbackIssue(reason: string): AnalysisIssue {
+  return {
+    code: "morphology-haiku-fallback",
+    label: "형태소 분석 폴백",
+    reason: `Haiku 명사 추출 실패로 표면 토큰 분석으로 대체했습니다: ${reason}`,
+    severity: "low",
+    source: "local-content",
+  };
+}
+
 export function analyzeMorphology(params: {
   title: string;
   content: string;
@@ -140,6 +151,106 @@ export function analyzeMorphology(params: {
 
   return {
     titleMorphemes: titleTokenSet,
+    repeatedBodyMorphemes,
+    uniqueBodyMorphemeCount,
+    titleMorphemesActivatedInBody,
+    missingTitleMorphemesInBody,
+    topicAlignmentNotes,
+    issues,
+  };
+}
+
+export async function analyzeMorphologyAsync(params: {
+  title: string;
+  content: string;
+  keywords?: string[];
+}): Promise<MorphologyAnalysis> {
+  let titleNouns: string[];
+  let bodyNounEntries: Array<{ noun: string; count: number }>;
+  let keywordNouns: string[];
+
+  try {
+    const [titleResult, bodyResult, keywordResult] = await Promise.all([
+      extractContentNouns(params.title),
+      extractContentNouns(params.content),
+      params.keywords && params.keywords.length > 0
+        ? extractContentNouns(params.keywords.join(" "))
+        : Promise.resolve([]),
+    ]);
+    titleNouns = titleResult.map((entry) => entry.noun);
+    bodyNounEntries = bodyResult;
+    keywordNouns = keywordResult.map((entry) => entry.noun);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "알 수 없는 오류";
+    const fallback = analyzeMorphology(params);
+    return {
+      ...fallback,
+      issues: [...fallback.issues, buildHaikuFallbackIssue(reason)],
+    };
+  }
+
+  const bodyNounSet = new Set(bodyNounEntries.map((entry) => entry.noun));
+  const titleNounSet = Array.from(new Set(titleNouns));
+  const titleMorphemesActivatedInBody = titleNounSet.filter((noun) =>
+    bodyNounSet.has(noun)
+  );
+  const missingTitleMorphemesInBody = titleNounSet.filter(
+    (noun) => !bodyNounSet.has(noun)
+  );
+  const uniqueBodyMorphemeCount = bodyNounSet.size;
+  const repeatedBodyMorphemes: MorphemeStat[] = bodyNounEntries
+    .filter((entry) => entry.count >= 2)
+    .map((entry) => ({
+      token: entry.noun,
+      count: entry.count,
+      source: "body" as const,
+    }));
+
+  const topicAlignmentNotes: string[] = [];
+  const issues: AnalysisIssue[] = [];
+
+  if (keywordNouns.length > 0) {
+    const missingKeywordNouns = Array.from(new Set(keywordNouns)).filter(
+      (noun) => !bodyNounSet.has(noun)
+    );
+    if (missingKeywordNouns.length > 0) {
+      issues.push({
+        code: "keyword-token-missing-in-body",
+        label: "키워드 명사 미활성화",
+        reason: `본문에서 활성화되지 않은 목표 명사: ${missingKeywordNouns.join(", ")}`,
+        severity: "high",
+        source: "local-content",
+      });
+    } else {
+      topicAlignmentNotes.push(
+        "제목 및 목표 키워드의 명사가 본문에서 모두 확인됩니다."
+      );
+    }
+  }
+
+  if (uniqueBodyMorphemeCount < 30) {
+    issues.push({
+      code: "low-body-token-variety",
+      label: "본문 정보 다양성 부족",
+      reason:
+        "본문의 명사 종류 수가 낮아 정보량 부족 가능성이 있습니다.",
+      severity: "medium",
+      source: "local-content",
+    });
+  }
+
+  if (repeatedBodyMorphemes.length > 0 && repeatedBodyMorphemes[0].count >= 8) {
+    issues.push({
+      code: "high-token-repetition",
+      label: "본문 반복 명사 과다",
+      reason: `반복 수가 높은 명사가 있습니다: ${repeatedBodyMorphemes[0].token}(${repeatedBodyMorphemes[0].count})`,
+      severity: "medium",
+      source: "local-content",
+    });
+  }
+
+  return {
+    titleMorphemes: titleNounSet,
     repeatedBodyMorphemes,
     uniqueBodyMorphemeCount,
     titleMorphemesActivatedInBody,

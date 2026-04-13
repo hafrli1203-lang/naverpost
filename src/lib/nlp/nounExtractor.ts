@@ -18,6 +18,39 @@ export interface CompetitorBlogSample {
   description: string;
 }
 
+export interface ContentNoun {
+  noun: string;
+  count: number;
+}
+
+export async function extractContentNouns(text: string): Promise<ContentNoun[]> {
+  const trimmed = text.trim();
+  if (!trimmed) return [];
+
+  const prompt = `다음 한국어 텍스트에서 일반명사/고유명사만 추출한다. 조사, 어미, 동사, 형용사는 제외한다. 복합명사는 의미 단위로 분리하되 업계 통용 복합명사(예: 티타늄안경테, 누진다초점)는 유지한다.\n\n텍스트:\n${trimmed}\n\n작업:\n- 명사별 출현 횟수를 센다.\n- 1글자 명사는 제외한다.\n- 결과를 JSON 으로만 반환한다. 설명 없이 JSON 한 덩어리만 출력한다.\n\n출력 형식:\n\`\`\`json\n{ "nouns": [{"noun": "안경테", "count": 5}] }\n\`\`\``;
+
+  const message = await getClient().messages.create({
+    model: MODEL,
+    max_tokens: 4096,
+    messages: [{ role: "user", content: prompt }],
+  });
+
+  const out = message.content[0].type === "text" ? message.content[0].text : "";
+  const jsonMatch = out.match(/```(?:json)?\s*([\s\S]*?)```/);
+  const jsonText = jsonMatch ? jsonMatch[1].trim() : out.trim();
+  const parsed = JSON.parse(jsonText) as { nouns?: unknown };
+
+  if (!Array.isArray(parsed.nouns)) return [];
+  return parsed.nouns
+    .filter(
+      (entry): entry is ContentNoun =>
+        typeof (entry as ContentNoun)?.noun === "string" &&
+        (entry as ContentNoun).noun.length >= 2 &&
+        typeof (entry as ContentNoun)?.count === "number"
+    )
+    .sort((a, b) => b.count - a.count);
+}
+
 export async function extractCompetitorNouns(
   samples: CompetitorBlogSample[]
 ): Promise<CompetitorNounResult> {
