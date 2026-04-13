@@ -261,17 +261,35 @@ export default function Home() {
             const i = cursor++;
             if (i >= total) return;
             try {
-              const res = await fetch("/api/image/one", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  sessionId: state.sessionId,
-                  index: i,
-                  prompt: prompts[i],
-                }),
-              });
-              const json = await safeJson(res);
-              if (!res.ok || !json.success) throw new Error(json.error ?? "이미지 생성 실패");
+              const maxAttempts = 3;
+              let lastErr: unknown = null;
+              let json: { success?: boolean; error?: string; data?: unknown } = {};
+              let res: Response | null = null;
+              for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+                try {
+                  res = await fetch("/api/image/one", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      sessionId: state.sessionId,
+                      index: i,
+                      prompt: prompts[i],
+                    }),
+                  });
+                  json = await safeJson(res);
+                  if (res.ok && json.success) {
+                    lastErr = null;
+                    break;
+                  }
+                  lastErr = new Error(json.error ?? `HTTP ${res.status}`);
+                } catch (e) {
+                  lastErr = e;
+                }
+                if (attempt < maxAttempts) {
+                  await new Promise((r) => setTimeout(r, 1000 * attempt));
+                }
+              }
+              if (lastErr) throw lastErr;
               const data = json.data as {
                 imageId?: string;
                 imageUrl?: string;
