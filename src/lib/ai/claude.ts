@@ -62,7 +62,7 @@ export async function reviseArticle(prompt: string): Promise<string> {
 export async function generateImagePrompts(prompt: string): Promise<string> {
   const message = await getClient().messages.create({
     model: PROMPT_MODEL,
-    max_tokens: 2048,
+    max_tokens: 4096,
     messages: [{ role: "user", content: prompt }],
   });
 

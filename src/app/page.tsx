@@ -237,82 +237,94 @@ export default function Home() {
       setImageProgress({ current: 0, total: 10 });
 
       try {
-        const params = JSON.stringify({
-          sessionId: state.sessionId,
-          articleContent,
-          title,
-          mainKeyword,
+        const promptsRes = await fetch("/api/image/prompts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ articleContent, title, mainKeyword }),
         });
-        const encoded = btoa(unescape(encodeURIComponent(params)));
-        const eventSource = new EventSource(
-          `/api/image/generate?params=${encodeURIComponent(encoded)}`
-        );
+        const promptsJson = await safeJson(promptsRes);
+        if (!promptsRes.ok || !promptsJson.success) {
+          throw new Error(promptsJson.error ?? "프롬프트 생성 실패");
+        }
+        const prompts: string[] = (promptsJson.data as { prompts: string[] }).prompts;
+        const total = prompts.length;
+        setImageProgress({ current: 0, total });
 
-        eventSource.onmessage = (e) => {
-          try {
-            const event = JSON.parse(e.data);
+        let completed = 0;
+        let successCount = 0;
+        let failCount = 0;
+        const concurrency = 2;
+        let cursor = 0;
 
-            if (event.type === "progress") {
-              setImageProgress({ current: event.index ?? 0, total: event.total ?? 10 });
-            } else if (event.type === "image-ready") {
-              const mimeType = event.mimeType || "image/jpeg";
-              const imageUrl = event.base64Data
-                ? `data:${mimeType};base64,${event.base64Data}`
-                : (event.imageUrl ?? "");
+        const worker = async () => {
+          while (true) {
+            const i = cursor++;
+            if (i >= total) return;
+            try {
+              const res = await fetch("/api/image/one", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  sessionId: state.sessionId,
+                  index: i,
+                  prompt: prompts[i],
+                }),
+              });
+              const json = await safeJson(res);
+              if (!res.ok || !json.success) throw new Error(json.error ?? "이미지 생성 실패");
+              const data = json.data as {
+                imageId?: string;
+                imageUrl?: string;
+                base64Data?: string;
+                mimeType?: string;
+                prompt?: string;
+              };
+              const mimeType = data.mimeType || "image/jpeg";
+              const imageUrl = data.base64Data
+                ? `data:${mimeType};base64,${data.base64Data}`
+                : (data.imageUrl ?? "");
               const img: BlogImage = {
-                index: event.index,
-                imageId: event.imageId ?? "",
+                index: i,
+                imageId: data.imageId ?? "",
                 imageUrl,
-                prompt: event.prompt ?? "",
-                section: `섹션 ${event.index + 1}`,
+                prompt: data.prompt ?? prompts[i],
+                section: `섹션 ${i + 1}`,
                 status: "success",
               };
               setState((prev) => ({
                 ...prev,
-                images: [...prev.images.filter((i) => i.index !== event.index), img].sort(
+                images: [...prev.images.filter((x) => x.index !== i), img].sort(
                   (a, b) => a.index - b.index
                 ),
               }));
-            } else if (event.type === "image-failed") {
+              successCount++;
+            } catch {
               const img: BlogImage = {
-                index: event.index,
+                index: i,
                 imageId: "",
                 imageUrl: "",
-                prompt: "",
-                section: `섹션 ${event.index + 1}`,
+                prompt: prompts[i] ?? "",
+                section: `섹션 ${i + 1}`,
                 status: "failed",
               };
               setState((prev) => ({
                 ...prev,
-                images: [...prev.images.filter((i) => i.index !== event.index), img].sort(
+                images: [...prev.images.filter((x) => x.index !== i), img].sort(
                   (a, b) => a.index - b.index
                 ),
               }));
-            } else if (event.type === "complete") {
-              eventSource.close();
-              setIsGeneratingImages(false);
-              setImageProgress({
-                current: event.successCount ?? 0,
-                total: event.total ?? 10,
-              });
-              if (event.error) {
-                toast.error(`이미지 생성 실패: ${event.error}`);
-              } else {
-                toast.success(
-                  `이미지 생성 완료: 성공 ${event.successCount ?? 0}개, 실패 ${event.failCount ?? 0}개`
-                );
-              }
+              failCount++;
+            } finally {
+              completed++;
+              setImageProgress({ current: completed, total });
             }
-          } catch {
-            // Ignore SSE parse errors
           }
         };
 
-        eventSource.onerror = () => {
-          eventSource.close();
-          setIsGeneratingImages(false);
-          toast.error("이미지 생성 중 연결 오류가 발생했습니다.");
-        };
+        await Promise.all(Array.from({ length: concurrency }, () => worker()));
+
+        setIsGeneratingImages(false);
+        toast.success(`이미지 생성 완료: 성공 ${successCount}개, 실패 ${failCount}개`);
       } catch (err) {
         setIsGeneratingImages(false);
         toast.error(err instanceof Error ? err.message : "이미지 생성 중 오류가 발생했습니다.");
