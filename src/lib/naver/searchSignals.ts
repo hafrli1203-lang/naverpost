@@ -160,29 +160,83 @@ function buildExposureFromBlogSearch(total: number): ExposureSignal[] {
   ];
 }
 
-function buildRelatedFromBlogItems(
-  title: string,
-  items: Array<{ title: string; description: string }>
-): RelatedKeywordSignal[] {
-  const seedTokens = new Set(uniqueTokens(title.toLowerCase()));
-  const collected = new Set<string>();
+async function fetchAutocomplete(keyword: string): Promise<string[]> {
+  const url = new URL("https://ac.search.naver.com/nx/ac");
+  url.searchParams.set("q", keyword);
+  url.searchParams.set("con", "0");
+  url.searchParams.set("frm", "nv");
+  url.searchParams.set("ans", "2");
+  url.searchParams.set("r_format", "json");
+  url.searchParams.set("r_enc", "UTF-8");
+  url.searchParams.set("r_unicode", "0");
+  url.searchParams.set("t_koreng", "1");
+  url.searchParams.set("run", "2");
+  url.searchParams.set("rev", "4");
+  url.searchParams.set("q_enc", "UTF-8");
+  url.searchParams.set("st", "100");
 
-  for (const item of items) {
-    const tokens = uniqueTokens(`${item.title} ${item.description}`);
-    for (const token of tokens) {
-      if (!seedTokens.has(token.toLowerCase())) {
-        collected.add(token);
-      }
-      if (collected.size >= 10) break;
-    }
-    if (collected.size >= 10) break;
+  const response = await fetch(url, {
+    method: "GET",
+    headers: {
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36",
+      Referer: "https://search.naver.com/",
+    },
+  });
+
+  if (!response.ok) {
+    throw new NaverSearchDependencyError(
+      `네이버 자동완성 호출에 실패했습니다. (${response.status})`
+    );
   }
 
-  return Array.from(collected).map((keyword) => ({
-    keyword,
-    relationType: "related-search",
-    source: "naver-search",
-  }));
+  const json = (await response.json()) as {
+    items?: Array<Array<Array<string | number> | string>>;
+  };
+
+  const suggestions = new Set<string>();
+  const groups = json.items ?? [];
+  for (const group of groups) {
+    for (const entry of group) {
+      const word = Array.isArray(entry) ? entry[0] : entry;
+      if (typeof word === "string" && word.trim().length > 0) {
+        suggestions.add(word.trim());
+      }
+    }
+  }
+
+  return Array.from(suggestions);
+}
+
+async function buildRelatedFromAutocomplete(
+  seedKeywords: string[]
+): Promise<RelatedKeywordSignal[]> {
+  const seen = new Set<string>();
+  const collected: RelatedKeywordSignal[] = [];
+  const seedLower = new Set(seedKeywords.map((k) => k.toLowerCase().trim()).filter(Boolean));
+
+  for (const seed of seedKeywords) {
+    if (!seed.trim()) continue;
+    let suggestions: string[] = [];
+    try {
+      suggestions = await fetchAutocomplete(seed);
+    } catch {
+      continue;
+    }
+    for (const suggestion of suggestions) {
+      const key = suggestion.toLowerCase();
+      if (seen.has(key) || seedLower.has(key)) continue;
+      seen.add(key);
+      collected.push({
+        keyword: suggestion,
+        relationType: "autocomplete",
+        source: "naver-search",
+      });
+      if (collected.length >= 15) return collected;
+    }
+  }
+
+  return collected;
 }
 
 export async function getExternalSearchSignals(params: {
@@ -207,11 +261,19 @@ export async function getExternalSearchSignals(params: {
     );
   }
 
-  const [blogSearch, searchVolume] = await Promise.all([
+  const autocompleteSeeds = Array.from(
+    new Set(
+      [mainKeyword, subKeyword1, subKeyword2]
+        .map((value) => value.trim())
+        .filter((value) => value.length > 0)
+    )
+  );
+
+  const [blogSearch, searchVolume, relatedKeywords] = await Promise.all([
     fetchBlogSearch(mainKeyword),
     fetchSearchTrend(tokens),
+    buildRelatedFromAutocomplete(autocompleteSeeds),
   ]);
-  const relatedKeywords = buildRelatedFromBlogItems(title, blogSearch.items);
   const exposures = buildExposureFromBlogSearch(blogSearch.total);
 
   if (searchVolume.length === 0) {
@@ -240,8 +302,8 @@ export async function getExternalSearchSignals(params: {
     relatedKeywords,
     exposures,
     notes: [
-      "네이버 블로그 검색 API와 데이터랩 검색어 트렌드 API 기준으로 수집한 실데이터입니다.",
-      "검색량, 연관 검색 신호, 노출 경쟁 신호를 모두 확보한 뒤에만 결과를 반환합니다.",
+      "네이버 블로그 검색 API, 데이터랩 검색어 트렌드 API, 자동완성 엔드포인트로 수집한 실데이터입니다.",
+      "검색량, 자동완성 기반 연관 검색 신호, 노출 경쟁 신호를 모두 확보한 뒤에만 결과를 반환합니다.",
     ],
   };
 }

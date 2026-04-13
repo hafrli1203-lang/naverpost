@@ -5,6 +5,23 @@
 
 ---
 
+## v1.2 (2026-04-13)
+
+### 네이버 자동완성 기반 연관 키워드 실연결
+
+**변경사항:**
+- `lib/naver/searchSignals.ts`: `buildRelatedFromBlogItems`(블로그 검색 결과 토큰 재추출 방식) 제거
+- `ac.search.naver.com/nx/ac` 자동완성 엔드포인트 연동 (`fetchAutocomplete`)
+- 메인/서브 키워드 3종을 시드로 병렬 호출 후 중복 제거해 최대 15개 연관 신호 생성
+- `RelatedKeywordSignal.relationType`이 `autocomplete`로 정확히 표시됨
+- `externalSignals.notes`에 자동완성 수집 사실 반영
+
+**이유:**
+- 기존 연관 키워드는 블로그 검색 결과 제목/본문에서 뽑은 표면 토큰이라 추측성이었음
+- `blai-implementation-plan.md`의 "추측값 금지 / 실데이터만 허용" 원칙 준수
+
+---
+
 ## v1.1 (2026-03-14)
 
 ### 안경원 관리 + AI 자동 주제 추천
