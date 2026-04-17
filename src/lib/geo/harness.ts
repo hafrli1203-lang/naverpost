@@ -13,16 +13,16 @@ type Heading = {
   text: string;
 };
 
-const TODAY = "2026-04-17";
+const TODAY = "2026-04-18";
 
 const ABSOLUTE_PHRASE_REPLACEMENTS: Array<{ from: RegExp; to: string }> = [
-  { from: /100%\s*해결/g, to: "동일하게 해결하기 어렵습니다" },
-  { from: /완벽하게\s*대체/gi, to: "동일한 결과로 대체" },
-  { from: /부작용이\s*전혀\s*없/gi, to: "개인차가 있을 수 있" },
-  { from: /무조건/gi, to: "상황에 따라" },
-  { from: /반드시\s*좋/gi, to: "도움이 될 수 있" },
-  { from: /확실하게/gi, to: "상대적으로" },
-  { from: /즉시\s*효과/gi, to: "비교적 빠른 변화를 체감" },
+  { from: /100%\s*해결/gi, to: "도움이 될 수 있는 방향으로" },
+  { from: /무조건\s*좋(?:다|아요|습니다)/gi, to: "상황에 따라 도움이 될 수 있습니다" },
+  { from: /반드시\s*필요/gi, to: "필요할 수 있습니다" },
+  { from: /완벽(?:하게)?/gi, to: "보다 안정적으로" },
+  { from: /즉시\s*효과/gi, to: "상대적으로 빠른 체감" },
+  { from: /최고(?:의)?/gi, to: "선호도가 높은" },
+  { from: /확실한\s*개선/gi, to: "개선 가능성을 기대할 수 있는" },
 ];
 
 function normalizeLine(line: string): string {
@@ -56,7 +56,7 @@ function parseHeadings(content: string): Heading[] {
 }
 
 function hasQuestionHeading(headings: Heading[]): boolean {
-  return headings.some((heading) => /\?$|까요\?|인가요\?|나요\?/.test(heading.text));
+  return headings.some((heading) => /\?$|누구|어떻게|무엇|왜|비교/.test(heading.text));
 }
 
 function hasTable(content: string): boolean {
@@ -64,23 +64,22 @@ function hasTable(content: string): boolean {
 }
 
 function hasFaq(content: string): boolean {
-  return /##\s*(faq|자주 묻는 질문)/i.test(content) || /Q\.\s*/.test(content);
+  return /##\s*faq/i.test(content) || /자주 묻는 질문/.test(content) || /Q\.\s*/.test(content);
 }
 
 function hasSourceSection(content: string): boolean {
-  return /##\s*(참고|출처|참고 자료|참고 및 확인 포인트)/i.test(content) || /출처[:：]/.test(content);
+  return /##\s*(확인 및 안내|참고 및 확인 포인트|참고 자료|출처 안내)/.test(content);
 }
 
 function hasAuthorMeta(content: string, article: ArticleContent): boolean {
   return (
-    content.includes(`작성 주체: ${article.shopName}`) ||
-    content.includes(`작성 기준: ${article.shopName}`) ||
-    content.includes("업데이트 일자:")
+    content.includes(`${article.shopName}`) &&
+    (content.includes("업데이트 기준일") || content.includes("상담 관점"))
   );
 }
 
 function hasSectionAnswer(content: string): boolean {
-  return /핵심 답변[:：]/.test(content) || /한 줄 요약[:：]/.test(content);
+  return /핵심 답변:/.test(content);
 }
 
 function hasMedicalClaimRisk(content: string): boolean {
@@ -88,7 +87,7 @@ function hasMedicalClaimRisk(content: string): boolean {
 }
 
 function countSourceMentions(content: string): number {
-  const matches = content.match(/출처[:：]|참고[:：]|연구|가이드라인|학회|논문|자료/g);
+  const matches = content.match(/공개 자료|상담 관점|업데이트 기준일|확인 및 안내|참고 자료|출처/g);
   return matches?.length ?? 0;
 }
 
@@ -99,30 +98,30 @@ function buildPreviewDescription(content: string): string {
 
 function buildQuestionHeading(article: ArticleContent, currentHeading?: string): string {
   const base = currentHeading || article.mainKeyword || article.title;
-  if (base.includes("차이")) {
-    return `## ${base.replace(/\?+$/, "")}는 어떤 차이가 있나요?`;
+  if (base.includes("비교")) {
+    return `## ${base.replace(/\?+$/, "")}는 어떻게 비교하면 좋을까요?`;
   }
-  if (base.includes("효과") || base.includes("시술") || base.includes("수술")) {
-    return `## ${base.replace(/\?+$/, "")}는 어떻게 확인해야 할까요?`;
+  if (base.includes("준비") || base.includes("상담")) {
+    return `## ${base.replace(/\?+$/, "")} 전에 먼저 확인할 것은 무엇일까요?`;
   }
-  return `## ${base.replace(/\?+$/, "")}는 무엇인가요?`;
+  return `## ${base.replace(/\?+$/, "")}는 어떤 기준으로 보면 좋을까요?`;
 }
 
 function buildComparisonTable(article: ArticleContent): string {
   return [
-    "## 한눈에 보는 핵심 비교",
+    "## 비교해서 보면 더 쉬운 포인트",
     "",
-    "| 구분 | 핵심 확인 포인트 | 설명 |",
+    "| 항목 | 먼저 볼 기준 | 확인 포인트 |",
     "| :--- | :--- | :--- |",
-    `| ${article.mainKeyword} | 적용 대상과 기대 포인트 | ${article.mainKeyword}를 볼 때는 대상, 방식, 유지 관점까지 함께 확인하는 것이 좋습니다. |`,
-    `| ${article.subKeyword1} | 상담 시 비교 질문 | ${article.subKeyword1}와의 차이는 회복 흐름, 비용, 적합 대상 기준으로 나눠 보는 편이 좋습니다. |`,
-    `| ${article.subKeyword2} | 선택 전 체크 항목 | ${article.subKeyword2}는 부작용 가능성, 유지 기간, 생활 패턴 적합성을 함께 확인해야 합니다. |`,
+    `| ${article.mainKeyword} | 현재 불편한 점 | 생활 패턴, 예산, 유지 부담을 함께 보는 편이 좋습니다. |`,
+    `| ${article.subKeyword1} | 적용이 쉬운지 | 바로 실천할 수 있는지, 일상에서 유지 가능한지 확인하는 것이 좋습니다. |`,
+    `| ${article.subKeyword2} | 상담이 필요한지 | 스스로 판단하기 어려운 부분은 상담에서 다시 확인하는 편이 안전합니다. |`,
   ].join("\n");
 }
 
 function buildSectionAnswer(headingText: string): string {
   const normalized = headingText.replace(/\?+$/, "");
-  return `핵심 답변: 이 섹션에서는 ${normalized}를 판단할 때 먼저 봐야 할 기준을 짧게 정리합니다.`;
+  return `핵심 답변: ${normalized}는 현재 상태, 생활 패턴, 기대하는 변화 기준으로 나눠 보면 훨씬 이해가 쉬워집니다.`;
 }
 
 function buildFaqSection(article: ArticleContent): string {
@@ -140,34 +139,32 @@ function buildFaqSection(article: ArticleContent): string {
   ].join("\n");
 }
 
-function buildSourceSection(article: ArticleContent): string {
-  const sourceLines = article.brief?.researchSummary
-    ?.split(/\r?\n/)
-    .map((line) => normalizeLine(line))
-    .filter(Boolean)
-    .slice(0, 3) ?? [];
+function buildNaturalSourceSection(article: ArticleContent): string {
+  const sourceLines =
+    article.brief?.researchSummary
+      ?.split(/\r?\n/)
+      .map((line) => stripMarkdown(normalizeLine(line)))
+      .filter(Boolean)
+      .slice(0, 2) ?? [];
 
-  const bullets = sourceLines.length > 0
-    ? sourceLines.map((line) => `참고: ${line}`)
-    : [
-        "- 작성 시점의 공개 자료와 일반적인 상담 기준을 바탕으로 정리했습니다.",
-        "- 최종 결정 전에는 개인 상태와 일정, 비용 조건을 별도로 확인하는 편이 좋습니다.",
-      ];
+  const summarySentence =
+    sourceLines.length > 0
+      ? `공개 자료에서는 ${sourceLines.join(" 또한 ")}`
+      : "공개 자료와 일반적인 상담 기준에서는 생활 패턴과 현재 상태를 함께 보는 접근이 반복적으로 강조됩니다.";
 
   return [
-    "## 참고 및 확인 포인트",
+    "## 확인 및 안내",
     "",
-    `- 작성 기준: ${article.shopName} ${article.category} 콘텐츠 가이드`,
-    `- 업데이트 일자: ${TODAY}`,
-    ...bullets,
+    `${article.shopName} ${article.category} 상담 관점에서 보면 ${article.mainKeyword}는 한 가지 기준으로 단정하기보다 현재 불편한 점과 생활 패턴을 함께 보는 편이 좋습니다.`,
+    `이 글은 ${TODAY} 기준 공개 자료와 현장 상담 관점을 바탕으로 정리했으며, ${summarySentence}`,
+    "개인 상태에 따라 적용 방법과 우선순위는 달라질 수 있으므로, 실제 선택 전에는 상담에서 한 번 더 확인하는 편이 안전합니다.",
   ].join("\n");
 }
 
 function buildAuthorMeta(article: ArticleContent): string {
   return [
-    `- 작성 주체: ${article.shopName}`,
-    `- 분류: ${article.category}`,
-    `- 업데이트 일자: ${TODAY}`,
+    `${article.shopName} ${article.category} 기준으로 정리한 내용입니다.`,
+    `업데이트 기준일은 ${TODAY}입니다.`,
     "",
   ].join("\n");
 }
@@ -189,19 +186,13 @@ function analyzeCategories(article: ArticleContent): GeoCategoryScore[] {
     content.includes(article.subKeyword2);
   const validationPenalty = article.validation.revisionReasons.length * 2;
 
-  const categories: GeoCategoryScore[] = [
+  return [
     {
       key: "ai-quote-structure",
       label: "AI 인용 구조",
       score: Math.max(
         0,
-        Math.min(
-          30,
-          (questionHeading ? 8 : 0) +
-            (table ? 8 : 0) +
-            (sectionAnswer ? 8 : 0) +
-            (faq ? 6 : 0)
-        )
+        Math.min(30, (questionHeading ? 8 : 0) + (table ? 8 : 0) + (sectionAnswer ? 8 : 0) + (faq ? 6 : 0))
       ),
       maxScore: 30,
     },
@@ -222,7 +213,7 @@ function analyzeCategories(article: ArticleContent): GeoCategoryScore[] {
     },
     {
       key: "entity-and-author",
-      label: "엔티티 & 저자",
+      label: "엔티티 & 작성자",
       score: Math.max(
         0,
         Math.min(
@@ -251,8 +242,6 @@ function analyzeCategories(article: ArticleContent): GeoCategoryScore[] {
       maxScore: 25,
     },
   ];
-
-  return categories;
 }
 
 function buildRecommendations(article: ArticleContent, categories: GeoCategoryScore[]): GeoRecommendation[] {
@@ -264,11 +253,11 @@ function buildRecommendations(article: ArticleContent, categories: GeoCategorySc
   if (!hasQuestionHeading(headings)) {
     recommendations.push({
       id: "question-heading",
-      title: "소제목 질문형 변환",
-      description: "AI와 검색엔진이 직접 답변을 매칭하기 쉬운 질문형 소제목으로 바꿉니다.",
+      title: "질문형 소제목 추가",
+      description: "검색형 질문에 바로 답하는 구조로 바꾸면 인용 가능성이 올라갑니다.",
       category: "ai-quote-structure",
       impact: "high",
-      reason: "질문형 소제목이 없어서 AEO/GEO 추출 포인트가 약합니다.",
+      reason: "질문형 소제목은 GEO/AEO 구조 점수에 직접 도움이 됩니다.",
       before: firstHeading?.raw ?? "질문형 소제목 없음",
       after: buildQuestionHeading(article, firstHeading?.text),
       selectedByDefault: true,
@@ -278,13 +267,13 @@ function buildRecommendations(article: ArticleContent, categories: GeoCategorySc
   if (!hasTable(content)) {
     recommendations.push({
       id: "comparison-table",
-      title: "비교 테이블 추가",
-      description: "핵심 차이를 표로 정리해 생성형 AI가 구조적으로 읽기 쉽게 만듭니다.",
+      title: "비교표 추가",
+      description: "핵심 정보를 한눈에 비교할 수 있으면 구조화 점수가 좋아집니다.",
       category: "ai-quote-structure",
       impact: "high",
-      reason: "표가 없어서 차이점·선택 기준을 구조적으로 인용하기 어렵습니다.",
-      before: "비교 표 없음",
-      after: "| 구분 | 핵심 확인 포인트 | 설명 |",
+      reason: "비교표는 요약과 인용에 유리한 구조 신호입니다.",
+      before: "비교표 없음",
+      after: "| 항목 | 먼저 볼 기준 | 확인 포인트 |",
       selectedByDefault: true,
     });
   }
@@ -292,13 +281,13 @@ function buildRecommendations(article: ArticleContent, categories: GeoCategorySc
   if (hasMedicalClaimRisk(content)) {
     recommendations.push({
       id: "soften-claims",
-      title: "의료법 저촉 표현 수정",
-      description: "과장되거나 단정적인 표현을 완곡한 정보형 문장으로 바꿉니다.",
+      title: "과장 표현 완화",
+      description: "단정적인 문장을 줄이면 신뢰도 감점 위험을 낮출 수 있습니다.",
       category: "trust-and-sources",
       impact: "high",
-      reason: "과장 표현은 신뢰성과 검색 노출 안정성을 동시에 떨어뜨립니다.",
-      before: "단정형 표현 존재",
-      after: "상황에 따라, 개인차가 있을 수 있습니다, 동일하게 보기 어렵습니다",
+      reason: "과장 표현은 신뢰성 점수와 직접 연결됩니다.",
+      before: "강한 단정 표현 포함",
+      after: "상황에 따라 도움이 될 수 있는 표현으로 조정",
       selectedByDefault: true,
     });
   }
@@ -306,13 +295,13 @@ function buildRecommendations(article: ArticleContent, categories: GeoCategorySc
   if (!hasSectionAnswer(content)) {
     recommendations.push({
       id: "section-answer",
-      title: "섹션별 핵심 답변 강화",
-      description: "각 섹션 시작부에 40~60자 내외의 요약 답변을 넣어 답변 추출성을 높입니다.",
+      title: "섹션별 핵심 답변 추가",
+      description: "각 소제목 바로 아래에 짧은 답을 두면 정보 이해가 빨라집니다.",
       category: "ai-quote-structure",
       impact: "high",
-      reason: "섹션 요약이 없으면 검색엔진이 핵심 문장을 뽑기 어렵습니다.",
-      before: "핵심 답변 라인 없음",
-      after: "핵심 답변: 이 섹션에서는 ...를 먼저 정리합니다.",
+      reason: "짧은 핵심 답변은 AI 인용과 검색형 요약에 유리합니다.",
+      before: "핵심 답변 없음",
+      after: "핵심 답변: 먼저 볼 기준을 짧게 정리",
       selectedByDefault: true,
     });
   }
@@ -320,11 +309,11 @@ function buildRecommendations(article: ArticleContent, categories: GeoCategorySc
   if (!hasFaq(content)) {
     recommendations.push({
       id: "faq",
-      title: "FAQ 섹션 추가",
-      description: "자주 묻는 질문 섹션을 추가해 검색의 직접 답변 패턴을 강화합니다.",
+      title: "FAQ 추가",
+      description: "자주 묻는 질문 구조를 넣으면 검색형 유입 대응력이 좋아집니다.",
       category: "ai-quote-structure",
       impact: "medium",
-      reason: "FAQ가 없어서 질문형 검색 수요를 흡수하기 어렵습니다.",
+      reason: "FAQ는 질문형 검색 대응과 구조화 점수에 도움이 됩니다.",
       before: "FAQ 없음",
       after: "## FAQ",
       selectedByDefault:
@@ -335,13 +324,13 @@ function buildRecommendations(article: ArticleContent, categories: GeoCategorySc
   if (!hasSourceSection(content)) {
     recommendations.push({
       id: "source-note",
-      title: "출처 및 확인 포인트 추가",
-      description: "참고 자료와 검토 기준을 명시해 인용 신뢰도를 보강합니다.",
+      title: "확인 및 안내 문단 추가",
+      description: "출처 신호는 남기되 운영 메모처럼 보이지 않도록 자연 문장으로 정리합니다.",
       category: "trust-and-sources",
       impact: "high",
-      reason: "출처 및 업데이트 기준이 없어 신뢰 신호가 약합니다.",
-      before: "참고/출처 섹션 없음",
-      after: "## 참고 및 확인 포인트",
+      reason: "신뢰 신호는 유지하면서 독자 경험을 덜 해치는 방식입니다.",
+      before: "출처 안내 문단 없음",
+      after: "## 확인 및 안내",
       selectedByDefault: true,
     });
   }
@@ -349,13 +338,13 @@ function buildRecommendations(article: ArticleContent, categories: GeoCategorySc
   if (!hasAuthorMeta(content, article)) {
     recommendations.push({
       id: "author-meta",
-      title: "작성 주체 및 업데이트 정보 추가",
-      description: "매장명, 분류, 업데이트 일자를 명시해 엔티티 신호를 보강합니다.",
+      title: "작성 주체와 기준일 추가",
+      description: "작성 관점과 업데이트 기준일을 자연스럽게 넣어 신뢰도를 보강합니다.",
       category: "entity-and-author",
       impact: "medium",
-      reason: "작성 주체와 업데이트 일자가 명시되지 않아 엔티티 신호가 약합니다.",
-      before: "작성 주체/업데이트 정보 없음",
-      after: `- 작성 주체: ${article.shopName}`,
+      reason: "작성 주체와 기준일은 엔티티/작성자 점수에 도움이 됩니다.",
+      before: "작성 기준 문장 없음",
+      after: `${article.shopName} ${article.category} 기준으로 정리한 내용입니다.`,
       selectedByDefault: true,
     });
   }
@@ -372,9 +361,9 @@ function buildGrade(score: number): GeoAnalysisResult["grade"] {
 
 function buildSummary(score: number): string {
   if (score >= 90) return "생성형 AI 인용 구조와 신뢰 신호가 잘 정리된 상태입니다.";
-  if (score >= 75) return "전반적으로 양호하지만 몇 가지 GEO 구조 보강 여지가 있습니다.";
-  if (score >= 55) return "핵심 GEO 요소를 보강하면 인용 가능성을 더 높일 수 있습니다.";
-  return "GEO 핵심 구조가 부족해 후처리 보강이 필요한 상태입니다.";
+  if (score >= 75) return "기본 구조는 안정적이지만 일부 신뢰 신호를 더 보강할 수 있습니다.";
+  if (score >= 55) return "구조와 신뢰 신호가 일부 부족해 발행 전 보강이 필요합니다.";
+  return "GEO 관점에서 구조 보강이 많이 필요한 상태입니다.";
 }
 
 export function runGeoHarness(article: ArticleContent): GeoAnalysisResult {
@@ -391,7 +380,8 @@ export function runGeoHarness(article: ArticleContent): GeoAnalysisResult {
     recommendations,
     previewTitle: article.title,
     previewDescription: buildPreviewDescription(article.content),
-    citationDensityLabel: citationDensityCount >= 2 ? "우수" : citationDensityCount >= 1 ? "보통" : "부족",
+    citationDensityLabel:
+      citationDensityCount >= 2 ? "충분" : citationDensityCount >= 1 ? "보통" : "부족",
     citationDensityCount,
   };
 }
@@ -403,7 +393,7 @@ function replaceFirstHeading(lines: string[], article: ArticleContent): string[]
     return [buildQuestionHeading(article), "", ...lines];
   }
 
-  if (/\?$|까요\?|인가요\?|나요\?/.test(firstHeading.text)) {
+  if (/\?$|누구|어떻게|무엇|왜|비교/.test(firstHeading.text)) {
     return lines;
   }
 
@@ -419,10 +409,10 @@ function injectSectionAnswers(lines: string[]): string[] {
     const line = lines[index];
     next.push(line);
 
-    if ((/^##\s+/.test(line) || /^###\s+/.test(line)) && !/^##\s*(faq|자주 묻는 질문)/i.test(line)) {
+    if ((/^##\s+/.test(line) || /^###\s+/.test(line)) && !/^##\s*faq/i.test(line)) {
       const headingText = normalizeLine(line.replace(/^###?\s+/, ""));
       const nextLine = normalizeLine(lines[index + 1] ?? "");
-      if (!/^핵심 답변[:：]/.test(nextLine)) {
+      if (!/^핵심 답변:/.test(nextLine)) {
         next.push(buildSectionAnswer(headingText));
       }
     }
@@ -476,7 +466,7 @@ export function applyGeoRecommendations(
   }
 
   if (selectedRecommendationIds.includes("source-note")) {
-    nextContent = appendUniqueBlock(nextContent, buildSourceSection(article));
+    nextContent = appendUniqueBlock(nextContent, buildNaturalSourceSection(article));
   }
 
   if (selectedRecommendationIds.includes("author-meta")) {
