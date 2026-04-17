@@ -42,7 +42,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const saved = await saveImage(sessionId, index, result.base64Data);
+    const saved = await saveImage(sessionId, index, result.base64Data, result.mimeType);
     const imageUrl = `/api/image/file/${saved.imageId}`;
 
     return NextResponse.json({
@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
         imageId: saved.imageId,
         imageUrl,
         base64Data: result.base64Data,
-        mimeType: result.mimeType,
+        mimeType: saved.mimeType,
       },
     });
   } catch (err) {

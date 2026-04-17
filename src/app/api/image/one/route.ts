@@ -30,7 +30,7 @@ export async function POST(request: NextRequest) {
     }
 
     const result = await generateBlogImage(prompt, apiKey);
-    const saved = await saveImage(sessionId, index, result.base64Data);
+    const saved = await saveImage(sessionId, index, result.base64Data, result.mimeType);
 
     return NextResponse.json({
       success: true,
@@ -39,7 +39,7 @@ export async function POST(request: NextRequest) {
         imageId: saved.imageId,
         imageUrl: `/api/image/file/${saved.imageId}`,
         base64Data: result.base64Data,
-        mimeType: result.mimeType,
+        mimeType: saved.mimeType,
         prompt,
       },
     });

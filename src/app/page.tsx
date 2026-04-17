@@ -88,7 +88,13 @@ export default function Home() {
     subKeyword1: string;
     subKeyword2: string;
     articleContent: string;
-    images?: { index: number; imageId: string; prompt: string; section: string }[];
+    images?: {
+      index: number;
+      imageId: string;
+      prompt: string;
+      section: string;
+      mimeType?: string;
+    }[];
   }>>([]);
 
   const loadSavedSessions = useCallback(() => {
@@ -426,6 +432,7 @@ export default function Home() {
                 index: i,
                 imageId: data.imageId ?? "",
                 imageUrl,
+                mimeType,
                 prompt: data.prompt ?? prompts[i],
                 section: `섹션 ${i + 1}`,
                 status: "success",
@@ -516,6 +523,7 @@ export default function Home() {
                   status: "success" as const,
                   imageUrl: regenUrl,
                   imageId: regenData.imageId ?? "",
+                  mimeType: regenMime,
                   ...(customPrompt ? { prompt: customPrompt } : {}),
                 }
               : img
@@ -558,6 +566,7 @@ export default function Home() {
           imageId: img.imageId,
           prompt: img.prompt,
           section: img.section,
+          mimeType: img.mimeType,
         }));
       const res = await fetch("/api/sessions", {
         method: "POST",
@@ -618,6 +627,7 @@ export default function Home() {
         imageUrl: `/api/image/file/${img.imageId}`,
         prompt: img.prompt,
         section: img.section,
+        mimeType: img.mimeType,
         status: "success" as const,
       }));
       const hasImages = restoredImages.length > 0;

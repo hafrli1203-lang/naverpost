@@ -289,6 +289,7 @@ export interface BlogImage {
   index: number;
   imageId: string;
   imageUrl: string;
+  mimeType?: string;
   prompt: string;
   section: string;
   status: "pending" | "generating" | "success" | "failed" | "retrying";

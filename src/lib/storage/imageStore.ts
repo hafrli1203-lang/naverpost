@@ -2,81 +2,131 @@ import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 
-// 하이브리드 저장소: 파일 기반 우선, 실패 시 인메모리 fallback
 const IMAGES_DIR = path.join(process.cwd(), "data", "images");
-const memoryImageStore = new Map<string, Buffer>();
-const memoryParamsStore = new Map<string, {
-  sessionId: string;
-  articleContent: string;
-  title: string;
-  mainKeyword: string;
-}>();
+const memoryParamsStore = new Map<
+  string,
+  {
+    sessionId: string;
+    articleContent: string;
+    title: string;
+    mainKeyword: string;
+  }
+>();
 
-function ensureDir(): boolean {
-  try {
-    if (!fs.existsSync(IMAGES_DIR)) {
-      fs.mkdirSync(IMAGES_DIR, { recursive: true });
-    }
-    return true;
-  } catch (err) {
-    console.error("[imageStore] 디렉토리 생성 실패:", err);
-    return false;
+type StoredImageMeta = {
+  sessionId: string;
+  index: number;
+  mimeType: string;
+  extension: string;
+  savedAt: string;
+};
+
+export type StoredImage = {
+  buffer: Buffer;
+  mimeType: string;
+};
+
+function ensureDir(): void {
+  if (!fs.existsSync(IMAGES_DIR)) {
+    fs.mkdirSync(IMAGES_DIR, { recursive: true });
   }
 }
 
-function imagePath(imageId: string): string {
-  const safeId = imageId.replace(/[^a-zA-Z0-9_-]/g, "_");
-  return path.join(IMAGES_DIR, `${safeId}.jpg`);
+function sanitizeImageId(imageId: string): string {
+  return imageId.replace(/[^a-zA-Z0-9_-]/g, "_");
+}
+
+function getExtensionFromMimeType(mimeType: string): string {
+  switch (mimeType) {
+    case "image/png":
+      return "png";
+    case "image/webp":
+      return "webp";
+    case "image/gif":
+      return "gif";
+    case "image/jpeg":
+    case "image/jpg":
+    default:
+      return "jpg";
+  }
+}
+
+function imageMetaPath(imageId: string): string {
+  return path.join(IMAGES_DIR, `${sanitizeImageId(imageId)}.json`);
+}
+
+function imageBinaryPath(imageId: string, extension: string): string {
+  return path.join(IMAGES_DIR, `${sanitizeImageId(imageId)}.${extension}`);
+}
+
+function readImageMeta(imageId: string): StoredImageMeta | null {
+  try {
+    const metaPath = imageMetaPath(imageId);
+    if (!fs.existsSync(metaPath)) return null;
+    return JSON.parse(fs.readFileSync(metaPath, "utf-8")) as StoredImageMeta;
+  } catch (error) {
+    console.error("[imageStore] Failed to read image metadata:", error);
+    return null;
+  }
+}
+
+function writeImageMeta(imageId: string, meta: StoredImageMeta): void {
+  fs.writeFileSync(imageMetaPath(imageId), JSON.stringify(meta, null, 2), "utf-8");
 }
 
 export async function saveImage(
   sessionId: string,
   index: number,
-  base64Data: string
-): Promise<{ imageId: string; filePath: string }> {
+  base64Data: string,
+  mimeType = "image/jpeg"
+): Promise<{ imageId: string; filePath: string; mimeType: string }> {
+  ensureDir();
+
   const imageId = crypto.randomUUID();
   const buffer = Buffer.from(base64Data, "base64");
+  const extension = getExtensionFromMimeType(mimeType);
+  const filePath = imageBinaryPath(imageId, extension);
 
-  if (ensureDir()) {
-    try {
-      const filePath = imagePath(imageId);
-      fs.writeFileSync(filePath, buffer);
-      console.log(`[imageStore] 이미지 저장 성공: ${filePath}`);
-      return { imageId, filePath };
-    } catch (err) {
-      console.error("[imageStore] 파일 쓰기 실패, 인메모리 fallback:", err);
-    }
+  try {
+    fs.writeFileSync(filePath, buffer);
+    writeImageMeta(imageId, {
+      sessionId,
+      index,
+      mimeType,
+      extension,
+      savedAt: new Date().toISOString(),
+    });
+    console.log(`[imageStore] Saved durable image: ${filePath}`);
+    return { imageId, filePath, mimeType };
+  } catch (error) {
+    console.error("[imageStore] Durable image save failed:", error);
+    throw new Error("이미지 파일 저장에 실패했습니다. 다시 시도해 주세요.");
   }
-
-  // 인메모리 fallback
-  memoryImageStore.set(imageId, buffer);
-  return { imageId, filePath: `memory://${sessionId}/${imageId}-${index}.jpg` };
 }
 
-export async function getImage(imageId: string): Promise<Buffer | null> {
-  // 항상 파일에서 먼저 읽기 시도 (useFileSystem 플래그 제거 — 매번 시도)
+export async function getImage(imageId: string): Promise<StoredImage | null> {
   try {
-    const filePath = imagePath(imageId);
-    if (fs.existsSync(filePath)) {
-      return fs.readFileSync(filePath);
-    }
-  } catch (err) {
-    console.error("[imageStore] 파일 읽기 실패:", err);
-  }
+    const meta = readImageMeta(imageId);
+    if (!meta) return null;
 
-  // 인메모리 fallback
-  return memoryImageStore.get(imageId) ?? null;
+    const filePath = imageBinaryPath(imageId, meta.extension);
+    if (!fs.existsSync(filePath)) {
+      return null;
+    }
+
+    return {
+      buffer: fs.readFileSync(filePath),
+      mimeType: meta.mimeType,
+    };
+  } catch (error) {
+    console.error("[imageStore] Failed to load durable image:", error);
+    return null;
+  }
 }
 
 export async function cleanupSession(sessionId: string): Promise<void> {
   void sessionId;
-  // 파일 기반에서는 sessionId별 정리가 필요하면 별도 매핑 필요
-  // 현재는 수동 정리 또는 cleanupStale에서 처리
 }
-
-// ---------------------------------------------------------------------------
-// Generation session params (avoids URL length limits for SSE endpoint)
-// ---------------------------------------------------------------------------
 
 export async function saveGenerationParams(params: {
   sessionId: string;
@@ -103,24 +153,38 @@ export async function deleteGenerationParams(token: string): Promise<void> {
 }
 
 export async function cleanupStale(): Promise<void> {
-  // 파일 기반: 오래된 이미지 정리 (24시간 이상)
-  if (!ensureDir()) return;
+  ensureDir();
+
   try {
     const files = fs.readdirSync(IMAGES_DIR);
     const now = Date.now();
-    const MAX_AGE = 24 * 60 * 60 * 1000; // 24시간
+    const maxAge = 30 * 24 * 60 * 60 * 1000;
+
     for (const file of files) {
       try {
-        const filePath = path.join(IMAGES_DIR, file);
-        const stat = fs.statSync(filePath);
-        if (now - stat.mtimeMs > MAX_AGE) {
-          fs.unlinkSync(filePath);
+        if (!file.endsWith(".json")) continue;
+
+        const imageId = file.replace(/\.json$/, "");
+        const meta = readImageMeta(imageId);
+        if (!meta) continue;
+
+        const age = now - new Date(meta.savedAt).getTime();
+        if (age <= maxAge) continue;
+
+        const binaryPath = imageBinaryPath(imageId, meta.extension);
+        const metaPath = imageMetaPath(imageId);
+
+        if (fs.existsSync(binaryPath)) {
+          fs.unlinkSync(binaryPath);
+        }
+        if (fs.existsSync(metaPath)) {
+          fs.unlinkSync(metaPath);
         }
       } catch {
-        // 개별 파일 오류 무시
+        // ignore per-file cleanup failures
       }
     }
   } catch {
-    // 무시
+    // ignore cleanup failures
   }
 }

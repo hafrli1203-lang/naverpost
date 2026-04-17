@@ -9,23 +9,23 @@ export async function GET(
 
   if (!imageId) {
     return NextResponse.json(
-      { success: false, error: "imageId는 필수입니다." },
+      { success: false, error: "imageId가 필요합니다." },
       { status: 400 }
     );
   }
 
-  const imageBuffer = await getImage(imageId);
+  const storedImage = await getImage(imageId);
 
-  if (!imageBuffer) {
+  if (!storedImage) {
     return NextResponse.json(
       { success: false, error: "이미지를 찾을 수 없습니다." },
       { status: 404 }
     );
   }
 
-  return new NextResponse(new Uint8Array(imageBuffer), {
+  return new NextResponse(new Uint8Array(storedImage.buffer), {
     headers: {
-      "Content-Type": "image/jpeg",
+      "Content-Type": storedImage.mimeType,
       "Cache-Control": "public, max-age=3600",
     },
   });

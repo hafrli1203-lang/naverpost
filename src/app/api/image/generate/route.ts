@@ -97,14 +97,14 @@ function createImageStream(
           send({ type: "progress", index: i, total });
           try {
             const result = await generateBlogImage(prompts[i], apiKey);
-            const saved = await saveImage(sessionId, i, result.base64Data);
+            const saved = await saveImage(sessionId, i, result.base64Data, result.mimeType);
             send({
               type: "image-ready",
               index: i,
               imageId: saved.imageId,
               imageUrl: `/api/image/file/${saved.imageId}`,
               base64Data: result.base64Data,
-              mimeType: result.mimeType,
+              mimeType: saved.mimeType,
               prompt: prompts[i],
               total,
             });

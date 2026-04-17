@@ -4,6 +4,7 @@ import path from "path";
 export interface SavedImage {
   index: number;
   imageId: string;
+  mimeType?: string;
   prompt: string;
   section: string;
 }
