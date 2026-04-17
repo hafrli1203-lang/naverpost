@@ -170,6 +170,64 @@ export interface ValidationResult {
   issues?: AnalysisIssue[];
 }
 
+// ===== GEO Types =====
+
+export type GeoCategoryKey =
+  | "ai-quote-structure"
+  | "trust-and-sources"
+  | "entity-and-author"
+  | "content-quality";
+
+export type GeoRecommendationCategory =
+  | "ai-quote-structure"
+  | "trust-and-sources"
+  | "entity-and-author";
+
+export interface GeoCategoryScore {
+  key: GeoCategoryKey;
+  label: string;
+  score: number;
+  maxScore: number;
+}
+
+export interface GeoRecommendation {
+  id:
+    | "question-heading"
+    | "comparison-table"
+    | "soften-claims"
+    | "section-answer"
+    | "faq"
+    | "source-note"
+    | "author-meta";
+  title: string;
+  description: string;
+  category: GeoRecommendationCategory;
+  impact: "low" | "medium" | "high";
+  reason: string;
+  before?: string;
+  after?: string;
+  selectedByDefault: boolean;
+}
+
+export interface GeoAnalysisResult {
+  score: number;
+  grade: "poor" | "fair" | "good" | "excellent";
+  summary: string;
+  categories: GeoCategoryScore[];
+  recommendations: GeoRecommendation[];
+  previewTitle: string;
+  previewDescription: string;
+  citationDensityLabel: string;
+  citationDensityCount: number;
+}
+
+export interface GeoOptimizationResult {
+  appliedRecommendationIds: GeoRecommendation["id"][];
+  optimizedContent: string;
+  analysisBefore: GeoAnalysisResult;
+  analysisAfter: GeoAnalysisResult;
+}
+
 // ===== Article Types =====
 
 export interface ArticleBrief {
@@ -216,6 +274,7 @@ export interface ArticleContent {
   category: string;
   validation: ValidationResult;
   brief?: ArticleBrief;
+  geo?: GeoAnalysisResult;
 }
 
 // ===== Image Types =====

@@ -11,7 +11,16 @@ import type { ArticleOptions } from "@/components/ShopSelector";
 import { WorkflowStepper } from "@/components/WorkflowStepper";
 import { usePersistedWorkflow } from "@/hooks/usePersistedWorkflow";
 import { CATEGORIES } from "@/lib/constants";
-import type { ArticleContent, BlogImage, KeywordOption, Shop, WorkflowState } from "@/types";
+import type {
+  ArticleContent,
+  BlogImage,
+  GeoAnalysisResult,
+  GeoOptimizationResult,
+  GeoRecommendation,
+  KeywordOption,
+  Shop,
+  WorkflowState,
+} from "@/types";
 
 type LooseApiResponse = {
   success?: boolean;
@@ -62,6 +71,7 @@ export default function Home() {
 
   const [maxStageReached, setMaxStageReached] = useState<number>(state.currentStage);
   const [isLoading, setIsLoading] = useState(false);
+  const [isGeoLoading, setIsGeoLoading] = useState(false);
   const [isGeneratingImages, setIsGeneratingImages] = useState(false);
   const [imageProgress, setImageProgress] = useState({ current: 0, total: 0 });
   const [keywordOptions, setKeywordOptions] = useState<KeywordOption[]>([]);
@@ -99,6 +109,97 @@ export default function Home() {
       .catch(() => {});
     loadSavedSessions();
   }, [loadSavedSessions]);
+
+  const analyzeGeo = useCallback(async (article: ArticleContent): Promise<GeoAnalysisResult | null> => {
+    try {
+      const res = await fetch("/api/article/geo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: "analyze",
+          article,
+        }),
+      });
+      const json = await safeJson(res);
+      if (!res.ok || !json.success) {
+        throw new Error(json.error ?? "GEO 분석에 실패했습니다.");
+      }
+      return json.data as GeoAnalysisResult;
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "GEO 분석 중 오류가 발생했습니다.");
+      return null;
+    }
+  }, []);
+
+  const applyGeo = useCallback(
+    async (
+      selectedRecommendationIds: GeoRecommendation["id"][]
+    ): Promise<GeoOptimizationResult | null> => {
+      if (!state.article) return null;
+
+      setIsGeoLoading(true);
+      try {
+        const res = await fetch("/api/article/geo", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            mode: "apply",
+            article: state.article,
+            selectedRecommendationIds,
+          }),
+        });
+        const json = await safeJson(res);
+        if (!res.ok || !json.success) {
+          throw new Error(json.error ?? "GEO 최적화 적용에 실패했습니다.");
+        }
+
+        const payload = json.data as {
+          article: ArticleContent;
+          optimization: GeoOptimizationResult;
+        };
+
+        setState((prev) => ({
+          ...prev,
+          article: payload.article,
+        }));
+        toast.success(
+          `GEO 점수 ${payload.optimization.analysisBefore.score} → ${payload.optimization.analysisAfter.score}`
+        );
+        return payload.optimization;
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "GEO 적용 중 오류가 발생했습니다.");
+        return null;
+      } finally {
+        setIsGeoLoading(false);
+      }
+    },
+    [state.article, setState]
+  );
+
+  useEffect(() => {
+    if (!state.article || state.article.geo || isGeoLoading) return;
+
+    let cancelled = false;
+    setIsGeoLoading(true);
+    analyzeGeo(state.article)
+      .then((geo) => {
+        if (!cancelled && geo) {
+          setState((prev) => ({
+            ...prev,
+            article: prev.article ? { ...prev.article, geo } : prev.article,
+          }));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsGeoLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [analyzeGeo, isGeoLoading, setState, state.article]);
 
   const handleStart = useCallback(
     async (shopId: string, categoryId: string, topic: string, opts?: ArticleOptions) => {
@@ -188,10 +289,15 @@ export default function Home() {
           throw new Error(json.error ?? "본문 생성에 실패했습니다.");
         }
 
+        const article = json.data as ArticleContent;
+        setIsGeoLoading(true);
+        const geo = await analyzeGeo(article);
+        setIsGeoLoading(false);
+
         setState({
           ...state,
           selectedKeyword: option,
-          article: json.data as ArticleContent,
+          article: geo ? { ...article, geo } : article,
           currentStage: 2,
         });
         setMaxStageReached((prev) => Math.max(prev, 2));
@@ -201,7 +307,7 @@ export default function Home() {
         setIsLoading(false);
       }
     },
-    [articleOptions, state, setState]
+    [analyzeGeo, articleOptions, state, setState]
   );
 
   const handleArticleRewrite = useCallback(async () => {
@@ -210,11 +316,26 @@ export default function Home() {
   }, [state.selectedKeyword, handleKeywordSelect]);
 
   const handleManualEdit = useCallback(
-    (content: string) => {
+    async (content: string) => {
       if (!state.article) return;
-      setState({ ...state, article: { ...state.article, content } });
+
+      const updatedArticle = { ...state.article, content };
+      setState({ ...state, article: updatedArticle });
+
+      setIsGeoLoading(true);
+      try {
+        const geo = await analyzeGeo(updatedArticle);
+        if (geo) {
+          setState((prev) => ({
+            ...prev,
+            article: prev.article ? { ...prev.article, content, geo } : prev.article,
+          }));
+        }
+      } finally {
+        setIsGeoLoading(false);
+      }
     },
-    [state, setState]
+    [analyzeGeo, state, setState]
   );
 
   const handleArticleApprove = useCallback(() => {
@@ -467,7 +588,7 @@ export default function Home() {
   }, [loadSavedSessions, state]);
 
   const handleLoadSession = useCallback(
-    (session: (typeof savedSessions)[number]) => {
+    async (session: (typeof savedSessions)[number]) => {
       const shop = shops.find((s) => s.name === session.shopName) ?? null;
       const category = CATEGORIES.find((c) => c.name === session.category) ?? null;
       const article: ArticleContent = {
@@ -488,6 +609,9 @@ export default function Home() {
           revisionReasons: [],
         },
       };
+      setIsGeoLoading(true);
+      const geo = await analyzeGeo(article);
+      setIsGeoLoading(false);
       const restoredImages: BlogImage[] = (session.images ?? []).map((img) => ({
         index: img.index,
         imageId: img.imageId,
@@ -509,13 +633,13 @@ export default function Home() {
           subKeyword1: session.subKeyword1,
           subKeyword2: session.subKeyword2,
         },
-        article,
+        article: geo ? { ...article, geo } : article,
         images: restoredImages,
       });
       setMaxStageReached(hasImages ? 3 : 2);
       toast.success("저장된 세션을 불러왔습니다.");
     },
-    [setState, shops]
+    [analyzeGeo, setState, shops]
   );
 
   const handleDeleteSession = useCallback(
@@ -633,7 +757,9 @@ export default function Home() {
             onRewrite={handleArticleRewrite}
             onManualEdit={handleManualEdit}
             onSave={handleSaveSession}
+            onApplyGeo={applyGeo}
             isLoading={isLoading || isGeneratingImages}
+            isGeoLoading={isGeoLoading}
             targetCharCount={articleOptions?.charCount ?? 2000}
           />
         )}

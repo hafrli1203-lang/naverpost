@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
-import { CheckCircle, ChevronDown, ChevronUp, FileText, Key, RotateCcw, Store, Tag } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Check, CheckCircle, ChevronDown, ChevronUp, Copy, FileText, Key, RotateCcw, Store, Tag } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import { formatForNaver } from "@/lib/naver/contentFormatter";
 import { WorkflowState } from "@/types";
 
 interface FinalConfirmProps {
@@ -16,7 +17,31 @@ interface FinalConfirmProps {
 export function FinalConfirm({ state, onStartOver }: FinalConfirmProps) {
   const [articleExpanded, setArticleExpanded] = useState(false);
   const [imagesExpanded, setImagesExpanded] = useState(false);
+  const [previewMode, setPreviewMode] = useState<"raw" | "naver">("naver");
+  const [copiedHtml, setCopiedHtml] = useState(false);
   const { shop, category, article, images, selectedKeyword } = state;
+  const previewHtml = useMemo(() => {
+    if (!article) return "";
+    const imageUrls = images
+      .filter((img) => img.status === "success" && img.imageUrl)
+      .map((img) => img.imageUrl);
+
+    return formatForNaver({
+      title: article.title,
+      content: article.content,
+      imageUrls,
+    });
+  }, [article, images]);
+
+  const handleCopyHtml = async () => {
+    if (!previewHtml || typeof navigator === "undefined" || !navigator.clipboard) {
+      return;
+    }
+
+    await navigator.clipboard.writeText(previewHtml);
+    setCopiedHtml(true);
+    window.setTimeout(() => setCopiedHtml(false), 2000);
+  };
 
   return (
     <div className="mx-auto w-full max-w-2xl space-y-5">
@@ -104,9 +129,48 @@ export function FinalConfirm({ state, onStartOver }: FinalConfirmProps) {
           {articleExpanded && (
             <CardContent className="pt-0">
               <Separator className="mb-4" />
-              <div className="max-h-64 overflow-y-auto whitespace-pre-wrap text-sm leading-7 text-gray-700">
-                {article.content}
+              <div className="mb-4 flex gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={previewMode === "naver" ? "default" : "outline"}
+                  onClick={() => setPreviewMode("naver")}
+                >
+                  네이버 포맷 미리보기
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={previewMode === "raw" ? "default" : "outline"}
+                  onClick={() => setPreviewMode("raw")}
+                >
+                  원문 보기
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="ml-auto gap-1.5"
+                  onClick={handleCopyHtml}
+                  disabled={!previewHtml}
+                >
+                  {copiedHtml ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                  {copiedHtml ? "HTML 복사됨" : "네이버 HTML 복사"}
+                </Button>
               </div>
+
+              {previewMode === "raw" ? (
+                <div className="max-h-64 overflow-y-auto whitespace-pre-wrap text-sm leading-7 text-gray-700">
+                  {article.content}
+                </div>
+              ) : (
+                <div className="max-h-[560px] overflow-y-auto rounded-xl border border-slate-200 bg-white p-4">
+                  <div
+                    className="min-h-[200px]"
+                    dangerouslySetInnerHTML={{ __html: previewHtml }}
+                  />
+                </div>
+              )}
             </CardContent>
           )}
         </Card>
