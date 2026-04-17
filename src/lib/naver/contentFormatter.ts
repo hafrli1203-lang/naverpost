@@ -139,7 +139,7 @@ function convertMarkdownToHtml(markdown: string): string {
         continue;
       }
 
-      if (/^- /.test(block.text) && looksLikeMetaLine(block.text)) {
+      if (looksLikeMetaLine(block.text)) {
         flushParagraphBuffer();
         output.push(renderMetaLine(block.text));
         continue;
@@ -209,7 +209,7 @@ function renderAnswerLead(text: string): string {
 }
 
 function renderMetaLine(text: string): string {
-  const value = text.replace(/^- /, "");
+  const value = text.replace(/^-\s*/, "");
   return `<div style="margin:0 0 10px;padding:12px 14px;border-radius:12px;background:#f8fafc;border:1px solid #e5e7eb;font-size:14px;line-height:1.8;color:#475569;">${inlineMarkdown(
     value
   )}</div>`;

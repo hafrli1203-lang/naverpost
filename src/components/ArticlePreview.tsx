@@ -404,6 +404,89 @@ export function ArticlePreview({
                   </div>
                 </>
               )}
+
+              {article.brief?.competitorMorphology?.status === "available" && (
+                <>
+                  <Separator />
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-medium text-muted-foreground">경쟁 블로그 본문 신호</p>
+                      <span className="text-[11px] text-muted-foreground">
+                        본문 샘플 {article.brief.competitorMorphology.bodySampleSize ?? 0}건
+                      </span>
+                    </div>
+
+                    {(article.brief.competitorMorphology.bodyNouns?.length ?? 0) > 0 && (
+                      <div className="space-y-1">
+                        <p className="text-[11px] font-medium text-slate-600">본문 공통 명사</p>
+                        <div className="flex flex-wrap gap-1">
+                          {article.brief.competitorMorphology.bodyNouns?.slice(0, 12).map((noun) => (
+                            <Badge
+                              key={noun}
+                              variant="secondary"
+                              className="bg-slate-100 text-slate-700 hover:bg-slate-100 text-[11px]"
+                            >
+                              {noun}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {(article.brief.competitorMorphology.bodyHighlights?.length ?? 0) > 0 && (
+                      <div className="space-y-1">
+                        <p className="text-[11px] font-medium text-slate-600">본문 핵심 논점</p>
+                        <div className="space-y-1">
+                          {article.brief.competitorMorphology.bodyHighlights?.map((highlight) => (
+                            <p key={highlight} className="text-xs leading-5 text-muted-foreground">
+                              - {highlight}
+                            </p>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {(article.brief.competitorMorphology.titleAngles?.length ?? 0) > 0 && (
+                      <div className="space-y-1">
+                        <p className="text-[11px] font-medium text-slate-600">상위 제목 패턴</p>
+                        <div className="space-y-1">
+                          {article.brief.competitorMorphology.titleAngles?.map((item) => (
+                            <p key={item} className="text-xs leading-5 text-muted-foreground">
+                              - {item}
+                            </p>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {(article.brief.competitorMorphology.contentBlocks?.length ?? 0) > 0 && (
+                      <div className="space-y-1">
+                        <p className="text-[11px] font-medium text-slate-600">상위 본문 구조 힌트</p>
+                        <div className="space-y-1">
+                          {article.brief.competitorMorphology.contentBlocks?.map((item) => (
+                            <p key={item} className="text-xs leading-5 text-muted-foreground">
+                              - {item}
+                            </p>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {(article.brief.competitorMorphology.cautionPoints?.length ?? 0) > 0 && (
+                      <div className="space-y-1">
+                        <p className="text-[11px] font-medium text-slate-600">노출 관점 주의사항</p>
+                        <div className="space-y-1">
+                          {article.brief.competitorMorphology.cautionPoints?.map((item) => (
+                            <p key={item} className="text-xs leading-5 text-muted-foreground">
+                              - {item}
+                            </p>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
             </CardContent>
           </Card>
         </div>

@@ -148,7 +148,7 @@ function buildSourceSection(article: ArticleContent): string {
     .slice(0, 3) ?? [];
 
   const bullets = sourceLines.length > 0
-    ? sourceLines.map((line) => `- ${line}`)
+    ? sourceLines.map((line) => `참고: ${line}`)
     : [
         "- 작성 시점의 공개 자료와 일반적인 상담 기준을 바탕으로 정리했습니다.",
         "- 최종 결정 전에는 개인 상태와 일정, 비용 조건을 별도로 확인하는 편이 좋습니다.",

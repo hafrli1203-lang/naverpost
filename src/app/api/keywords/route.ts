@@ -16,6 +16,7 @@ import { analyzeTitleBodyAlignment } from "@/lib/validation/titleBodyAlignment";
 import type { KeywordOption, KeywordOptionAnalysis } from "@/types";
 
 export const maxDuration = 120;
+const EXTERNAL_SIGNAL_TOP_K = 3;
 
 function inferSearchIntentAxis(option: KeywordOption): string {
   const source = `${option.title} ${option.mainKeyword} ${option.subKeyword1} ${option.subKeyword2}`;
@@ -31,8 +32,9 @@ async function buildKeywordAnalysis(params: {
   option: KeywordOption;
   forbiddenList: string[];
   referenceList: string[];
+  externalSignals?: KeywordOptionAnalysis["externalSignals"];
 }): Promise<KeywordOptionAnalysis> {
-  const { option, forbiddenList, referenceList } = params;
+  const { option, forbiddenList, referenceList, externalSignals } = params;
   const syntheticBody =
     `${option.title}\n${option.mainKeyword}\n${option.subKeyword1}\n${option.subKeyword2}`;
   const keywords = [option.mainKeyword, option.subKeyword1, option.subKeyword2];
@@ -54,13 +56,6 @@ async function buildKeywordAnalysis(params: {
     forbiddenList,
     referenceList,
   });
-  const externalSignals = await getExternalSearchSignals({
-    title: option.title,
-    mainKeyword: option.mainKeyword,
-    subKeyword1: option.subKeyword1,
-    subKeyword2: option.subKeyword2,
-  });
-
   const issues = [
     ...morphology.issues,
     ...languageRisk.issues,
@@ -165,7 +160,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const analyzedResults = await Promise.all(
+    const locallyAnalyzedResults = await Promise.all(
       options.map(async (option) => {
         const validation = validateKeywordOption(option, forbiddenList, referenceList);
         const analysis = await buildKeywordAnalysis({
@@ -183,13 +178,38 @@ export async function POST(request: NextRequest) {
       })
     );
 
-    const results = analyzedResults
-      .sort((a, b) => b._priorityScore - a._priorityScore)
-      .map((item) => {
-        const { _priorityScore, ...rest } = item;
-        void _priorityScore;
-        return rest;
-      });
+    const rankedResults = [...locallyAnalyzedResults].sort((a, b) => b._priorityScore - a._priorityScore);
+    const topForExternalSignals = rankedResults.slice(0, EXTERNAL_SIGNAL_TOP_K);
+
+    const externalSignalEntries = await Promise.all(
+      topForExternalSignals.map(async (item) => {
+        try {
+          const externalSignals = await getExternalSearchSignals({
+            title: item.title,
+            mainKeyword: item.mainKeyword,
+            subKeyword1: item.subKeyword1,
+            subKeyword2: item.subKeyword2,
+          });
+          return [item.title, externalSignals] as const;
+        } catch {
+          return [item.title, undefined] as const;
+        }
+      })
+    );
+
+    const externalSignalMap = new Map(externalSignalEntries);
+
+    const results = rankedResults.map((item) => {
+      const { _priorityScore, analysis, ...rest } = item;
+      void _priorityScore;
+      return {
+        ...rest,
+        analysis: {
+          ...analysis,
+          externalSignals: externalSignalMap.get(item.title),
+        },
+      };
+    });
 
     return NextResponse.json({
       success: true,

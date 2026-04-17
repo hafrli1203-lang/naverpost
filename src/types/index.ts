@@ -258,8 +258,14 @@ export interface ArticleBrief {
   competitorMorphology?: {
     status: "available" | "unavailable";
     sampleSize: number;
+    bodySampleSize?: number;
     commonNouns: string[];
     titleNouns: string[];
+    bodyNouns?: string[];
+    bodyHighlights?: string[];
+    titleAngles?: string[];
+    contentBlocks?: string[];
+    cautionPoints?: string[];
   };
   sources: BlaiSignalSource[];
 }

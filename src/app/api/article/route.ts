@@ -78,11 +78,17 @@ export async function POST(request: NextRequest) {
     }
 
     let competitorMorphology:
-      | {
+        | {
           status: "available" | "unavailable";
           sampleSize: number;
+          bodySampleSize?: number;
           commonNouns: string[];
           titleNouns: string[];
+          bodyNouns?: string[];
+          bodyHighlights?: string[];
+          titleAngles?: string[];
+          contentBlocks?: string[];
+          cautionPoints?: string[];
         }
       | undefined;
     try {
@@ -90,8 +96,14 @@ export async function POST(request: NextRequest) {
       competitorMorphology = {
         status: result.status,
         sampleSize: result.sampleSize,
+        bodySampleSize: result.bodySampleSize,
         commonNouns: result.commonNouns.map((entry) => entry.noun),
         titleNouns: result.titleNouns.map((entry) => entry.noun),
+        bodyNouns: result.bodyNouns.map((entry) => entry.noun),
+        bodyHighlights: result.bodyHighlights,
+        titleAngles: result.titleAngles,
+        contentBlocks: result.contentBlocks,
+        cautionPoints: result.cautionPoints,
       };
     } catch {
       // Competitor morphology analysis failure should not block article generation.

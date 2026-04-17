@@ -110,7 +110,9 @@ export function buildArticlePrompt(params: {
   const competitorSection =
     brief?.competitorMorphology?.status === "available" &&
     (brief.competitorMorphology.commonNouns.length > 0 ||
-      brief.competitorMorphology.titleNouns.length > 0)
+      brief.competitorMorphology.titleNouns.length > 0 ||
+      (brief.competitorMorphology.bodyNouns?.length ?? 0) > 0 ||
+      (brief.competitorMorphology.bodyHighlights?.length ?? 0) > 0)
       ? `\n- 상위 노출 블로그 공통 명사 (${brief.competitorMorphology.sampleSize}건 분석): ${brief.competitorMorphology.commonNouns
           .slice(0, 15)
           .join(", ")}\n- 상위 노출 블로그 제목 명사: ${brief.competitorMorphology.titleNouns

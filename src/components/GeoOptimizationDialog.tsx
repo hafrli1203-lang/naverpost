@@ -50,6 +50,53 @@ function impactBadgeClass(impact: GeoRecommendation["impact"]): string {
   }
 }
 
+function impactLabel(impact: GeoRecommendation["impact"]): string {
+  switch (impact) {
+    case "high":
+      return "영향 큼";
+    case "medium":
+      return "영향 중간";
+    default:
+      return "영향 낮음";
+  }
+}
+
+function buildScoreReasons(
+  analysis: GeoAnalysisResult,
+  selectedIds: GeoRecommendation["id"][]
+): string[] {
+  const selected = analysis.recommendations.filter((item) => selectedIds.includes(item.id));
+  const lines: string[] = [];
+
+  if (selected.some((item) => item.id === "question-heading")) {
+    lines.push("질문형 소제목이 추가되어 AI 인용 구조 점수가 올라갑니다.");
+  }
+  if (selected.some((item) => item.id === "section-answer")) {
+    lines.push("섹션별 핵심 답변이 들어가 요약 가능성이 높아집니다.");
+  }
+  if (selected.some((item) => item.id === "comparison-table")) {
+    lines.push("비교표가 추가되어 정보 구조가 더 선명해집니다.");
+  }
+  if (selected.some((item) => item.id === "faq")) {
+    lines.push("FAQ가 들어가 자주 묻는 질문형 검색 대응력이 올라갑니다.");
+  }
+  if (selected.some((item) => item.id === "source-note")) {
+    lines.push("출처와 확인 포인트가 들어가 신뢰성과 검증 가능성이 올라갑니다.");
+  }
+  if (selected.some((item) => item.id === "author-meta")) {
+    lines.push("작성 주체와 업데이트 정보가 들어가 엔티티 신호가 강화됩니다.");
+  }
+  if (selected.some((item) => item.id === "soften-claims")) {
+    lines.push("과장 표현을 줄여 신뢰도 관련 감점 위험을 낮춥니다.");
+  }
+
+  if (lines.length === 0) {
+    lines.push("선택한 개선안이 아직 없습니다.");
+  }
+
+  return lines;
+}
+
 export function GeoOptimizationDialog({
   article,
   isBusy,
@@ -66,6 +113,10 @@ export function GeoOptimizationDialog({
   );
 
   const effectiveSelectedIds = selectedIds.length > 0 ? selectedIds : recommendationIds;
+  const scoreReasons = useMemo(
+    () => (analysis ? buildScoreReasons(analysis, effectiveSelectedIds) : []),
+    [analysis, effectiveSelectedIds]
+  );
 
   function handleOpenChange(nextOpen: boolean) {
     if (nextOpen && analysis) {
@@ -121,7 +172,9 @@ export function GeoOptimizationDialog({
 
             <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-center">
               <div className="text-5xl font-semibold text-amber-600">{analysis.score}</div>
-              <div className="mt-1 text-sm text-slate-600">/ 100 · {gradeText(analysis.grade)}</div>
+              <div className="mt-1 text-sm text-slate-600">
+                / 100 점, 현재 상태는 {gradeText(analysis.grade)}
+              </div>
             </div>
 
             <div className="mt-5 grid gap-3 md:grid-cols-2">
@@ -148,13 +201,29 @@ export function GeoOptimizationDialog({
 
             <div className="mt-5 rounded-xl border border-slate-200 p-4">
               <div className="mb-3 flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-slate-900">네이버 검색 프리뷰</h3>
+                <h3 className="text-sm font-semibold text-slate-900">점수가 오르는 이유</h3>
                 <span className="text-xs text-slate-500">
-                  인용 밀도 {analysis.citationDensityCount}건 · {analysis.citationDensityLabel}
+                  선택된 개선안 {effectiveSelectedIds.length}개 기준
+                </span>
+              </div>
+              <div className="space-y-2">
+                {scoreReasons.map((reason) => (
+                  <p key={reason} className="text-sm leading-6 text-slate-600">
+                    - {reason}
+                  </p>
+                ))}
+              </div>
+            </div>
+
+            <div className="mt-5 rounded-xl border border-slate-200 p-4">
+              <div className="mb-3 flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-slate-900">검색 미리보기</h3>
+                <span className="text-xs text-slate-500">
+                  출처 언급 {analysis.citationDensityCount}회, {analysis.citationDensityLabel}
                 </span>
               </div>
               <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                <div className="text-xs text-green-600">● 블로그 · blog.naver.com</div>
+                <div className="text-xs text-green-600">미리보기 · blog.naver.com</div>
                 <div className="mt-2 text-xl font-semibold text-slate-900">
                   {analysis.previewTitle}
                 </div>
@@ -167,7 +236,7 @@ export function GeoOptimizationDialog({
             <div className="mt-5">
               <div className="mb-3 flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-slate-900">
-                  변경 항목 ({analysis.recommendations.length}건)
+                  적용 가능한 개선안 ({analysis.recommendations.length}개)
                 </h3>
                 <button
                   type="button"
@@ -216,11 +285,7 @@ export function GeoOptimizationDialog({
                                 recommendation.impact
                               )}`}
                             >
-                              {recommendation.impact === "high"
-                                ? "높음"
-                                : recommendation.impact === "medium"
-                                  ? "보통"
-                                  : "낮음"}
+                              {impactLabel(recommendation.impact)}
                             </span>
                           </div>
                           <p className="text-sm text-slate-600">{recommendation.description}</p>
@@ -231,13 +296,13 @@ export function GeoOptimizationDialog({
                       {(recommendation.before || recommendation.after) && (
                         <div className="mt-3 grid gap-2 md:grid-cols-2">
                           <div className="rounded-xl bg-slate-50 p-3">
-                            <div className="mb-1 text-xs text-slate-500">현재</div>
+                            <div className="mb-1 text-xs text-slate-500">적용 전</div>
                             <div className="text-sm text-slate-700">
                               {recommendation.before ?? "없음"}
                             </div>
                           </div>
                           <div className="rounded-xl bg-cyan-50 p-3">
-                            <div className="mb-1 text-xs text-teal-600">최적화</div>
+                            <div className="mb-1 text-xs text-teal-600">적용 후</div>
                             <div className="text-sm text-slate-700">
                               {recommendation.after ?? "없음"}
                             </div>
@@ -265,7 +330,7 @@ export function GeoOptimizationDialog({
               ) : (
                 <TrendingUp className="h-4 w-4" />
               )}
-              선택 적용 ({effectiveSelectedIds.length})
+              선택 항목 적용 ({effectiveSelectedIds.length})
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -274,7 +339,7 @@ export function GeoOptimizationDialog({
       {lastResult && (
         <div className="rounded-xl border border-teal-200 bg-teal-50 px-4 py-3 text-sm text-teal-800">
           GEO 점수가 {lastResult.analysisBefore.score}점에서 {lastResult.analysisAfter.score}점으로
-          변경되었습니다.
+          올라갔습니다.
         </div>
       )}
     </>

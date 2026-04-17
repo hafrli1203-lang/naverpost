@@ -3,6 +3,10 @@ import { NextRequest, NextResponse } from "next/server";
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
+  if (process.env.NODE_ENV !== "production") {
+    return NextResponse.next();
+  }
+
   if (pathname === "/login" || pathname === "/api/auth") {
     return NextResponse.next();
   }
