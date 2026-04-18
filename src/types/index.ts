@@ -192,13 +192,11 @@ export interface GeoCategoryScore {
 
 export interface GeoRecommendation {
   id:
+    | "direct-answer-lead"
     | "question-heading"
     | "comparison-table"
     | "soften-claims"
-    | "section-answer"
-    | "faq"
-    | "source-note"
-    | "author-meta";
+    | "remove-template-blocks";
   title: string;
   description: string;
   category: GeoRecommendationCategory;

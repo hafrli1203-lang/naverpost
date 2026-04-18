@@ -53,6 +53,12 @@ function buildFinalReport(state: WorkflowState) {
     }
   }
 
+  for (let i = 0; i < actions.length; i += 1) {
+    if (/FAQ|질문형|핵심 답변/.test(actions[i])) {
+      actions[i] = "ë³¸ë¬¸ íë¦„ì€ ìœ ì§€í•˜ë˜ í‘œ, ê·¼ê±° ë¬¸ìž¥, ì •ë³´ ê¸°ì¤€ ìœ„ì£¼ë¡œë§Œ ë³´ê°•í•˜ëŠ” íŽ¸ì´ ì•ˆì „í•©ë‹ˆë‹¤.";
+    }
+  }
+
   if (article.validation.revisionReasons.length === 0) {
     strengths.push("본문 검증에서 큰 수정 사유가 잡히지 않았습니다.");
   } else {

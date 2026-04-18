@@ -68,26 +68,20 @@ function buildScoreReasons(
   const selected = analysis.recommendations.filter((item) => selectedIds.includes(item.id));
   const lines: string[] = [];
 
-  if (selected.some((item) => item.id === "question-heading")) {
-    lines.push("질문형 소제목이 추가되어 AI 인용 구조 점수가 올라갑니다.");
+  if (selected.some((item) => item.id === "remove-template-blocks")) {
+    lines.push("기계적으로 붙은 FAQ·핵심 답변 블록을 걷어내 본문 흐름이 더 자연스러워집니다.");
   }
-  if (selected.some((item) => item.id === "section-answer")) {
-    lines.push("섹션별 핵심 답변이 들어가 요약 가능성이 높아집니다.");
+  if (selected.some((item) => item.id === "direct-answer-lead") && false) {
+    lines.push("도입부에서 질문에 바로 답해 AI와 사용자가 핵심 기준을 더 빨리 파악할 수 있습니다.");
+  }
+  if (selected.some((item) => item.id === "question-heading") && false) {
+    lines.push("질문형 소제목으로 구조를 정리해 탐색 흐름과 인용 가능성을 함께 높입니다.");
   }
   if (selected.some((item) => item.id === "comparison-table")) {
-    lines.push("비교표가 추가되어 정보 구조가 더 선명해집니다.");
-  }
-  if (selected.some((item) => item.id === "faq")) {
-    lines.push("FAQ가 들어가 자주 묻는 질문형 검색 대응력이 올라갑니다.");
-  }
-  if (selected.some((item) => item.id === "source-note")) {
-    lines.push("출처와 확인 포인트가 들어가 신뢰성과 검증 가능성이 올라갑니다.");
-  }
-  if (selected.some((item) => item.id === "author-meta")) {
-    lines.push("작성 주체와 업데이트 정보가 들어가 엔티티 신호가 강화됩니다.");
+    lines.push("판단 기준 표를 보강해 증상·검사 시점 같은 정보를 한눈에 정리할 수 있습니다.");
   }
   if (selected.some((item) => item.id === "soften-claims")) {
-    lines.push("과장 표현을 줄여 신뢰도 관련 감점 위험을 낮춥니다.");
+    lines.push("과장 표현을 줄여 건강성 주제에서 신뢰를 해치지 않는 문장으로 다듬습니다.");
   }
 
   if (lines.length === 0) {
@@ -173,7 +167,7 @@ export function GeoOptimizationDialog({
             <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-center">
               <div className="text-5xl font-semibold text-amber-600">{analysis.score}</div>
               <div className="mt-1 text-sm text-slate-600">
-                / 100 점, 현재 상태는 {gradeText(analysis.grade)}
+                / 100점, 현재 상태는 {gradeText(analysis.grade)}
               </div>
             </div>
 
@@ -219,7 +213,7 @@ export function GeoOptimizationDialog({
               <div className="mb-3 flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-slate-900">검색 미리보기</h3>
                 <span className="text-xs text-slate-500">
-                  출처 언급 {analysis.citationDensityCount}회, {analysis.citationDensityLabel}
+                  근거 언급 {analysis.citationDensityCount}회, {analysis.citationDensityLabel}
                 </span>
               </div>
               <div className="rounded-2xl border border-slate-200 bg-white p-4">
