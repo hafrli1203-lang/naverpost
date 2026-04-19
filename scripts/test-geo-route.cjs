@@ -1,4 +1,4 @@
-const fs = require("fs");
+﻿const fs = require("fs");
 const path = require("path");
 const vm = require("vm");
 const ts = require("typescript");
@@ -15,11 +15,9 @@ function transpileModule(filePath) {
   }).outputText;
 }
 
-function loadRouteModule() {
+function loadRouteModule(options = {}) {
   const routePath = path.join(process.cwd(), "src", "app", "api", "article", "geo", "route.ts");
   const code = transpileModule(routePath);
-
-  const advancedJobs = new Map();
 
   const mockApplyGeoRecommendations = (article, selectedIds) => ({
     appliedRecommendationIds: selectedIds,
@@ -32,7 +30,7 @@ function loadRouteModule() {
       recommendations: [],
       previewTitle: article.title,
       previewDescription: article.content.slice(0, 60),
-      citationDensityLabel: "낮음",
+      citationDensityLabel: "부족",
       citationDensityCount: 0,
     },
     analysisAfter: {
@@ -54,7 +52,7 @@ function loadRouteModule() {
     exports: module.exports,
     process,
     console,
-    crypto: { randomUUID: () => "job-test-123" },
+    crypto: { randomUUID: () => `job-${Math.random().toString(36).slice(2)}` },
     setTimeout,
     clearTimeout,
     require: (specifier) => {
@@ -74,7 +72,24 @@ function loadRouteModule() {
       if (specifier === "@/lib/ai/claude") {
         return {
           rewriteArticleForGeo: async () =>
-            "안경렌즈 스크래치는 세척 방식과 보관 습관에 따라 빨라질 수 있습니다.\n\n## 관리 기준\n\n| 항목 | 설명 |\n| :--- | :--- |\n| 기준 | 점검 |\n",
+            options.rewriteText ??
+            [
+              "안경테 스크래치는 닦는 습관과 보관 방식에 따라 더 빨리 생길 수 있습니다.",
+              "",
+              "## 어떤 관리 습관이 영향을 줄까요?",
+              "안경테 스크래치는 마른 천으로 반복해서 닦을 때 더 잘 생깁니다.",
+              "",
+              "## 왜 보관 방식도 중요할까요?",
+              "케이스 없이 가방에 넣으면 표면 손상이 빨라질 수 있습니다.",
+              "",
+              "## 소재별로 차이가 있을까요?",
+              "| 항목 | 설명 |",
+              "| :--- | :--- |",
+              "| 관리 | 기본 점검 |",
+              "",
+              "## 언제 점검을 받아보면 좋을까요?",
+              "안경원 상담을 통해 현재 상태를 확인해보는 것이 좋습니다.",
+            ].join("\n"),
         };
       }
       if (specifier === "@/lib/geo/harness") {
@@ -159,12 +174,19 @@ async function main() {
   const { POST } = loadRouteModule();
 
   const article = {
-    title: "안경렌즈 스크래치 발생 원인과 수명 단축 관계",
-    content:
-      "안경렌즈 스크래치가 생기면 빛 번짐이 심해질 수 있습니다.\n\n| 항목 | 설명 |\n| :--- | :--- |\n| 원인 | 마찰 |\n",
-    mainKeyword: "안경렌즈 스크래치",
-    subKeyword1: "안경렌즈 수명",
-    subKeyword2: "안경렌즈 관리",
+    title: "안경테 스크래치 발생 원인과 수명 단축 관계",
+    content: [
+      "안경테 스크래치가 생기면 표면 손상이 더 빨리 눈에 띌 수 있습니다.",
+      "",
+      "| 항목 | 설명 |",
+      "| :--- | :--- |",
+      "| 원인 | 마찰 |",
+      "",
+      "지니스안경 김해장유점에서 현재 상태를 확인할 수 있습니다.",
+    ].join("\n"),
+    mainKeyword: "안경테 스크래치",
+    subKeyword1: "안경테 수명",
+    subKeyword2: "안경테 관리",
     shopName: "지니스안경 김해장유점",
     category: "안경원",
     validation: {
@@ -229,6 +251,40 @@ async function main() {
   );
   if (invalidStatus.status !== 404) {
     throw new Error("advanced-status missing-job should return 404");
+  }
+
+  const { POST: guardedPost } = loadRouteModule({
+    rewriteText: [
+      "---",
+      "",
+      "## 엉뚱한 이야기",
+      "전혀 다른 주제로 바뀐 문장입니다.",
+      "",
+      "## 또 다른 문단",
+      "지역 정보도 매장 정보도 없습니다.",
+      "",
+      "| 항목 | 설명 |",
+      "| :--- | :--- |",
+      "| 무관 | 내용 |",
+    ].join("\n"),
+  });
+
+  const guardedStart = await guardedPost(
+    mockRequest({
+      mode: "start-advanced",
+      article,
+      selectedRecommendationIds: ["remove-template-blocks", "comparison-table", "direct-answer-lead"],
+    })
+  );
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  const guardedStatus = await guardedPost(
+    mockRequest({
+      mode: "advanced-status",
+      jobId: guardedStart.body.data.jobId,
+    })
+  );
+  if (guardedStatus.body?.data?.optimization?.analysisAfter?.score !== 68) {
+    throw new Error("advanced GEO guard should reject low-integrity rewrites");
   }
 
   console.log("geo-route tests passed");

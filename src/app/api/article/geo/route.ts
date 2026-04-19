@@ -57,6 +57,11 @@ type AdvancedGeoJob = {
 
 const advancedGeoJobs = new Map<string, AdvancedGeoJob>();
 
+type RewriteIntegrityCheck = {
+  ok: boolean;
+  reasons: string[];
+};
+
 function buildValidationKeywords(article: ArticleContent) {
   return {
     title: article.title,
@@ -202,6 +207,91 @@ function computeTokenCoverage(required: string[], content: string): number {
   return hitCount / required.length;
 }
 
+function countParagraphs(content: string): number {
+  return content
+    .split(/\n\s*\n/)
+    .map((block) => block.trim())
+    .filter(Boolean).length;
+}
+
+function countBullets(content: string): number {
+  return (content.match(/^\s*[-*]\s+/gm) ?? []).length;
+}
+
+function countHeadings(content: string): number {
+  return (content.match(/^##\s+/gm) ?? []).length;
+}
+
+function countSentences(content: string): number {
+  return (
+    content
+      .split(/[.!?]\s+|[。！？]\s*|\n+/)
+      .map((part) => part.trim())
+      .filter((part) => part.length >= 8).length || 1
+  );
+}
+
+function hasAwkwardFormatting(content: string): boolean {
+  return /^---/m.test(content) || /(?:^|\n)---(?:\n|$)/.test(content);
+}
+
+function checkRewriteIntegrity(
+  article: ArticleContent,
+  originalContent: string,
+  candidateContent: string
+): RewriteIntegrityCheck {
+  const reasons: string[] = [];
+  const normalizedOriginal = originalContent.replace(/\s+/g, " ").trim();
+  const normalizedCandidate = candidateContent.replace(/\s+/g, " ").trim();
+
+  if (hasAwkwardFormatting(candidateContent)) {
+    reasons.push("구분선 같은 인위적 서식이 추가됨");
+  }
+
+  const originalParagraphs = countParagraphs(originalContent);
+  const candidateParagraphs = countParagraphs(candidateContent);
+  if (candidateParagraphs < Math.max(3, Math.floor(originalParagraphs * 0.6))) {
+    reasons.push("문단 수가 지나치게 줄어 의미가 축약될 위험이 있음");
+  }
+
+  const originalSentences = countSentences(originalContent);
+  const candidateSentences = countSentences(candidateContent);
+  if (candidateSentences < Math.max(4, Math.floor(originalSentences * 0.6))) {
+    reasons.push("설명 문장 수가 지나치게 줄어듦");
+  }
+
+  const originalBullets = countBullets(originalContent);
+  const candidateBullets = countBullets(candidateContent);
+  if (candidateBullets > Math.max(originalBullets + 3, 5)) {
+    reasons.push("목록형 문장이 과도하게 늘어 자연스러움이 떨어질 수 있음");
+  }
+
+  const candidateHeadings = countHeadings(candidateContent);
+  if (candidateHeadings < 3 || candidateHeadings > 5) {
+    reasons.push("소제목 구조가 과하거나 부족함");
+  }
+
+  const originalTokens = extractMeaningfulTokens(
+    `${article.title} ${article.mainKeyword} ${article.subKeyword1} ${article.subKeyword2} ${normalizedOriginal}`
+  );
+  if (computeTokenCoverage(originalTokens.slice(0, 24), normalizedCandidate) < 0.55) {
+    reasons.push("원문 핵심 의미 보존 비율이 낮음");
+  }
+
+  if (normalizedOriginal.includes(article.shopName) && !normalizedCandidate.includes(article.shopName)) {
+    reasons.push("매장 정보가 누락됨");
+  }
+
+  if (normalizedOriginal.includes(article.category) && !normalizedCandidate.includes(article.category)) {
+    reasons.push("업종 맥락이 누락됨");
+  }
+
+  return {
+    ok: reasons.length === 0,
+    reasons,
+  };
+}
+
 function isTopicAligned(article: ArticleContent, content: string): boolean {
   const normalized = content.replace(/\s+/g, " ").trim();
   if (!normalized.includes(article.mainKeyword)) return false;
@@ -255,6 +345,9 @@ async function optimizeGeoWithAi(
 
     const candidateContent = sanitizeGeoRewrite(rewritten, article.title);
     if (!isTopicAligned(article, candidateContent)) continue;
+
+    const integrity = checkRewriteIntegrity(article, bestContent, candidateContent);
+    if (!integrity.ok) continue;
 
     const candidateValidation = buildFastValidation(
       candidateContent,
