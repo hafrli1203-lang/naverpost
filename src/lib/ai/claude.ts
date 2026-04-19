@@ -9,6 +9,7 @@ function getClient(): Anthropic {
 
 const MODEL = "claude-opus-4-6";
 const PROMPT_MODEL = "claude-sonnet-4-6";
+const GEO_MODEL = "claude-sonnet-4-6";
 
 export async function generateKeywords(
   prompt: string
@@ -54,6 +55,21 @@ export async function reviseArticle(prompt: string): Promise<string> {
     model: MODEL,
     max_tokens: 4096,
     messages: [{ role: "user", content: prompt }],
+  });
+
+  return message.content[0].type === "text" ? message.content[0].text : "";
+}
+
+export async function rewriteArticleForGeo(
+  prompt: string,
+  timeoutMs = 60000
+): Promise<string> {
+  const message = await getClient().messages.create({
+    model: GEO_MODEL,
+    max_tokens: 3200,
+    messages: [{ role: "user", content: prompt }],
+  }, {
+    timeout: timeoutMs,
   });
 
   return message.content[0].type === "text" ? message.content[0].text : "";

@@ -31,6 +31,9 @@ interface ArticlePreviewProps {
   onApplyGeo: (
     selectedRecommendationIds: GeoRecommendation["id"][]
   ) => Promise<GeoOptimizationResult | null>;
+  onApplyAdvancedGeo?: (
+    selectedRecommendationIds: GeoRecommendation["id"][]
+  ) => Promise<GeoOptimizationResult | null>;
   isLoading: boolean;
   isGeoLoading?: boolean;
   targetCharCount?: number;
@@ -132,6 +135,7 @@ export function ArticlePreview({
   onManualEdit,
   onSave,
   onApplyGeo,
+  onApplyAdvancedGeo,
   isLoading,
   isGeoLoading = false,
   targetCharCount = 2000,
@@ -511,6 +515,7 @@ export function ArticlePreview({
           article={article}
           isBusy={isLoading || isGeoLoading}
           onApply={onApplyGeo}
+          onApplyAdvanced={onApplyAdvancedGeo}
         />
         <Button
           variant="outline"

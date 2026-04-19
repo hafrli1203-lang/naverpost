@@ -22,7 +22,9 @@ type GeoIntent =
   | "checklist"
   | "general";
 
-const TODAY = "2026-04-18";
+export type GeoHarnessMode = "safe" | "aggressive";
+
+const TODAY = "2026-04-19";
 
 const ABSOLUTE_PHRASE_REPLACEMENTS: Array<{ from: RegExp; to: string }> = [
   { from: /100%\s*해결/gi, to: "도움이 될 수 있는 방향으로" },
@@ -291,10 +293,15 @@ function buildStructuredTable(article: ArticleContent): string {
   }
 }
 
-function analyzeCategories(article: ArticleContent): GeoCategoryScore[] {
+function analyzeCategories(
+  article: ArticleContent,
+  mode: GeoHarnessMode = "safe"
+): GeoCategoryScore[] {
   const content = article.content;
   const headings = parseHeadings(content);
   const meaningfulHeadings = headings.filter((heading) => !isTemplateHeading(heading.raw));
+  const questionHeading = hasQuestionHeading(headings);
+  const directAnswerLead = hasDirectAnswerLead(content, article);
   const table = hasTable(content);
   const templateArtifacts = hasTemplateArtifacts(content);
   const sourceMentions = countSourceMentions(content);
@@ -317,15 +324,27 @@ function analyzeCategories(article: ArticleContent): GeoCategoryScore[] {
         0,
         Math.min(
           30,
-          (meaningfulHeadings.length >= 4
-            ? 12
-            : meaningfulHeadings.length >= 3
-              ? 10
-              : meaningfulHeadings.length >= 2
-                ? 7
-                : 3) +
-            (table ? 10 : 0) +
-            (!templateArtifacts ? 8 : 0)
+          mode === "aggressive"
+            ? (directAnswerLead ? 8 : 0) +
+              (questionHeading ? 6 : 0) +
+              (meaningfulHeadings.length >= 4
+                ? 8
+                : meaningfulHeadings.length >= 3
+                  ? 6
+                  : meaningfulHeadings.length >= 2
+                    ? 4
+                    : 2) +
+              (table ? 5 : 0) +
+              (!templateArtifacts ? 3 : 0)
+            : (meaningfulHeadings.length >= 4
+                ? 12
+                : meaningfulHeadings.length >= 3
+                  ? 10
+                  : meaningfulHeadings.length >= 2
+                    ? 7
+                    : 3) +
+              (table ? 10 : 0) +
+              (!templateArtifacts ? 8 : 0)
         )
       ),
       maxScore: 30,
@@ -370,7 +389,10 @@ function analyzeCategories(article: ArticleContent): GeoCategoryScore[] {
   ];
 }
 
-function buildRecommendations(article: ArticleContent): GeoRecommendation[] {
+function buildRecommendations(
+  article: ArticleContent,
+  mode: GeoHarnessMode = "safe"
+): GeoRecommendation[] {
   const content = article.content;
   const headings = parseHeadings(content);
   const firstHeading = headings[0];
@@ -390,7 +412,7 @@ function buildRecommendations(article: ArticleContent): GeoRecommendation[] {
     });
   }
 
-  if (!hasDirectAnswerLead(content, article) && false) {
+  if (!hasDirectAnswerLead(content, article) && mode === "aggressive") {
     recommendations.push({
       id: "direct-answer-lead",
       title: "도입부에 바로 답하기",
@@ -404,7 +426,7 @@ function buildRecommendations(article: ArticleContent): GeoRecommendation[] {
     });
   }
 
-  if (!hasQuestionHeading(headings) && false) {
+  if (!hasQuestionHeading(headings) && mode === "aggressive") {
     recommendations.push({
       id: "question-heading",
       title: "질문형 소제목으로 정리",
@@ -463,11 +485,14 @@ function buildSummary(score: number): string {
   return "GEO 관점에서 본문 구조와 신뢰 표현을 다시 정리할 필요가 있습니다.";
 }
 
-export function runGeoHarness(article: ArticleContent): GeoAnalysisResult {
-  const categories = analyzeCategories(article);
+export function runGeoHarness(
+  article: ArticleContent,
+  mode: GeoHarnessMode = "safe"
+): GeoAnalysisResult {
+  const categories = analyzeCategories(article, mode);
   const score = categories.reduce((sum, item) => sum + item.score, 0);
   const citationDensityCount = countSourceMentions(article.content);
-  const recommendations = buildRecommendations(article);
+  const recommendations = buildRecommendations(article, mode);
 
   return {
     score,
@@ -566,9 +591,10 @@ function appendUniqueBlock(content: string, block: string): string {
 
 export function applyGeoRecommendations(
   article: ArticleContent,
-  selectedRecommendationIds: GeoRecommendation["id"][]
+  selectedRecommendationIds: GeoRecommendation["id"][],
+  mode: GeoHarnessMode = "safe"
 ): GeoOptimizationResult {
-  const analysisBefore = runGeoHarness(article);
+  const analysisBefore = runGeoHarness(article, mode);
   let nextContent = article.content;
 
   if (selectedRecommendationIds.includes("remove-template-blocks")) {
@@ -579,11 +605,11 @@ export function applyGeoRecommendations(
     nextContent = softenClaims(nextContent);
   }
 
-  if (selectedRecommendationIds.includes("question-heading") && false) {
+  if (selectedRecommendationIds.includes("question-heading") && mode === "aggressive") {
     nextContent = replaceFirstHeading(getLines(nextContent), article).join("\n");
   }
 
-  if (selectedRecommendationIds.includes("direct-answer-lead") && false) {
+  if (selectedRecommendationIds.includes("direct-answer-lead") && mode === "aggressive") {
     nextContent = insertLeadParagraph(nextContent, buildLeadAnswer(article));
   }
 
@@ -591,10 +617,13 @@ export function applyGeoRecommendations(
     nextContent = appendUniqueBlock(nextContent, buildStructuredTable(article));
   }
 
-  const analysisAfter = runGeoHarness({
-    ...article,
-    content: nextContent,
-  });
+  const analysisAfter = runGeoHarness(
+    {
+      ...article,
+      content: nextContent,
+    },
+    mode
+  );
 
   if (analysisAfter.score < analysisBefore.score) {
     return {

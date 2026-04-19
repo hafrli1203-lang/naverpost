@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:geo": "node scripts/test-geo-harness.cjs"
+    "test:geo": "node scripts/test-geo-harness.cjs",
+    "eval:geo:aggressive": "node scripts/geo-aggressive-eval.cjs",
+    "eval:geo:ai": "node scripts/geo-ai-eval.cjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",

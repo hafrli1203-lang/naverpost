@@ -199,6 +199,88 @@ export default function Home() {
     [state.article, setState]
   );
 
+  const applyAdvancedGeo = useCallback(
+    async (
+      selectedRecommendationIds: GeoRecommendation["id"][]
+    ): Promise<GeoOptimizationResult | null> => {
+      if (!state.article) return null;
+
+      setIsGeoLoading(true);
+      try {
+        const startRes = await fetch("/api/article/geo", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            mode: "start-advanced",
+            article: state.article,
+            selectedRecommendationIds,
+          }),
+        });
+        const startJson = await safeJson(startRes);
+        if (!startRes.ok || !startJson.success) {
+          throw new Error(startJson.error ?? "고득점 GEO 작업 시작에 실패했습니다.");
+        }
+
+        const jobId = (startJson.data as { jobId?: string } | undefined)?.jobId;
+        if (!jobId) {
+          throw new Error("고득점 GEO 작업 ID를 받지 못했습니다.");
+        }
+
+        const startedAt = Date.now();
+        const timeoutMs = 120000;
+
+        while (Date.now() - startedAt < timeoutMs) {
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+
+          const statusRes = await fetch("/api/article/geo", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              mode: "advanced-status",
+              jobId,
+            }),
+          });
+          const statusJson = await safeJson(statusRes);
+          if (!statusRes.ok || !statusJson.success) {
+            throw new Error(statusJson.error ?? "고득점 GEO 상태 확인에 실패했습니다.");
+          }
+
+          const job = statusJson.data as {
+            status: "pending" | "running" | "completed" | "failed";
+            article?: ArticleContent;
+            optimization?: GeoOptimizationResult;
+            error?: string;
+          };
+
+          if (job.status === "completed" && job.article && job.optimization) {
+            setState((prev) => ({
+              ...prev,
+              article: job.article!,
+            }));
+            toast.success(`고득점 GEO 실험 완료: ${buildGeoToastMessage(job.optimization)}`);
+            return job.optimization;
+          }
+
+          if (job.status === "failed") {
+            throw new Error(job.error ?? "고득점 GEO 작업이 실패했습니다.");
+          }
+        }
+
+        throw new Error("고득점 GEO 작업 시간이 초과되었습니다.");
+      } catch (error) {
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : "고득점 GEO 적용 중 오류가 발생했습니다."
+        );
+        return null;
+      } finally {
+        setIsGeoLoading(false);
+      }
+    },
+    [state.article, setState]
+  );
+
   useEffect(() => {
     if (!state.article || state.article.geo || isGeoLoading) return;
 
@@ -785,6 +867,7 @@ export default function Home() {
             onManualEdit={handleManualEdit}
             onSave={handleSaveSession}
             onApplyGeo={applyGeo}
+            onApplyAdvancedGeo={applyAdvancedGeo}
             isLoading={isLoading || isGeneratingImages}
             isGeoLoading={isGeoLoading}
             targetCharCount={articleOptions?.charCount ?? 2000}

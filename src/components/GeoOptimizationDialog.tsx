@@ -24,6 +24,9 @@ interface GeoOptimizationDialogProps {
   onApply: (
     selectedRecommendationIds: GeoRecommendation["id"][]
   ) => Promise<GeoOptimizationResult | null>;
+  onApplyAdvanced?: (
+    selectedRecommendationIds: GeoRecommendation["id"][]
+  ) => Promise<GeoOptimizationResult | null>;
 }
 
 function gradeText(grade: GeoAnalysisResult["grade"]): string {
@@ -35,7 +38,7 @@ function gradeText(grade: GeoAnalysisResult["grade"]): string {
     case "fair":
       return "보통";
     default:
-      return "보완 필요";
+      return "개선 필요";
   }
 }
 
@@ -74,7 +77,7 @@ function buildGeoResultMessage(result: GeoOptimizationResult): string {
   }
 
   if (result.appliedRecommendationIds.length === 0) {
-    return `GEO 점수는 ${before}점으로 유지됐고, 적용할 만한 유의미한 변경은 보류했습니다.`;
+    return `GEO 점수는 ${before}점으로 유지됐고, 유의미한 변경은 보류했습니다.`;
   }
 
   return `GEO 점수는 ${before}점으로 유지됐습니다.`;
@@ -88,23 +91,23 @@ function buildScoreReasons(
   const lines: string[] = [];
 
   if (selected.some((item) => item.id === "remove-template-blocks")) {
-    lines.push("기계적으로 붙은 FAQ·핵심 답변 블록을 걷어내 본문 흐름이 더 자연스러워집니다.");
-  }
-  if (selected.some((item) => item.id === "direct-answer-lead") && false) {
-    lines.push("도입부에서 질문에 바로 답해 AI와 사용자가 핵심 기준을 더 빨리 파악할 수 있습니다.");
-  }
-  if (selected.some((item) => item.id === "question-heading") && false) {
-    lines.push("질문형 소제목으로 구조를 정리해 탐색 흐름과 인용 가능성을 함께 높입니다.");
+    lines.push("기계적으로 붙은 FAQ, 핵심 답변, 확인 문구를 걷어내 본문 흐름을 자연스럽게 유지합니다.");
   }
   if (selected.some((item) => item.id === "comparison-table")) {
-    lines.push("판단 기준 표를 보강해 증상·검사 시점 같은 정보를 한눈에 정리할 수 있습니다.");
+    lines.push("비교나 기준이 필요한 글은 표를 보강해 AI가 인용하기 쉬운 구조로 만듭니다.");
   }
   if (selected.some((item) => item.id === "soften-claims")) {
-    lines.push("과장 표현을 줄여 건강성 주제에서 신뢰를 해치지 않는 문장으로 다듬습니다.");
+    lines.push("과장되거나 단정적인 표현을 완화해 신뢰도 신호를 보강합니다.");
+  }
+  if (selected.some((item) => item.id === "direct-answer-lead")) {
+    lines.push("도입부에서 주제를 더 빨리 설명하도록 정리합니다.");
+  }
+  if (selected.some((item) => item.id === "question-heading")) {
+    lines.push("소제목 구조를 정리해 주제별 구분을 더 선명하게 만듭니다.");
   }
 
   if (lines.length === 0) {
-    lines.push("선택한 개선안이 아직 없습니다.");
+    lines.push("현재 선택으로는 큰 구조 변화 없이 본문을 유지합니다.");
   }
 
   return lines;
@@ -114,6 +117,7 @@ export function GeoOptimizationDialog({
   article,
   isBusy,
   onApply,
+  onApplyAdvanced,
 }: GeoOptimizationDialogProps) {
   const [open, setOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState<GeoRecommendation["id"][]>([]);
@@ -153,6 +157,15 @@ export function GeoOptimizationDialog({
 
   async function handleApply() {
     const result = await onApply(effectiveSelectedIds);
+    if (result) {
+      setLastResult(result);
+      setOpen(false);
+    }
+  }
+
+  async function handleApplyAdvanced() {
+    if (!onApplyAdvanced) return;
+    const result = await onApplyAdvanced(effectiveSelectedIds);
     if (result) {
       setLastResult(result);
       setOpen(false);
@@ -214,9 +227,9 @@ export function GeoOptimizationDialog({
 
             <div className="mt-5 rounded-xl border border-slate-200 p-4">
               <div className="mb-3 flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-slate-900">점수가 오르는 이유</h3>
+                <h3 className="text-sm font-semibold text-slate-900">점수 반영 기준</h3>
                 <span className="text-xs text-slate-500">
-                  선택된 개선안 {effectiveSelectedIds.length}개 기준
+                  선택 항목 {effectiveSelectedIds.length}개
                 </span>
               </div>
               <div className="space-y-2">
@@ -230,13 +243,13 @@ export function GeoOptimizationDialog({
 
             <div className="mt-5 rounded-xl border border-slate-200 p-4">
               <div className="mb-3 flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-slate-900">검색 미리보기</h3>
+                <h3 className="text-sm font-semibold text-slate-900">노출 미리보기</h3>
                 <span className="text-xs text-slate-500">
-                  근거 언급 {analysis.citationDensityCount}회, {analysis.citationDensityLabel}
+                  근거 표현 {analysis.citationDensityCount}회, {analysis.citationDensityLabel}
                 </span>
               </div>
               <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                <div className="text-xs text-green-600">미리보기 · blog.naver.com</div>
+                <div className="text-xs text-green-600">미리보기 기준 blog.naver.com</div>
                 <div className="mt-2 text-xl font-semibold text-slate-900">
                   {analysis.previewTitle}
                 </div>
@@ -249,7 +262,7 @@ export function GeoOptimizationDialog({
             <div className="mt-5">
               <div className="mb-3 flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-slate-900">
-                  적용 가능한 개선안 ({analysis.recommendations.length}개)
+                  적용 가능 항목 ({analysis.recommendations.length}개)
                 </h3>
                 <button
                   type="button"
@@ -309,13 +322,13 @@ export function GeoOptimizationDialog({
                       {(recommendation.before || recommendation.after) && (
                         <div className="mt-3 grid gap-2 md:grid-cols-2">
                           <div className="rounded-xl bg-slate-50 p-3">
-                            <div className="mb-1 text-xs text-slate-500">적용 전</div>
+                            <div className="mb-1 text-xs text-slate-500">변경 전</div>
                             <div className="text-sm text-slate-700">
                               {recommendation.before ?? "없음"}
                             </div>
                           </div>
                           <div className="rounded-xl bg-cyan-50 p-3">
-                            <div className="mb-1 text-xs text-teal-600">적용 후</div>
+                            <div className="mb-1 text-xs text-teal-600">변경 후</div>
                             <div className="text-sm text-slate-700">
                               {recommendation.after ?? "없음"}
                             </div>
@@ -333,6 +346,21 @@ export function GeoOptimizationDialog({
             <Button variant="outline" onClick={() => setOpen(false)} disabled={isBusy}>
               닫기
             </Button>
+            {onApplyAdvanced && (
+              <Button
+                variant="outline"
+                onClick={handleApplyAdvanced}
+                disabled={isBusy || effectiveSelectedIds.length === 0}
+                className="gap-2 border-amber-300 text-amber-700 hover:bg-amber-50 hover:text-amber-800"
+              >
+                {isBusy ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Sparkles className="h-4 w-4" />
+                )}
+                고득점 GEO 실험
+              </Button>
+            )}
             <Button
               onClick={handleApply}
               disabled={isBusy || effectiveSelectedIds.length === 0}
