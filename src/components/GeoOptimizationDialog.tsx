@@ -21,6 +21,7 @@ import type {
 interface GeoOptimizationDialogProps {
   article: ArticleContent;
   isBusy: boolean;
+  onRefreshAnalysis?: () => Promise<GeoAnalysisResult | null>;
   onApply: (
     selectedRecommendationIds: GeoRecommendation["id"][]
   ) => Promise<GeoOptimizationResult | null>;
@@ -116,6 +117,7 @@ function buildScoreReasons(
 export function GeoOptimizationDialog({
   article,
   isBusy,
+  onRefreshAnalysis,
   onApply,
   onApplyAdvanced,
 }: GeoOptimizationDialogProps) {
@@ -135,13 +137,18 @@ export function GeoOptimizationDialog({
     [analysis, effectiveSelectedIds]
   );
 
-  function handleOpenChange(nextOpen: boolean) {
-    if (nextOpen && analysis) {
-      setSelectedIds(
-        analysis.recommendations
-          .filter((item) => item.selectedByDefault)
-          .map((item) => item.id)
-      );
+  async function handleOpenChange(nextOpen: boolean) {
+    if (nextOpen) {
+      const refreshed = onRefreshAnalysis ? await onRefreshAnalysis() : analysis;
+      const sourceAnalysis = refreshed ?? analysis;
+
+      if (sourceAnalysis) {
+        setSelectedIds(
+          sourceAnalysis.recommendations
+            .filter((item) => item.selectedByDefault)
+            .map((item) => item.id)
+        );
+      }
     }
     if (!nextOpen) {
       setLastResult(null);

@@ -8,7 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { GeoOptimizationDialog } from "@/components/GeoOptimizationDialog";
-import { ArticleContent, GeoOptimizationResult, GeoRecommendation } from "@/types";
+import { ArticleContent, GeoAnalysisResult, GeoOptimizationResult, GeoRecommendation } from "@/types";
 import {
   CheckCircle,
   AlertTriangle,
@@ -28,6 +28,7 @@ interface ArticlePreviewProps {
   onRewrite: () => void;
   onManualEdit: (content: string) => void | Promise<void>;
   onSave?: () => void;
+  onRefreshGeoAnalysis?: () => Promise<GeoAnalysisResult | null>;
   onApplyGeo: (
     selectedRecommendationIds: GeoRecommendation["id"][]
   ) => Promise<GeoOptimizationResult | null>;
@@ -134,6 +135,7 @@ export function ArticlePreview({
   onRewrite,
   onManualEdit,
   onSave,
+  onRefreshGeoAnalysis,
   onApplyGeo,
   onApplyAdvancedGeo,
   isLoading,
@@ -514,6 +516,7 @@ export function ArticlePreview({
         <GeoOptimizationDialog
           article={article}
           isBusy={isLoading || isGeoLoading}
+          onRefreshAnalysis={onRefreshGeoAnalysis}
           onApply={onApplyGeo}
           onApplyAdvanced={onApplyAdvancedGeo}
         />

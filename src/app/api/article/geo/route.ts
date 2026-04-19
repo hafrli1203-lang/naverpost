@@ -37,6 +37,7 @@ const GEO_TARGET_SCORE = 90;
 const ADVANCED_GEO_MIN_AI_BASELINE_SCORE = 60;
 const ADVANCED_GEO_MAX_AI_ATTEMPTS = 2;
 const ADVANCED_GEO_AI_TIMEOUT_MS = 60000;
+const SAFE_GEO_REWRITE_TIMEOUT_MS = 25000;
 const AGGRESSIVE_DEFAULT_IDS: GeoRecommendation["id"][] = [
   "remove-template-blocks",
   "soften-claims",
@@ -158,6 +159,19 @@ function normalizeSelectedIds(
 ): GeoRecommendation["id"][] {
   const values = ids?.length ? ids : AGGRESSIVE_DEFAULT_IDS;
   return [...new Set(values)];
+}
+
+function buildServerSelectedIds(
+  article: ArticleContent,
+  clientSelectedIds: GeoRecommendation["id"][] | undefined,
+  mode: "safe" | "aggressive"
+): GeoRecommendation["id"][] {
+  const currentAnalysis = runGeoHarness(article, mode);
+  const recommendedIds = currentAnalysis.recommendations
+    .filter((item) => item.selectedByDefault)
+    .map((item) => item.id);
+
+  return [...new Set([...normalizeSelectedIds(clientSelectedIds), ...recommendedIds])];
 }
 
 function sanitizeGeoRewrite(text: string, title: string): string {
@@ -392,6 +406,75 @@ async function optimizeGeoWithAi(
   };
 }
 
+async function optimizeSafeGeo(
+  article: ArticleContent,
+  selectedIds: GeoRecommendation["id"][]
+): Promise<GeoOptimizationResult> {
+  const baseline = applyGeoRecommendations(article, selectedIds, "safe");
+  const normalizedSelectedIds = normalizeSelectedIds(selectedIds);
+  const baselineChanged = baseline.optimizedContent.trim() !== article.content.trim();
+  const canUseAi = Boolean(process.env.ANTHROPIC_API_KEY?.trim());
+
+  if (baselineChanged || !canUseAi) {
+    return baseline;
+  }
+
+  const prompt = buildGeoRewritePrompt({
+    article,
+    targetScore: Math.max(GEO_TARGET_SCORE - 5, baseline.analysisBefore.score),
+  });
+
+  const rewritten = await withTimeout(
+    rewriteArticleForGeo(prompt, SAFE_GEO_REWRITE_TIMEOUT_MS),
+    SAFE_GEO_REWRITE_TIMEOUT_MS + 2000
+  );
+
+  if (!rewritten) {
+    return baseline;
+  }
+
+  const candidateContent = sanitizeGeoRewrite(rewritten, article.title);
+  if (!candidateContent || candidateContent === article.content.trim()) {
+    return baseline;
+  }
+
+  if (!isTopicAligned(article, candidateContent)) {
+    return baseline;
+  }
+
+  const integrity = checkRewriteIntegrity(article, article.content, candidateContent);
+  if (!integrity.ok) {
+    return baseline;
+  }
+
+  const candidateValidation = buildFastValidation(
+    candidateContent,
+    buildValidationKeywords(article)
+  );
+  if (candidateValidation.missingKeywords.length > 0) {
+    return baseline;
+  }
+
+  const candidateAnalysis = runGeoHarness(
+    { ...article, content: candidateContent, validation: candidateValidation },
+    "safe"
+  );
+
+  if (candidateAnalysis.score < baseline.analysisAfter.score) {
+    return baseline;
+  }
+
+  return {
+    appliedRecommendationIds: [
+      ...baseline.appliedRecommendationIds,
+      ...normalizedSelectedIds.filter((id) => !baseline.appliedRecommendationIds.includes(id)),
+    ],
+    optimizedContent: candidateContent,
+    analysisBefore: baseline.analysisBefore,
+    analysisAfter: candidateAnalysis,
+  };
+}
+
 async function runAdvancedGeoJob(
   jobId: string,
   article: ArticleContent,
@@ -473,12 +556,17 @@ export async function POST(request: NextRequest) {
     }
 
     if (body.mode === "apply") {
+      const serverSelectedIds = buildServerSelectedIds(
+        body.article,
+        body.selectedRecommendationIds,
+        "safe"
+      );
+
       const result = toDisplayOptimization(
         body.article,
-        applyGeoRecommendations(
+        await optimizeSafeGeo(
           body.article,
-          normalizeSelectedIds(body.selectedRecommendationIds),
-          "safe"
+          serverSelectedIds,
         )
       );
 
@@ -505,7 +593,11 @@ export async function POST(request: NextRequest) {
 
     if (body.mode === "start-advanced") {
       const jobId = crypto.randomUUID();
-      const selectedIds = normalizeSelectedIds(body.selectedRecommendationIds);
+      const selectedIds = buildServerSelectedIds(
+        body.article,
+        body.selectedRecommendationIds,
+        "aggressive"
+      );
 
       advancedGeoJobs.set(jobId, {
         id: jobId,

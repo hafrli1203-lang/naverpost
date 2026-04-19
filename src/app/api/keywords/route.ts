@@ -18,6 +18,79 @@ import type { KeywordOption, KeywordOptionAnalysis } from "@/types";
 export const maxDuration = 120;
 const EXTERNAL_SIGNAL_TOP_K = 3;
 
+function normalizeTitleForComparison(title: string): string {
+  return title.replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function tokenizeTitleForComparison(title: string): string[] {
+  const tokens = title.match(/[가-힣A-Za-z0-9]{2,}/g) ?? [];
+  return [...new Set(tokens.map((token) => token.toLowerCase()))];
+}
+
+function calculateTitleSimilarity(a: string, b: string): number {
+  const aNorm = normalizeTitleForComparison(a);
+  const bNorm = normalizeTitleForComparison(b);
+  if (!aNorm || !bNorm) return 0;
+  if (aNorm === bNorm) return 1;
+
+  const aTokens = tokenizeTitleForComparison(aNorm);
+  const bTokens = tokenizeTitleForComparison(bNorm);
+  if (aTokens.length === 0 || bTokens.length === 0) return 0;
+
+  const bSet = new Set(bTokens);
+  const shared = aTokens.filter((token) => bSet.has(token));
+  const union = new Set([...aTokens, ...bTokens]).size;
+  const jaccard = union === 0 ? 0 : shared.length / union;
+  const overlapByShorter = shared.length / Math.max(1, Math.min(aTokens.length, bTokens.length));
+
+  return Math.max(jaccard, overlapByShorter);
+}
+
+function isTooSimilarTitle(a: KeywordOption, b: KeywordOption): boolean {
+  const similarity = calculateTitleSimilarity(a.title, b.title);
+  if (similarity >= 0.72) return true;
+
+  const sameMainKeyword = a.mainKeyword.trim() === b.mainKeyword.trim();
+  const sameSubKeyword1 = a.subKeyword1.trim() === b.subKeyword1.trim();
+  const sameSubKeyword2 = a.subKeyword2.trim() === b.subKeyword2.trim();
+
+  return sameMainKeyword && sameSubKeyword1 && sameSubKeyword2;
+}
+
+function pickDiverseKeywordResults<T extends KeywordOption & { _priorityScore: number }>(
+  rankedResults: T[]
+): T[] {
+  const selected: T[] = [];
+
+  for (const candidate of rankedResults) {
+    if (selected.every((picked) => !isTooSimilarTitle(candidate, picked))) {
+      selected.push(candidate);
+      continue;
+    }
+
+    if (selected.length >= Math.min(6, rankedResults.length)) {
+      continue;
+    }
+  }
+
+  if (selected.length === 0) return rankedResults;
+
+  for (const candidate of rankedResults) {
+    if (selected.includes(candidate)) continue;
+    if (selected.length >= rankedResults.length) break;
+
+    const weakestSimilarity = Math.max(
+      ...selected.map((picked) => calculateTitleSimilarity(candidate.title, picked.title))
+    );
+
+    if (weakestSimilarity < 0.9) {
+      selected.push(candidate);
+    }
+  }
+
+  return selected;
+}
+
 function inferSearchIntentAxis(option: KeywordOption): string {
   const source = `${option.title} ${option.mainKeyword} ${option.subKeyword1} ${option.subKeyword2}`;
 
@@ -179,7 +252,8 @@ export async function POST(request: NextRequest) {
     );
 
     const rankedResults = [...locallyAnalyzedResults].sort((a, b) => b._priorityScore - a._priorityScore);
-    const topForExternalSignals = rankedResults.slice(0, EXTERNAL_SIGNAL_TOP_K);
+    const diverseRankedResults = pickDiverseKeywordResults(rankedResults);
+    const topForExternalSignals = diverseRankedResults.slice(0, EXTERNAL_SIGNAL_TOP_K);
 
     const externalSignalEntries = await Promise.all(
       topForExternalSignals.map(async (item) => {
@@ -199,7 +273,7 @@ export async function POST(request: NextRequest) {
 
     const externalSignalMap = new Map(externalSignalEntries);
 
-    const results = rankedResults.map((item) => {
+    const results = diverseRankedResults.map((item) => {
       const { _priorityScore, analysis, ...rest } = item;
       void _priorityScore;
       return {

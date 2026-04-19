@@ -156,6 +156,24 @@ export default function Home() {
     }
   }, []);
 
+  const refreshGeoForCurrentArticle = useCallback(async (): Promise<GeoAnalysisResult | null> => {
+    if (!state.article) return null;
+
+    setIsGeoLoading(true);
+    try {
+      const geo = await analyzeGeo(state.article);
+      if (geo) {
+        setState((prev) => ({
+          ...prev,
+          article: prev.article ? { ...prev.article, geo } : prev.article,
+        }));
+      }
+      return geo;
+    } finally {
+      setIsGeoLoading(false);
+    }
+  }, [analyzeGeo, setState, state.article]);
+
   const applyGeo = useCallback(
     async (
       selectedRecommendationIds: GeoRecommendation["id"][]
@@ -866,6 +884,7 @@ export default function Home() {
             onRewrite={handleArticleRewrite}
             onManualEdit={handleManualEdit}
             onSave={handleSaveSession}
+            onRefreshGeoAnalysis={refreshGeoForCurrentArticle}
             onApplyGeo={applyGeo}
             onApplyAdvancedGeo={applyAdvancedGeo}
             isLoading={isLoading || isGeneratingImages}

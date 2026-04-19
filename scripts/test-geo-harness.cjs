@@ -193,6 +193,17 @@ function run() {
   assert(productIntroApplied.optimizedContent.includes("이번에 입고된 레이벤 신제품은 프레임 두께와 컬러 밸런스가 좋아서"));
   assert(productIntroApplied.optimizedContent.includes("매장에서는 기본 피팅과 렌즈 컬러 상담까지 함께 도와드리고 있으니"));
 
+  const aggressiveAnalysis = runGeoHarness(compareArticle, "aggressive");
+  const aggressiveSelected = getSelectedIds(aggressiveAnalysis);
+  assert(!aggressiveSelected.includes("direct-answer-lead"));
+  assert(!aggressiveSelected.includes("question-heading"));
+  const aggressiveApplied = applyGeoRecommendations(
+    compareArticle,
+    aggressiveSelected,
+    "aggressive"
+  );
+  assert(aggressiveApplied.analysisAfter.score >= aggressiveApplied.analysisBefore.score);
+
   console.log("geo-harness tests passed");
 }
 
