@@ -358,7 +358,7 @@ export function GeoOptimizationDialog({
                 ) : (
                   <Sparkles className="h-4 w-4" />
                 )}
-                고득점 GEO 실험
+                고득점 GEO
               </Button>
             )}
             <Button

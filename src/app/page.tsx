@@ -218,7 +218,7 @@ export default function Home() {
         });
         const startJson = await safeJson(startRes);
         if (!startRes.ok || !startJson.success) {
-          throw new Error(startJson.error ?? "고득점 GEO 작업 시작에 실패했습니다.");
+          throw new Error(startJson.error ?? "고득점 GEO 시작에 실패했습니다.");
         }
 
         const jobId = (startJson.data as { jobId?: string } | undefined)?.jobId;
@@ -257,7 +257,7 @@ export default function Home() {
               ...prev,
               article: job.article!,
             }));
-            toast.success(`고득점 GEO 실험 완료: ${buildGeoToastMessage(job.optimization)}`);
+            toast.success(`고득점 GEO 완료: ${buildGeoToastMessage(job.optimization)}`);
             return job.optimization;
           }
 

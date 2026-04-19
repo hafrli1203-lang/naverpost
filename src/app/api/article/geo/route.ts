@@ -447,7 +447,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (body.mode === "analyze") {
-      const analysis = runGeoHarness(body.article, "aggressive");
+      const analysis = runGeoHarness(body.article, "safe");
       return NextResponse.json({ success: true, data: analysis });
     }
 
@@ -455,7 +455,7 @@ export async function POST(request: NextRequest) {
       const result = applyGeoRecommendations(
         body.article,
         normalizeSelectedIds(body.selectedRecommendationIds),
-        "aggressive"
+        "safe"
       );
 
       const validation = buildFastValidation(
