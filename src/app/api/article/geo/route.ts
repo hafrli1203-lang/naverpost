@@ -41,8 +41,6 @@ const AGGRESSIVE_DEFAULT_IDS: GeoRecommendation["id"][] = [
   "remove-template-blocks",
   "soften-claims",
   "comparison-table",
-  "direct-answer-lead",
-  "question-heading",
 ];
 
 type AdvancedGeoJob = {
@@ -61,6 +59,26 @@ type RewriteIntegrityCheck = {
   ok: boolean;
   reasons: string[];
 };
+
+function toDisplayOptimization(
+  articleBefore: ArticleContent,
+  optimization: GeoOptimizationResult
+): GeoOptimizationResult {
+  const displayBefore = runGeoHarness(articleBefore, "safe");
+  const displayAfter = runGeoHarness(
+    {
+      ...articleBefore,
+      content: optimization.optimizedContent,
+    },
+    "safe"
+  );
+
+  return {
+    ...optimization,
+    analysisBefore: displayBefore,
+    analysisAfter: displayAfter,
+  };
+}
 
 function buildValidationKeywords(article: ArticleContent) {
   return {
@@ -389,7 +407,10 @@ async function runAdvancedGeoJob(
   });
 
   try {
-    const optimization = await optimizeGeoWithAi(article, selectedIds);
+    const optimization = toDisplayOptimization(
+      article,
+      await optimizeGeoWithAi(article, selectedIds)
+    );
     const validation = buildFastValidation(
       optimization.optimizedContent,
       buildValidationKeywords(article)
@@ -452,10 +473,13 @@ export async function POST(request: NextRequest) {
     }
 
     if (body.mode === "apply") {
-      const result = applyGeoRecommendations(
+      const result = toDisplayOptimization(
         body.article,
-        normalizeSelectedIds(body.selectedRecommendationIds),
-        "safe"
+        applyGeoRecommendations(
+          body.article,
+          normalizeSelectedIds(body.selectedRecommendationIds),
+          "safe"
+        )
       );
 
       const validation = buildFastValidation(
