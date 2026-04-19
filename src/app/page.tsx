@@ -278,7 +278,7 @@ export default function Home() {
         }
 
         const startedAt = Date.now();
-        const timeoutMs = 120000;
+        const timeoutMs = 240000;
 
         while (Date.now() - startedAt < timeoutMs) {
           await new Promise((resolve) => setTimeout(resolve, 2000));

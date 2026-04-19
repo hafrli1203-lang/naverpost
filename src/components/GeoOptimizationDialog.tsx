@@ -378,24 +378,13 @@ export function GeoOptimizationDialog({
             <Button variant="outline" onClick={() => setOpen(false)} disabled={isBusy}>
               이전
             </Button>
-            {onApplyAdvanced && (
-              <Button
-                variant="outline"
-                onClick={handleApplyAdvanced}
-                disabled={isBusy || effectiveSelectedIds.length === 0}
-                className="gap-2 border-amber-300 text-amber-700 hover:bg-amber-50 hover:text-amber-800"
-              >
-                {isBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-                고득점 GEO
-              </Button>
-            )}
             <Button
-              onClick={handleApply}
+              onClick={onApplyAdvanced ? handleApplyAdvanced : handleApply}
               disabled={isBusy || effectiveSelectedIds.length === 0}
               className="gap-2 bg-teal-600 hover:bg-teal-700"
             >
               {isBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <TrendingUp className="h-4 w-4" />}
-              적용 ({effectiveSelectedIds.length}/{recommendations.length})
+              GEO 최적화 적용 ({effectiveSelectedIds.length}/{recommendations.length})
             </Button>
           </DialogFooter>
         </DialogContent>

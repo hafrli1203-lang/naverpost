@@ -1,6 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { rewriteArticleForGeo } from "@/lib/ai/claude";
-import { applyGeoRecommendations, runGeoHarness } from "@/lib/geo/harness";
+import {
+  analyzeHeadingSignals,
+  applyGeoRecommendations,
+  detectPostType,
+  hasTable,
+  hasTemplateArtifacts,
+  removeTemplateBlocks,
+  runGeoHarness,
+  softenClaims,
+} from "@/lib/geo/harness";
 import { buildGeoRewritePrompt } from "@/lib/prompts/geoRewritePrompt";
 import { PROHIBITED_WORDS, CAUTION_PHRASES } from "@/lib/validation/prohibitedWords";
 import { findOverusedWords } from "@/lib/validation/repetitionCheck";
@@ -38,15 +47,20 @@ type GeoRequestBody =
     };
 
 const GEO_TARGET_SCORE = 90;
-const ADVANCED_GEO_MIN_AI_BASELINE_SCORE = 60;
-const ADVANCED_GEO_MAX_AI_ATTEMPTS = 2;
+const ADVANCED_GEO_MAX_AI_ATTEMPTS = 3;
 const ADVANCED_GEO_AI_TIMEOUT_MS = 60000;
-const SAFE_GEO_REWRITE_TIMEOUT_MS = 25000;
-const AGGRESSIVE_DEFAULT_IDS: GeoRecommendation["id"][] = [
-  "remove-template-blocks",
-  "soften-claims",
+const SAFE_GEO_REWRITE_TIMEOUT_MS = 45000;
+
+const AI_REWRITE_IDS: ReadonlySet<GeoRecommendation["id"]> = new Set([
+  "question-heading",
+  "direct-answer-lead",
   "comparison-table",
-];
+]);
+
+const PROTECTED_POST_TYPES: ReadonlySet<ReturnType<typeof detectPostType>> = new Set([
+  "price-list",
+  "product-intro",
+]);
 
 type AdvancedGeoJob = {
   id: string;
@@ -76,77 +90,6 @@ type GeoPlanData = {
   projectedScore: number;
   steps: GeoPlanStep[];
 };
-
-const LEGACY_TEMPLATE_HEADING_PATTERNS = [
-  /^##\s*FAQ\s*$/i,
-  /^##\s*자주 묻는 질문\s*$/i,
-  /^##\s*확인 및 안내\s*$/i,
-];
-
-const LEGACY_TEMPLATE_LINE_PATTERNS = [
-  /^핵심 답변[:：]/u,
-  /^[^.!?\n]{2,80}(?:은|는|이|가)\s+어떤 기준으로 보면 좋을까요\?/u,
-  /현재 상태,\s*생활 패턴,\s*기대하는 변화 기준/u,
-];
-
-function stripLegacyGeoArtifacts(content: string): string {
-  const lines = content.split(/\r?\n/);
-  const next: string[] = [];
-  let skippingTemplateSection = false;
-
-  for (const line of lines) {
-    const trimmed = line.trim();
-
-    if (LEGACY_TEMPLATE_HEADING_PATTERNS.some((pattern) => pattern.test(trimmed))) {
-      skippingTemplateSection = true;
-      continue;
-    }
-
-    if (skippingTemplateSection && /^##\s+/.test(trimmed)) {
-      skippingTemplateSection = false;
-    }
-
-    if (skippingTemplateSection) {
-      continue;
-    }
-
-    if (LEGACY_TEMPLATE_LINE_PATTERNS.some((pattern) => pattern.test(trimmed))) {
-      continue;
-    }
-
-    next.push(line);
-  }
-
-  return next.join("\n").replace(/\n{3,}/g, "\n\n").trim();
-}
-
-function normalizeArticleForGeo(article: ArticleContent): ArticleContent {
-  const content = stripLegacyGeoArtifacts(article.content);
-  return {
-    ...article,
-    content,
-  };
-}
-
-function toDisplayOptimization(
-  articleBefore: ArticleContent,
-  optimization: GeoOptimizationResult
-): GeoOptimizationResult {
-  const displayBefore = runGeoHarness(articleBefore, "safe");
-  const displayAfter = runGeoHarness(
-    {
-      ...articleBefore,
-      content: optimization.optimizedContent,
-    },
-    "safe"
-  );
-
-  return {
-    ...optimization,
-    analysisBefore: displayBefore,
-    analysisAfter: displayAfter,
-  };
-}
 
 function buildValidationKeywords(article: ArticleContent) {
   return {
@@ -221,78 +164,40 @@ function buildFastValidation(
   };
 }
 
-function normalizeSelectedIds(
-  ids: GeoRecommendation["id"][] | undefined
+function filterSelectedIdsForPostType(
+  article: ArticleContent,
+  selectedIds: GeoRecommendation["id"][]
 ): GeoRecommendation["id"][] {
-  const values = ids?.length ? ids : AGGRESSIVE_DEFAULT_IDS;
-  return [...new Set(values)];
+  const postType = detectPostType(article);
+  if (!PROTECTED_POST_TYPES.has(postType)) return selectedIds;
+  return selectedIds.filter((id) => !AI_REWRITE_IDS.has(id));
 }
 
-function buildServerSelectedIds(
+function mergeServerRecommendations(
   article: ArticleContent,
-  clientSelectedIds: GeoRecommendation["id"][] | undefined,
-  mode: "safe" | "aggressive"
+  clientSelectedIds: GeoRecommendation["id"][] | undefined
 ): GeoRecommendation["id"][] {
-  const currentAnalysis = runGeoHarness(article, mode);
-  const recommendedIds = currentAnalysis.recommendations
+  const analysis = runGeoHarness(article, "safe");
+  const defaultIds = analysis.recommendations
     .filter((item) => item.selectedByDefault)
     .map((item) => item.id);
 
-  return [...new Set([...normalizeSelectedIds(clientSelectedIds), ...recommendedIds])];
+  const clientIds = clientSelectedIds ?? [];
+  const merged = [...new Set<GeoRecommendation["id"]>([...clientIds, ...defaultIds])];
+  return filterSelectedIdsForPostType(article, merged);
 }
 
-function buildGeoPlan(
-  article: ArticleContent,
-  mode: "safe" | "aggressive"
-): GeoPlanData {
-  let currentArticle = normalizeArticleForGeo(article);
-  const steps: GeoPlanStep[] = [];
-  const seen = new Set<string>();
-  const analysis = runGeoHarness(currentArticle, mode);
-  let currentAnalysis = analysis;
-
-  for (let pass = 1; pass <= 3; pass += 1) {
-    const passRecommendations = currentAnalysis.recommendations.filter(
-      (item) => !seen.has(item.id)
-    );
-    if (passRecommendations.length === 0) break;
-
-    const selectedIds = passRecommendations.map((item) => item.id);
-    const passResult = applyGeoRecommendations(currentArticle, selectedIds, mode);
-
-    passRecommendations.forEach((recommendation) => {
-      seen.add(recommendation.id);
-      steps.push({
-        pass,
-        recommendation,
-        projectedScore: Math.max(currentAnalysis.score, passResult.analysisAfter.score),
-      });
-    });
-
-    if (
-      passResult.optimizedContent.trim() === currentArticle.content.trim() ||
-      passResult.analysisAfter.score <= currentAnalysis.score
-    ) {
-      break;
-    }
-
-    const validation = buildFastValidation(
-      passResult.optimizedContent,
-      buildValidationKeywords(currentArticle)
-    );
-    currentArticle = {
-      ...currentArticle,
-      content: passResult.optimizedContent,
-      validation,
-    };
-    currentAnalysis = runGeoHarness(currentArticle, mode);
-  }
-
-  return {
-    analysis,
-    projectedScore: currentAnalysis.score,
-    steps,
-  };
+function buildGeoPlan(article: ArticleContent): GeoPlanData {
+  const analysis = runGeoHarness(article, "safe");
+  const steps: GeoPlanStep[] = analysis.recommendations.map((recommendation, index) => ({
+    pass: 1,
+    recommendation,
+    projectedScore: Math.min(100, analysis.score + (index + 1) * 6),
+  }));
+  const projectedScore = steps.length
+    ? steps[steps.length - 1].projectedScore
+    : analysis.score;
+  return { analysis, projectedScore, steps };
 }
 
 function sanitizeGeoRewrite(text: string, title: string): string {
@@ -310,6 +215,12 @@ function sanitizeGeoRewrite(text: string, title: string): string {
   next = next.replace(new RegExp(`^##\\s*${escapedTitle}\\s*\\n+`, "i"), "");
   next = next.replace(new RegExp(`^${escapedTitle}\\s*\\n+`, "i"), "");
 
+  return next.trim();
+}
+
+function postProcessGeoRewrite(content: string, article: ArticleContent): string {
+  let next = removeTemplateBlocks(content, article);
+  next = softenClaims(next);
   return next.trim();
 }
 
@@ -401,6 +312,10 @@ function checkRewriteIntegrity(
     reasons.push("구분선 같은 인위적 서식이 추가됨");
   }
 
+  if (hasTemplateArtifacts(candidateContent)) {
+    reasons.push("AI가 FAQ/핵심 답변 리터럴을 다시 삽입함");
+  }
+
   const originalParagraphs = countParagraphs(originalContent);
   const candidateParagraphs = countParagraphs(candidateContent);
   if (candidateParagraphs < Math.max(3, Math.floor(originalParagraphs * 0.6))) {
@@ -420,7 +335,7 @@ function checkRewriteIntegrity(
   }
 
   const candidateHeadings = countHeadings(candidateContent);
-  if (candidateHeadings < 3 || candidateHeadings > 5) {
+  if (candidateHeadings < 3 || candidateHeadings > 6) {
     reasons.push("소제목 구조가 과하거나 부족함");
   }
 
@@ -465,181 +380,175 @@ function isTopicAligned(article: ArticleContent, content: string): boolean {
   );
 }
 
-async function optimizeGeoWithAi(
-  article: ArticleContent,
-  selectedIds: GeoRecommendation["id"][]
-): Promise<GeoOptimizationResult> {
-  const analysisBefore = runGeoHarness(article, "aggressive");
-  const baselineResult = applyGeoRecommendations(article, selectedIds, "aggressive");
-  let bestContent = baselineResult.optimizedContent;
-  let bestAnalysis = baselineResult.analysisAfter;
+function buildRetryFeedback(params: {
+  selectedIds: GeoRecommendation["id"][];
+  cleanedContent: string;
+  attempt: number;
+}): string | undefined {
+  const { selectedIds, cleanedContent, attempt } = params;
+  const signals = analyzeHeadingSignals(cleanedContent);
+  const items: string[] = [];
 
-  const canUseAi = Boolean(process.env.ANTHROPIC_API_KEY?.trim());
-  if (!canUseAi || bestAnalysis.score < ADVANCED_GEO_MIN_AI_BASELINE_SCORE) {
-    return baselineResult;
+  if (selectedIds.includes("question-heading") && signals.questionRatio < 0.5) {
+    items.push(
+      `소제목 ${signals.meaningful}개 중 ${signals.questionCount}개만 질문형이었습니다. 반드시 3개 이상을 "~인가요?"/"~하나요?" 형태 질문형으로 바꿔 주세요. 본문 문단은 그대로 두고 소제목만 바꾸면 됩니다.`
+    );
   }
 
-  for (let attempt = 0; attempt < ADVANCED_GEO_MAX_AI_ATTEMPTS; attempt += 1) {
-    if (bestAnalysis.score >= GEO_TARGET_SCORE) break;
+  if (selectedIds.includes("direct-answer-lead") && signals.directAnswerRatio < 0.5) {
+    items.push(
+      `섹션 ${signals.meaningful}개 중 ${signals.directAnswerCount}개만 첫 줄에 40~80자 직답이 있었습니다. 남은 섹션 첫 줄에도 40~80자 요약 문장을 넣어 주세요. 요약은 해당 섹션 본문이 이미 설명하는 내용을 그대로 압축한 것이어야 합니다.`
+    );
+  }
 
+  if (selectedIds.includes("comparison-table") && !hasTable(cleanedContent)) {
+    items.push(
+      "비교 테이블이 본문에 없습니다. 본문 중간에 3~4열 markdown 표를 하나 추가하세요. 표의 수치·기준은 본문에 이미 있는 것만 정리하세요."
+    );
+  }
+
+  if (items.length === 0) return undefined;
+  return `[${attempt}차 시도 점검]\n- ${items.join("\n- ")}`;
+}
+
+async function runAiRewrite(
+  article: ArticleContent,
+  selectedIds: GeoRecommendation["id"][],
+  options: { timeoutMs: number; maxAttempts: number; targetScore: number }
+): Promise<{ content: string; appliedIds: GeoRecommendation["id"][] } | null> {
+  if (!process.env.ANTHROPIC_API_KEY?.trim()) return null;
+
+  const baselineAnalysis = runGeoHarness(article, "aggressive");
+  let bestContent: string | null = null;
+  let bestScore = baselineAnalysis.score;
+  let retryFeedback: string | undefined;
+
+  for (let attempt = 0; attempt < options.maxAttempts; attempt += 1) {
     const prompt = buildGeoRewritePrompt({
-      article: {
-        ...article,
-        content: bestContent,
-      },
-      targetScore: GEO_TARGET_SCORE,
+      article,
+      selectedIds,
+      targetScore: options.targetScore,
+      retryFeedback,
     });
-
     const rewritten = await withTimeout(
-      rewriteArticleForGeo(prompt, ADVANCED_GEO_AI_TIMEOUT_MS),
-      ADVANCED_GEO_AI_TIMEOUT_MS + 2000
+      rewriteArticleForGeo(prompt, options.timeoutMs),
+      options.timeoutMs + 2000
     );
-    if (!rewritten) break;
+    if (!rewritten) {
+      retryFeedback = "이전 시도가 시간 내 응답하지 못했습니다. 더 간결한 변경만 적용하세요.";
+      continue;
+    }
 
-    const candidateContent = sanitizeGeoRewrite(rewritten, article.title);
-    if (!isTopicAligned(article, candidateContent)) continue;
+    const sanitized = sanitizeGeoRewrite(rewritten, article.title);
+    const cleaned = postProcessGeoRewrite(sanitized, article);
+    if (!cleaned) {
+      retryFeedback = "이전 응답이 비어 있었습니다. 본문 markdown만 출력하세요.";
+      continue;
+    }
+    if (!isTopicAligned(article, cleaned)) {
+      retryFeedback =
+        "이전 시도에서 메인/서브 키워드 또는 제목 관련 핵심 단어가 본문에 충분히 유지되지 않았습니다. 원문의 모든 핵심 키워드를 자연스럽게 유지해 주세요.";
+      continue;
+    }
 
-    const integrity = checkRewriteIntegrity(article, bestContent, candidateContent);
-    if (!integrity.ok) continue;
+    const integrity = checkRewriteIntegrity(article, article.content, cleaned);
+    if (!integrity.ok) {
+      retryFeedback = `이전 시도는 다음 이유로 폐기되었습니다: ${integrity.reasons.join("; ")}. 이번에는 원문 구조와 의미를 더 엄격히 보존하세요.`;
+      continue;
+    }
 
-    const candidateValidation = buildFastValidation(
-      candidateContent,
-      buildValidationKeywords(article)
-    );
-    if (candidateValidation.missingKeywords.length > 0) continue;
+    const candidateValidation = buildFastValidation(cleaned, buildValidationKeywords(article));
+    if (candidateValidation.missingKeywords.length > 0) {
+      retryFeedback = `이전 시도에서 누락된 키워드: ${candidateValidation.missingKeywords.join(", ")}. 반드시 본문에 포함시키세요.`;
+      continue;
+    }
 
     const candidateAnalysis = runGeoHarness(
-      { ...article, content: candidateContent },
+      { ...article, content: cleaned, validation: candidateValidation },
       "aggressive"
     );
 
-    if (candidateAnalysis.score > bestAnalysis.score) {
-      bestContent = candidateContent;
-      bestAnalysis = candidateAnalysis;
+    if (candidateAnalysis.score > bestScore) {
+      bestContent = cleaned;
+      bestScore = candidateAnalysis.score;
     }
+
+    const nextFeedback = buildRetryFeedback({
+      selectedIds,
+      cleanedContent: cleaned,
+      attempt: attempt + 1,
+    });
+
+    if (candidateAnalysis.score >= options.targetScore && !nextFeedback) break;
+    retryFeedback = nextFeedback;
+    if (!retryFeedback) break;
   }
 
+  if (!bestContent) return null;
   return {
-    appliedRecommendationIds: selectedIds,
-    optimizedContent: bestContent,
-    analysisBefore,
-    analysisAfter: bestAnalysis,
+    content: bestContent,
+    appliedIds: selectedIds.filter((id) => AI_REWRITE_IDS.has(id)),
   };
 }
 
-async function optimizeSafeGeo(
+async function optimizeArticleForGeo(
   article: ArticleContent,
-  selectedIds: GeoRecommendation["id"][]
+  selectedIds: GeoRecommendation["id"][],
+  options: { timeoutMs: number; maxAttempts: number; targetScore: number }
 ): Promise<GeoOptimizationResult> {
   const analysisBefore = runGeoHarness(article, "safe");
-  let currentArticle = article;
-  let appliedIds: GeoRecommendation["id"][] = [];
+  const postType = detectPostType(article);
+  const effectiveIds = filterSelectedIdsForPostType(article, selectedIds);
 
-  for (let pass = 1; pass <= 3; pass += 1) {
-    const currentAnalysis = runGeoHarness(currentArticle, "safe");
-    const currentIds = [
-      ...new Set([
-        ...selectedIds,
-        ...currentAnalysis.recommendations.map((item) => item.id),
-      ]),
-    ];
-    const passResult = applyGeoRecommendations(currentArticle, currentIds, "safe");
+  let workingArticle = article;
+  const appliedIds: GeoRecommendation["id"][] = [];
 
-    if (
-      passResult.optimizedContent.trim() === currentArticle.content.trim() ||
-      passResult.analysisAfter.score < currentAnalysis.score
-    ) {
-      break;
-    }
+  const aiRewriteIds = effectiveIds.filter((id) => AI_REWRITE_IDS.has(id));
+  const canUseAiRewrite = aiRewriteIds.length > 0 && postType === "general";
 
-    appliedIds = [...new Set([...appliedIds, ...passResult.appliedRecommendationIds])];
-
-    if (passResult.analysisAfter.score === currentAnalysis.score) {
-      currentArticle = {
-        ...currentArticle,
-        content: passResult.optimizedContent,
+  if (canUseAiRewrite) {
+    const rewriteResult = await runAiRewrite(workingArticle, effectiveIds, options);
+    if (rewriteResult) {
+      workingArticle = {
+        ...workingArticle,
+        content: rewriteResult.content,
       };
-      break;
+      appliedIds.push(...rewriteResult.appliedIds);
     }
+  }
 
-    const validation = buildFastValidation(
-      passResult.optimizedContent,
-      buildValidationKeywords(currentArticle)
-    );
-    currentArticle = {
-      ...currentArticle,
-      content: passResult.optimizedContent,
-      validation,
+  const deterministicIds = effectiveIds.filter(
+    (id) => id === "remove-template-blocks" || id === "soften-claims" || id === "comparison-table"
+  );
+  if (deterministicIds.length > 0) {
+    const deterministicResult = applyGeoRecommendations(workingArticle, deterministicIds, "safe");
+    if (deterministicResult.appliedRecommendationIds.length > 0) {
+      workingArticle = {
+        ...workingArticle,
+        content: deterministicResult.optimizedContent,
+      };
+      deterministicResult.appliedRecommendationIds.forEach((id) => {
+        if (!appliedIds.includes(id)) appliedIds.push(id);
+      });
+    }
+  }
+
+  const finalAnalysis = runGeoHarness(workingArticle, "safe");
+
+  if (finalAnalysis.score < analysisBefore.score) {
+    return {
+      appliedRecommendationIds: [],
+      optimizedContent: article.content,
+      analysisBefore,
+      analysisAfter: analysisBefore,
     };
   }
 
-  const baseline: GeoOptimizationResult = {
-    appliedRecommendationIds: appliedIds,
-    optimizedContent: currentArticle.content,
-    analysisBefore,
-    analysisAfter: runGeoHarness(currentArticle, "safe"),
-  };
-  const normalizedSelectedIds = normalizeSelectedIds(selectedIds);
-  const baselineChanged = baseline.optimizedContent.trim() !== article.content.trim();
-  const canUseAi = Boolean(process.env.ANTHROPIC_API_KEY?.trim());
-
-  if (baselineChanged || !canUseAi) {
-    return baseline;
-  }
-
-  const prompt = buildGeoRewritePrompt({
-    article,
-    targetScore: Math.max(GEO_TARGET_SCORE - 5, baseline.analysisBefore.score),
-  });
-
-  const rewritten = await withTimeout(
-    rewriteArticleForGeo(prompt, SAFE_GEO_REWRITE_TIMEOUT_MS),
-    SAFE_GEO_REWRITE_TIMEOUT_MS + 2000
-  );
-
-  if (!rewritten) {
-    return baseline;
-  }
-
-  const candidateContent = sanitizeGeoRewrite(rewritten, article.title);
-  if (!candidateContent || candidateContent === article.content.trim()) {
-    return baseline;
-  }
-
-  if (!isTopicAligned(article, candidateContent)) {
-    return baseline;
-  }
-
-  const integrity = checkRewriteIntegrity(article, article.content, candidateContent);
-  if (!integrity.ok) {
-    return baseline;
-  }
-
-  const candidateValidation = buildFastValidation(
-    candidateContent,
-    buildValidationKeywords(article)
-  );
-  if (candidateValidation.missingKeywords.length > 0) {
-    return baseline;
-  }
-
-  const candidateAnalysis = runGeoHarness(
-    { ...article, content: candidateContent, validation: candidateValidation },
-    "safe"
-  );
-
-  if (candidateAnalysis.score < baseline.analysisAfter.score) {
-    return baseline;
-  }
-
   return {
-    appliedRecommendationIds: [
-      ...baseline.appliedRecommendationIds,
-      ...normalizedSelectedIds.filter((id) => !baseline.appliedRecommendationIds.includes(id)),
-    ],
-    optimizedContent: candidateContent,
-    analysisBefore: baseline.analysisBefore,
-    analysisAfter: candidateAnalysis,
+    appliedRecommendationIds: appliedIds,
+    optimizedContent: workingArticle.content,
+    analysisBefore,
+    analysisAfter: finalAnalysis,
   };
 }
 
@@ -658,10 +567,11 @@ async function runAdvancedGeoJob(
   });
 
   try {
-    const optimization = toDisplayOptimization(
-      article,
-      await optimizeGeoWithAi(article, selectedIds)
-    );
+    const optimization = await optimizeArticleForGeo(article, selectedIds, {
+      timeoutMs: ADVANCED_GEO_AI_TIMEOUT_MS,
+      maxAttempts: ADVANCED_GEO_MAX_AI_ATTEMPTS,
+      targetScore: GEO_TARGET_SCORE,
+    });
     const validation = buildFastValidation(
       optimization.optimizedContent,
       buildValidationKeywords(article)
@@ -719,30 +629,26 @@ export async function POST(request: NextRequest) {
     }
 
     if (body.mode === "analyze") {
-      const analysis = runGeoHarness(normalizeArticleForGeo(body.article), "safe");
+      const analysis = runGeoHarness(body.article, "safe");
       return NextResponse.json({ success: true, data: analysis });
     }
 
     if (body.mode === "plan") {
-      const plan = buildGeoPlan(body.article, "safe");
+      const plan = buildGeoPlan(body.article);
       return NextResponse.json({ success: true, data: plan });
     }
 
     if (body.mode === "apply") {
-      const normalizedArticle = normalizeArticleForGeo(body.article);
-      const serverSelectedIds = buildServerSelectedIds(
-        normalizedArticle,
-        body.selectedRecommendationIds,
-        "safe"
+      const serverSelectedIds = mergeServerRecommendations(
+        body.article,
+        body.selectedRecommendationIds
       );
 
-      const result = toDisplayOptimization(
-        normalizedArticle,
-        await optimizeSafeGeo(
-          normalizedArticle,
-          serverSelectedIds,
-        )
-      );
+      const result = await optimizeArticleForGeo(body.article, serverSelectedIds, {
+        timeoutMs: SAFE_GEO_REWRITE_TIMEOUT_MS,
+        maxAttempts: 1,
+        targetScore: GEO_TARGET_SCORE,
+      });
 
       const validation = buildFastValidation(
         result.optimizedContent,
@@ -750,7 +656,7 @@ export async function POST(request: NextRequest) {
       );
 
       const optimizedArticle: ArticleContent = {
-        ...normalizedArticle,
+        ...body.article,
         content: result.optimizedContent,
         validation,
         geo: result.analysisAfter,
@@ -767,11 +673,9 @@ export async function POST(request: NextRequest) {
 
     if (body.mode === "start-advanced") {
       const jobId = crypto.randomUUID();
-      const normalizedArticle = normalizeArticleForGeo(body.article);
-      const selectedIds = buildServerSelectedIds(
-        normalizedArticle,
-        body.selectedRecommendationIds,
-        "aggressive"
+      const selectedIds = mergeServerRecommendations(
+        body.article,
+        body.selectedRecommendationIds
       );
 
       advancedGeoJobs.set(jobId, {
@@ -782,7 +686,7 @@ export async function POST(request: NextRequest) {
       });
 
       setTimeout(() => {
-        void runAdvancedGeoJob(jobId, normalizedArticle, selectedIds);
+        void runAdvancedGeoJob(jobId, body.article, selectedIds);
       }, 0);
 
       return NextResponse.json({
