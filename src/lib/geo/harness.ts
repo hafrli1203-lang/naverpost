@@ -294,8 +294,7 @@ function buildStructuredTable(article: ArticleContent): string {
 function analyzeCategories(article: ArticleContent): GeoCategoryScore[] {
   const content = article.content;
   const headings = parseHeadings(content);
-  const questionHeading = hasQuestionHeading(headings);
-  const directAnswerLead = hasDirectAnswerLead(content, article);
+  const meaningfulHeadings = headings.filter((heading) => !isTemplateHeading(heading.raw));
   const table = hasTable(content);
   const templateArtifacts = hasTemplateArtifacts(content);
   const sourceMentions = countSourceMentions(content);
@@ -318,10 +317,15 @@ function analyzeCategories(article: ArticleContent): GeoCategoryScore[] {
         0,
         Math.min(
           30,
-          (directAnswerLead ? 12 : 0) +
-            (questionHeading ? 8 : 0) +
-            (table ? 6 : 0) +
-            (!templateArtifacts ? 4 : 0)
+          (meaningfulHeadings.length >= 4
+            ? 12
+            : meaningfulHeadings.length >= 3
+              ? 10
+              : meaningfulHeadings.length >= 2
+                ? 7
+                : 3) +
+            (table ? 10 : 0) +
+            (!templateArtifacts ? 8 : 0)
         )
       ),
       maxScore: 30,
@@ -355,7 +359,7 @@ function analyzeCategories(article: ArticleContent): GeoCategoryScore[] {
         Math.min(
           25,
           (charCount >= 1800 ? 8 : charCount >= 1400 ? 6 : 3) +
-            (headings.length >= 3 ? 6 : headings.length >= 2 ? 4 : 2) +
+            (meaningfulHeadings.length >= 3 ? 6 : meaningfulHeadings.length >= 2 ? 4 : 2) +
             (hasKeywordCoverage ? 5 : 2) +
             (!templateArtifacts ? 2 : 0) +
             Math.max(0, 4 - validationPenalty)
