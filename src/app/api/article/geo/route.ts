@@ -19,6 +19,10 @@ type GeoRequestBody =
       article: ArticleContent;
     }
   | {
+      mode: "plan";
+      article: ArticleContent;
+    }
+  | {
       mode: "apply";
       article: ArticleContent;
       selectedRecommendationIds: GeoRecommendation["id"][];
@@ -59,6 +63,18 @@ const advancedGeoJobs = new Map<string, AdvancedGeoJob>();
 type RewriteIntegrityCheck = {
   ok: boolean;
   reasons: string[];
+};
+
+type GeoPlanStep = {
+  pass: number;
+  recommendation: GeoRecommendation;
+  projectedScore: number;
+};
+
+type GeoPlanData = {
+  analysis: ReturnType<typeof runGeoHarness>;
+  projectedScore: number;
+  steps: GeoPlanStep[];
 };
 
 const LEGACY_TEMPLATE_HEADING_PATTERNS = [
@@ -102,6 +118,14 @@ function stripLegacyGeoArtifacts(content: string): string {
   }
 
   return next.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function normalizeArticleForGeo(article: ArticleContent): ArticleContent {
+  const content = stripLegacyGeoArtifacts(article.content);
+  return {
+    ...article,
+    content,
+  };
 }
 
 function toDisplayOptimization(
@@ -215,6 +239,60 @@ function buildServerSelectedIds(
     .map((item) => item.id);
 
   return [...new Set([...normalizeSelectedIds(clientSelectedIds), ...recommendedIds])];
+}
+
+function buildGeoPlan(
+  article: ArticleContent,
+  mode: "safe" | "aggressive"
+): GeoPlanData {
+  let currentArticle = normalizeArticleForGeo(article);
+  const steps: GeoPlanStep[] = [];
+  const seen = new Set<string>();
+  const analysis = runGeoHarness(currentArticle, mode);
+  let currentAnalysis = analysis;
+
+  for (let pass = 1; pass <= 3; pass += 1) {
+    const passRecommendations = currentAnalysis.recommendations.filter(
+      (item) => !seen.has(item.id)
+    );
+    if (passRecommendations.length === 0) break;
+
+    const selectedIds = passRecommendations.map((item) => item.id);
+    const passResult = applyGeoRecommendations(currentArticle, selectedIds, mode);
+
+    passRecommendations.forEach((recommendation) => {
+      seen.add(recommendation.id);
+      steps.push({
+        pass,
+        recommendation,
+        projectedScore: Math.max(currentAnalysis.score, passResult.analysisAfter.score),
+      });
+    });
+
+    if (
+      passResult.optimizedContent.trim() === currentArticle.content.trim() ||
+      passResult.analysisAfter.score <= currentAnalysis.score
+    ) {
+      break;
+    }
+
+    const validation = buildFastValidation(
+      passResult.optimizedContent,
+      buildValidationKeywords(currentArticle)
+    );
+    currentArticle = {
+      ...currentArticle,
+      content: passResult.optimizedContent,
+      validation,
+    };
+    currentAnalysis = runGeoHarness(currentArticle, mode);
+  }
+
+  return {
+    analysis,
+    projectedScore: currentAnalysis.score,
+    steps,
+  };
 }
 
 function sanitizeGeoRewrite(text: string, title: string): string {
@@ -453,7 +531,54 @@ async function optimizeSafeGeo(
   article: ArticleContent,
   selectedIds: GeoRecommendation["id"][]
 ): Promise<GeoOptimizationResult> {
-  const baseline = applyGeoRecommendations(article, selectedIds, "safe");
+  const analysisBefore = runGeoHarness(article, "safe");
+  let currentArticle = article;
+  let appliedIds: GeoRecommendation["id"][] = [];
+
+  for (let pass = 1; pass <= 3; pass += 1) {
+    const currentAnalysis = runGeoHarness(currentArticle, "safe");
+    const currentIds = [
+      ...new Set([
+        ...selectedIds,
+        ...currentAnalysis.recommendations.map((item) => item.id),
+      ]),
+    ];
+    const passResult = applyGeoRecommendations(currentArticle, currentIds, "safe");
+
+    if (
+      passResult.optimizedContent.trim() === currentArticle.content.trim() ||
+      passResult.analysisAfter.score < currentAnalysis.score
+    ) {
+      break;
+    }
+
+    appliedIds = [...new Set([...appliedIds, ...passResult.appliedRecommendationIds])];
+
+    if (passResult.analysisAfter.score === currentAnalysis.score) {
+      currentArticle = {
+        ...currentArticle,
+        content: passResult.optimizedContent,
+      };
+      break;
+    }
+
+    const validation = buildFastValidation(
+      passResult.optimizedContent,
+      buildValidationKeywords(currentArticle)
+    );
+    currentArticle = {
+      ...currentArticle,
+      content: passResult.optimizedContent,
+      validation,
+    };
+  }
+
+  const baseline: GeoOptimizationResult = {
+    appliedRecommendationIds: appliedIds,
+    optimizedContent: currentArticle.content,
+    analysisBefore,
+    analysisAfter: runGeoHarness(currentArticle, "safe"),
+  };
   const normalizedSelectedIds = normalizeSelectedIds(selectedIds);
   const baselineChanged = baseline.optimizedContent.trim() !== article.content.trim();
   const canUseAi = Boolean(process.env.ANTHROPIC_API_KEY?.trim());
@@ -594,15 +719,17 @@ export async function POST(request: NextRequest) {
     }
 
     if (body.mode === "analyze") {
-      const analysis = runGeoHarness(body.article, "safe");
+      const analysis = runGeoHarness(normalizeArticleForGeo(body.article), "safe");
       return NextResponse.json({ success: true, data: analysis });
     }
 
+    if (body.mode === "plan") {
+      const plan = buildGeoPlan(body.article, "safe");
+      return NextResponse.json({ success: true, data: plan });
+    }
+
     if (body.mode === "apply") {
-      const normalizedArticle: ArticleContent = {
-        ...body.article,
-        content: stripLegacyGeoArtifacts(body.article.content),
-      };
+      const normalizedArticle = normalizeArticleForGeo(body.article);
       const serverSelectedIds = buildServerSelectedIds(
         normalizedArticle,
         body.selectedRecommendationIds,
@@ -640,10 +767,7 @@ export async function POST(request: NextRequest) {
 
     if (body.mode === "start-advanced") {
       const jobId = crypto.randomUUID();
-      const normalizedArticle: ArticleContent = {
-        ...body.article,
-        content: stripLegacyGeoArtifacts(body.article.content),
-      };
+      const normalizedArticle = normalizeArticleForGeo(body.article);
       const selectedIds = buildServerSelectedIds(
         normalizedArticle,
         body.selectedRecommendationIds,

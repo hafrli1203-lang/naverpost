@@ -29,6 +29,7 @@ interface ArticlePreviewProps {
   onManualEdit: (content: string) => void | Promise<void>;
   onSave?: () => void;
   onRefreshGeoAnalysis?: () => Promise<GeoAnalysisResult | null>;
+  onLoadGeoPlan?: () => Promise<unknown | null>;
   onApplyGeo: (
     selectedRecommendationIds: GeoRecommendation["id"][]
   ) => Promise<GeoOptimizationResult | null>;
@@ -136,6 +137,7 @@ export function ArticlePreview({
   onManualEdit,
   onSave,
   onRefreshGeoAnalysis,
+  onLoadGeoPlan,
   onApplyGeo,
   onApplyAdvancedGeo,
   isLoading,
@@ -517,6 +519,7 @@ export function ArticlePreview({
           article={article}
           isBusy={isLoading || isGeoLoading}
           onRefreshAnalysis={onRefreshGeoAnalysis}
+          onLoadPlan={onLoadGeoPlan}
           onApply={onApplyGeo}
           onApplyAdvanced={onApplyAdvancedGeo}
         />

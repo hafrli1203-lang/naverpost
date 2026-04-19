@@ -22,6 +22,7 @@ interface GeoOptimizationDialogProps {
   article: ArticleContent;
   isBusy: boolean;
   onRefreshAnalysis?: () => Promise<GeoAnalysisResult | null>;
+  onLoadPlan?: () => Promise<unknown | null>;
   onApply: (
     selectedRecommendationIds: GeoRecommendation["id"][]
   ) => Promise<GeoOptimizationResult | null>;
@@ -29,6 +30,18 @@ interface GeoOptimizationDialogProps {
     selectedRecommendationIds: GeoRecommendation["id"][]
   ) => Promise<GeoOptimizationResult | null>;
 }
+
+type GeoPlanStep = {
+  pass: number;
+  recommendation: GeoRecommendation;
+  projectedScore: number;
+};
+
+type GeoPlanData = {
+  analysis: GeoAnalysisResult;
+  projectedScore: number;
+  steps: GeoPlanStep[];
+};
 
 function impactDelta(impact: GeoRecommendation["impact"]): number {
   switch (impact) {
@@ -117,26 +130,38 @@ export function GeoOptimizationDialog({
   article,
   isBusy,
   onRefreshAnalysis,
+  onLoadPlan,
   onApply,
   onApplyAdvanced,
 }: GeoOptimizationDialogProps) {
   const [open, setOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState<GeoRecommendation["id"][]>([]);
   const [lastResult, setLastResult] = useState<GeoOptimizationResult | null>(null);
+  const [plan, setPlan] = useState<GeoPlanData | null>(null);
   const analysis = article.geo;
 
-  const recommendations = analysis?.recommendations ?? [];
+  const displayAnalysis = plan?.analysis ?? analysis;
+  const recommendations = useMemo(
+    () => (plan ? plan.steps.map((item) => item.recommendation) : analysis?.recommendations ?? []),
+    [analysis?.recommendations, plan]
+  );
   const effectiveSelectedIds = selectedIds.length > 0 ? selectedIds : recommendations.map((item) => item.id);
   const estimatedScore = useMemo(
-    () => (analysis ? buildEstimatedScore(analysis, recommendations, effectiveSelectedIds) : 0),
-    [analysis, recommendations, effectiveSelectedIds]
+    () =>
+      plan?.projectedScore ??
+      (displayAnalysis ? buildEstimatedScore(displayAnalysis, recommendations, effectiveSelectedIds) : 0),
+    [displayAnalysis, plan?.projectedScore, recommendations, effectiveSelectedIds]
   );
 
   async function handleOpen() {
     const refreshed = onRefreshAnalysis ? await onRefreshAnalysis() : analysis;
     const sourceAnalysis = refreshed ?? analysis;
+    const loadedPlan = onLoadPlan ? ((await onLoadPlan()) as GeoPlanData | null) : null;
+    setPlan(loadedPlan);
 
-    if (sourceAnalysis) {
+    if (loadedPlan) {
+      setSelectedIds(loadedPlan.steps.map((item) => item.recommendation.id));
+    } else if (sourceAnalysis) {
       setSelectedIds(
         sourceAnalysis.recommendations
           .filter((item) => item.selectedByDefault)
@@ -151,6 +176,7 @@ export function GeoOptimizationDialog({
   function handleOpenChange(nextOpen: boolean) {
     if (!nextOpen) {
       setLastResult(null);
+      setPlan(null);
     }
     setOpen(nextOpen);
   }
@@ -178,7 +204,7 @@ export function GeoOptimizationDialog({
     }
   }
 
-  if (!analysis) return null;
+  if (!displayAnalysis) return null;
 
   return (
     <>
@@ -205,7 +231,7 @@ export function GeoOptimizationDialog({
             <div className="rounded-2xl border border-slate-200 bg-slate-50 px-6 py-6">
               <div className="flex flex-col items-center justify-center gap-3 text-center md:flex-row md:gap-8">
                 <div>
-                  <div className="text-4xl font-semibold text-slate-900">{analysis.score}</div>
+                  <div className="text-4xl font-semibold text-slate-900">{displayAnalysis.score}</div>
                   <div className="mt-1 text-xs text-slate-500">현재</div>
                 </div>
                 <ArrowRight className="h-5 w-5 text-slate-400" />
@@ -214,13 +240,13 @@ export function GeoOptimizationDialog({
                   <div className="mt-1 text-xs text-slate-500">예상</div>
                 </div>
                 <div className="rounded-full bg-teal-100 px-3 py-1 text-sm font-medium text-teal-700">
-                  {estimatedScore >= analysis.score ? `+${estimatedScore - analysis.score}점` : `${estimatedScore - analysis.score}점`}
+                  {estimatedScore >= displayAnalysis.score ? `+${estimatedScore - displayAnalysis.score}점` : `${estimatedScore - displayAnalysis.score}점`}
                 </div>
               </div>
             </div>
 
             <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              {analysis.categories.map((item) => {
+              {displayAnalysis.categories.map((item) => {
                 const ratio = Math.round((item.score / item.maxScore) * 100);
                 return (
                   <div key={item.key} className="rounded-xl border border-slate-200 bg-white p-4">
@@ -247,7 +273,7 @@ export function GeoOptimizationDialog({
                   변경 사항 ({recommendations.length}건)
                 </h3>
                 <p className="mt-1 text-sm text-slate-500">
-                  병원 블로그 예시처럼 적용 전후 차이를 바로 확인할 수 있게 보여줍니다.
+                  1차 제거 후 다시 재분석한 항목까지 포함해, 90점에 가까워질 때까지 필요한 변경을 묶어서 보여줍니다.
                 </p>
               </div>
               <button
@@ -260,8 +286,9 @@ export function GeoOptimizationDialog({
             </div>
 
             <div className="mt-4 space-y-4">
-              {recommendations.map((recommendation) => {
+              {recommendations.map((recommendation, index) => {
                 const checked = effectiveSelectedIds.includes(recommendation.id);
+                const step = plan?.steps[index];
                 return (
                   <button
                     key={recommendation.id}
@@ -285,6 +312,11 @@ export function GeoOptimizationDialog({
                             <span className="text-base font-semibold text-slate-900">
                               {recommendation.title}
                             </span>
+                            {step && (
+                              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600">
+                                {step.pass}차
+                              </span>
+                            )}
                             <span
                               className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${impactBadgeClass(
                                 recommendation.impact
@@ -294,6 +326,11 @@ export function GeoOptimizationDialog({
                             </span>
                           </div>
                           <p className="mt-1 text-sm text-slate-600">{recommendation.description}</p>
+                          {step && (
+                            <p className="mt-1 text-xs text-teal-700">
+                              이 단계 반영 시 예상 점수 {step.projectedScore}점
+                            </p>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -322,19 +359,19 @@ export function GeoOptimizationDialog({
                 <div>
                   <div className="text-sm font-semibold text-slate-900">검색 미리보기</div>
                   <div className="mt-1 text-xs text-slate-500">
-                    점수만이 아니라 실제 노출 문장도 함께 확인합니다.
-                  </div>
-                </div>
-                <div className="text-xs text-slate-500">
-                  인용 밀도 {analysis.citationDensityCount}건 · {gradeText(analysis.grade)}
+                  점수만이 아니라 실제 노출 문장도 함께 확인합니다.
                 </div>
               </div>
-              <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                <div className="text-xs text-emerald-600">블로그 · blog.naver.com</div>
-                <div className="mt-2 text-lg font-semibold text-slate-900">{analysis.previewTitle}</div>
-                <div className="mt-2 text-sm leading-6 text-slate-600">{analysis.previewDescription}</div>
+              <div className="text-xs text-slate-500">
+                  인용 밀도 {displayAnalysis.citationDensityCount}건 · {gradeText(displayAnalysis.grade)}
               </div>
             </div>
+            <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div className="text-xs text-emerald-600">블로그 · blog.naver.com</div>
+              <div className="mt-2 text-lg font-semibold text-slate-900">{displayAnalysis.previewTitle}</div>
+              <div className="mt-2 text-sm leading-6 text-slate-600">{displayAnalysis.previewDescription}</div>
+            </div>
+          </div>
           </div>
 
           <DialogFooter className="gap-2">

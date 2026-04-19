@@ -28,6 +28,18 @@ type LooseApiResponse = {
   data?: unknown;
 };
 
+type GeoPlanStep = {
+  pass: number;
+  recommendation: GeoRecommendation;
+  projectedScore: number;
+};
+
+type GeoPlanData = {
+  analysis: GeoAnalysisResult;
+  projectedScore: number;
+  steps: GeoPlanStep[];
+};
+
 function buildGeoToastMessage(optimization: GeoOptimizationResult): string {
   const before = optimization.analysisBefore.score;
   const after = optimization.analysisAfter.score;
@@ -152,6 +164,27 @@ export default function Home() {
       return json.data as GeoAnalysisResult;
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "GEO 분석 중 오류가 발생했습니다.");
+      return null;
+    }
+  }, []);
+
+  const loadGeoPlan = useCallback(async (article: ArticleContent): Promise<GeoPlanData | null> => {
+    try {
+      const res = await fetch("/api/article/geo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: "plan",
+          article,
+        }),
+      });
+      const json = await safeJson(res);
+      if (!res.ok || !json.success) {
+        throw new Error(json.error ?? "GEO 계획 분석에 실패했습니다.");
+      }
+      return json.data as GeoPlanData;
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "GEO 계획 분석 중 오류가 발생했습니다.");
       return null;
     }
   }, []);
@@ -885,6 +918,7 @@ export default function Home() {
             onManualEdit={handleManualEdit}
             onSave={handleSaveSession}
             onRefreshGeoAnalysis={refreshGeoForCurrentArticle}
+            onLoadGeoPlan={() => (state.article ? loadGeoPlan(state.article) : Promise.resolve(null))}
             onApplyGeo={applyGeo}
             onApplyAdvancedGeo={applyAdvancedGeo}
             isLoading={isLoading || isGeneratingImages}
