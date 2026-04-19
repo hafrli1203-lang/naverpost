@@ -61,6 +61,25 @@ function impactLabel(impact: GeoRecommendation["impact"]): string {
   }
 }
 
+function buildGeoResultMessage(result: GeoOptimizationResult): string {
+  const before = result.analysisBefore.score;
+  const after = result.analysisAfter.score;
+
+  if (after > before) {
+    return `GEO 점수가 ${before}점에서 ${after}점으로 올라갔습니다.`;
+  }
+
+  if (after < before) {
+    return `GEO 점수가 ${before}점에서 ${after}점으로 내려갔습니다.`;
+  }
+
+  if (result.appliedRecommendationIds.length === 0) {
+    return `GEO 점수는 ${before}점으로 유지됐고, 적용할 만한 유의미한 변경은 보류했습니다.`;
+  }
+
+  return `GEO 점수는 ${before}점으로 유지됐습니다.`;
+}
+
 function buildScoreReasons(
   analysis: GeoAnalysisResult,
   selectedIds: GeoRecommendation["id"][]
@@ -332,8 +351,7 @@ export function GeoOptimizationDialog({
 
       {lastResult && (
         <div className="rounded-xl border border-teal-200 bg-teal-50 px-4 py-3 text-sm text-teal-800">
-          GEO 점수가 {lastResult.analysisBefore.score}점에서 {lastResult.analysisAfter.score}점으로
-          올라갔습니다.
+          {buildGeoResultMessage(lastResult)}
         </div>
       )}
     </>

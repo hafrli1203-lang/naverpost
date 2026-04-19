@@ -28,6 +28,25 @@ type LooseApiResponse = {
   data?: unknown;
 };
 
+function buildGeoToastMessage(optimization: GeoOptimizationResult): string {
+  const before = optimization.analysisBefore.score;
+  const after = optimization.analysisAfter.score;
+
+  if (after > before) {
+    return `GEO 점수 ${before} → ${after}`;
+  }
+
+  if (after < before) {
+    return `GEO 점수 ${before} → ${after} 하락`;
+  }
+
+  if (optimization.appliedRecommendationIds.length === 0) {
+    return `GEO 점수 ${before} 유지, 유의미한 변경 없음`;
+  }
+
+  return `GEO 점수 ${before} 유지`;
+}
+
 async function safeJson(res: Response): Promise<LooseApiResponse> {
   if (res.status === 401) {
     window.location.href = "/login";
@@ -168,9 +187,7 @@ export default function Home() {
           ...prev,
           article: payload.article,
         }));
-        toast.success(
-          `GEO 점수 ${payload.optimization.analysisBefore.score} → ${payload.optimization.analysisAfter.score}`
-        );
+        toast.success(buildGeoToastMessage(payload.optimization));
         return payload.optimization;
       } catch (error) {
         toast.error(error instanceof Error ? error.message : "GEO 적용 중 오류가 발생했습니다.");

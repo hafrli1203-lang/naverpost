@@ -596,6 +596,15 @@ export function applyGeoRecommendations(
     content: nextContent,
   });
 
+  if (analysisAfter.score < analysisBefore.score) {
+    return {
+      appliedRecommendationIds: [],
+      optimizedContent: article.content,
+      analysisBefore,
+      analysisAfter: analysisBefore,
+    };
+  }
+
   return {
     appliedRecommendationIds: selectedRecommendationIds,
     optimizedContent: nextContent,
