@@ -61,6 +61,49 @@ type RewriteIntegrityCheck = {
   reasons: string[];
 };
 
+const LEGACY_TEMPLATE_HEADING_PATTERNS = [
+  /^##\s*FAQ\s*$/i,
+  /^##\s*자주 묻는 질문\s*$/i,
+  /^##\s*확인 및 안내\s*$/i,
+];
+
+const LEGACY_TEMPLATE_LINE_PATTERNS = [
+  /^핵심 답변[:：]/u,
+  /^[^.!?\n]{2,80}(?:은|는|이|가)\s+어떤 기준으로 보면 좋을까요\?/u,
+  /현재 상태,\s*생활 패턴,\s*기대하는 변화 기준/u,
+];
+
+function stripLegacyGeoArtifacts(content: string): string {
+  const lines = content.split(/\r?\n/);
+  const next: string[] = [];
+  let skippingTemplateSection = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    if (LEGACY_TEMPLATE_HEADING_PATTERNS.some((pattern) => pattern.test(trimmed))) {
+      skippingTemplateSection = true;
+      continue;
+    }
+
+    if (skippingTemplateSection && /^##\s+/.test(trimmed)) {
+      skippingTemplateSection = false;
+    }
+
+    if (skippingTemplateSection) {
+      continue;
+    }
+
+    if (LEGACY_TEMPLATE_LINE_PATTERNS.some((pattern) => pattern.test(trimmed))) {
+      continue;
+    }
+
+    next.push(line);
+  }
+
+  return next.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
 function toDisplayOptimization(
   articleBefore: ArticleContent,
   optimization: GeoOptimizationResult
@@ -556,16 +599,20 @@ export async function POST(request: NextRequest) {
     }
 
     if (body.mode === "apply") {
+      const normalizedArticle: ArticleContent = {
+        ...body.article,
+        content: stripLegacyGeoArtifacts(body.article.content),
+      };
       const serverSelectedIds = buildServerSelectedIds(
-        body.article,
+        normalizedArticle,
         body.selectedRecommendationIds,
         "safe"
       );
 
       const result = toDisplayOptimization(
-        body.article,
+        normalizedArticle,
         await optimizeSafeGeo(
-          body.article,
+          normalizedArticle,
           serverSelectedIds,
         )
       );
@@ -576,7 +623,7 @@ export async function POST(request: NextRequest) {
       );
 
       const optimizedArticle: ArticleContent = {
-        ...body.article,
+        ...normalizedArticle,
         content: result.optimizedContent,
         validation,
         geo: result.analysisAfter,
@@ -593,8 +640,12 @@ export async function POST(request: NextRequest) {
 
     if (body.mode === "start-advanced") {
       const jobId = crypto.randomUUID();
+      const normalizedArticle: ArticleContent = {
+        ...body.article,
+        content: stripLegacyGeoArtifacts(body.article.content),
+      };
       const selectedIds = buildServerSelectedIds(
-        body.article,
+        normalizedArticle,
         body.selectedRecommendationIds,
         "aggressive"
       );
@@ -607,7 +658,7 @@ export async function POST(request: NextRequest) {
       });
 
       setTimeout(() => {
-        void runAdvancedGeoJob(jobId, body.article, selectedIds);
+        void runAdvancedGeoJob(jobId, normalizedArticle, selectedIds);
       }, 0);
 
       return NextResponse.json({

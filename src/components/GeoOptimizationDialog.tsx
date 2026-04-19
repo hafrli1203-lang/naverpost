@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Loader2, Sparkles, TrendingUp } from "lucide-react";
+import { ArrowRight, CheckCircle2, Circle, Loader2, Sparkles, TrendingUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -30,23 +30,32 @@ interface GeoOptimizationDialogProps {
   ) => Promise<GeoOptimizationResult | null>;
 }
 
-function gradeText(grade: GeoAnalysisResult["grade"]): string {
-  switch (grade) {
-    case "excellent":
-      return "매우 좋음";
-    case "good":
-      return "좋음";
-    case "fair":
-      return "보통";
+function impactDelta(impact: GeoRecommendation["impact"]): number {
+  switch (impact) {
+    case "high":
+      return 8;
+    case "medium":
+      return 5;
     default:
-      return "개선 필요";
+      return 3;
+  }
+}
+
+function impactLabel(impact: GeoRecommendation["impact"]): string {
+  switch (impact) {
+    case "high":
+      return "높음";
+    case "medium":
+      return "중간";
+    default:
+      return "낮음";
   }
 }
 
 function impactBadgeClass(impact: GeoRecommendation["impact"]): string {
   switch (impact) {
     case "high":
-      return "bg-red-100 text-red-700";
+      return "bg-rose-100 text-rose-700";
     case "medium":
       return "bg-amber-100 text-amber-700";
     default:
@@ -54,14 +63,16 @@ function impactBadgeClass(impact: GeoRecommendation["impact"]): string {
   }
 }
 
-function impactLabel(impact: GeoRecommendation["impact"]): string {
-  switch (impact) {
-    case "high":
-      return "영향 큼";
-    case "medium":
-      return "영향 중간";
+function gradeText(grade: GeoAnalysisResult["grade"]): string {
+  switch (grade) {
+    case "excellent":
+      return "우수";
+    case "good":
+      return "양호";
+    case "fair":
+      return "보통";
     default:
-      return "영향 낮음";
+      return "개선 필요";
   }
 }
 
@@ -69,49 +80,37 @@ function buildGeoResultMessage(result: GeoOptimizationResult): string {
   const before = result.analysisBefore.score;
   const after = result.analysisAfter.score;
 
-  if (after > before) {
-    return `GEO 점수가 ${before}점에서 ${after}점으로 올라갔습니다.`;
-  }
-
-  if (after < before) {
-    return `GEO 점수가 ${before}점에서 ${after}점으로 내려갔습니다.`;
-  }
-
+  if (after > before) return `GEO 점수 ${before} → ${after}`;
+  if (after < before) return `GEO 점수 ${before} → ${after} 하락`;
   if (result.appliedRecommendationIds.length === 0) {
-    return `GEO 점수는 ${before}점으로 유지됐고, 유의미한 변경은 보류했습니다.`;
+    return `GEO 점수 ${before} 유지, 유의미한 변경 없음`;
   }
-
-  return `GEO 점수는 ${before}점으로 유지됐습니다.`;
+  return `GEO 점수 ${before} 유지`;
 }
 
-function buildScoreReasons(
+function buildEstimatedScore(
   analysis: GeoAnalysisResult,
+  recommendations: GeoRecommendation[],
   selectedIds: GeoRecommendation["id"][]
-): string[] {
-  const selected = analysis.recommendations.filter((item) => selectedIds.includes(item.id));
-  const lines: string[] = [];
+): number {
+  const selected = recommendations.filter((item) => selectedIds.includes(item.id));
+  const increase = selected.reduce((sum, item) => sum + impactDelta(item.impact), 0);
+  return Math.min(100, Math.max(analysis.score, analysis.score + increase));
+}
 
-  if (selected.some((item) => item.id === "remove-template-blocks")) {
-    lines.push("기계적으로 붙은 FAQ, 핵심 답변, 확인 문구를 걷어내 본문 흐름을 자연스럽게 유지합니다.");
-  }
-  if (selected.some((item) => item.id === "comparison-table")) {
-    lines.push("비교나 기준이 필요한 글은 표를 보강해 AI가 인용하기 쉬운 구조로 만듭니다.");
-  }
-  if (selected.some((item) => item.id === "soften-claims")) {
-    lines.push("과장되거나 단정적인 표현을 완화해 신뢰도 신호를 보강합니다.");
-  }
-  if (selected.some((item) => item.id === "direct-answer-lead")) {
-    lines.push("도입부에서 주제를 더 빨리 설명하도록 정리합니다.");
-  }
-  if (selected.some((item) => item.id === "question-heading")) {
-    lines.push("소제목 구조를 정리해 주제별 구분을 더 선명하게 만듭니다.");
-  }
+function buildAfterPreview(recommendation: GeoRecommendation): string {
+  if (recommendation.after?.trim()) return recommendation.after.trim();
 
-  if (lines.length === 0) {
-    lines.push("현재 선택으로는 큰 구조 변화 없이 본문을 유지합니다.");
+  switch (recommendation.id) {
+    case "remove-template-blocks":
+      return "FAQ, 핵심 답변, 확인 및 안내 같은 템플릿 블록 제거";
+    case "soften-claims":
+      return "단정적인 표현을 완화하고 근거 중심 문장으로 정리";
+    case "comparison-table":
+      return "비교 기준을 한눈에 볼 수 있는 표 추가";
+    default:
+      return "선택 시 반영";
   }
-
-  return lines;
 }
 
 export function GeoOptimizationDialog({
@@ -126,30 +125,30 @@ export function GeoOptimizationDialog({
   const [lastResult, setLastResult] = useState<GeoOptimizationResult | null>(null);
   const analysis = article.geo;
 
-  const recommendationIds = useMemo(
-    () => analysis?.recommendations.map((item) => item.id) ?? [],
-    [analysis]
+  const recommendations = analysis?.recommendations ?? [];
+  const effectiveSelectedIds = selectedIds.length > 0 ? selectedIds : recommendations.map((item) => item.id);
+  const estimatedScore = useMemo(
+    () => (analysis ? buildEstimatedScore(analysis, recommendations, effectiveSelectedIds) : 0),
+    [analysis, recommendations, effectiveSelectedIds]
   );
 
-  const effectiveSelectedIds = selectedIds.length > 0 ? selectedIds : recommendationIds;
-  const scoreReasons = useMemo(
-    () => (analysis ? buildScoreReasons(analysis, effectiveSelectedIds) : []),
-    [analysis, effectiveSelectedIds]
-  );
+  async function handleOpen() {
+    const refreshed = onRefreshAnalysis ? await onRefreshAnalysis() : analysis;
+    const sourceAnalysis = refreshed ?? analysis;
 
-  async function handleOpenChange(nextOpen: boolean) {
-    if (nextOpen) {
-      const refreshed = onRefreshAnalysis ? await onRefreshAnalysis() : analysis;
-      const sourceAnalysis = refreshed ?? analysis;
-
-      if (sourceAnalysis) {
-        setSelectedIds(
-          sourceAnalysis.recommendations
-            .filter((item) => item.selectedByDefault)
-            .map((item) => item.id)
-        );
-      }
+    if (sourceAnalysis) {
+      setSelectedIds(
+        sourceAnalysis.recommendations
+          .filter((item) => item.selectedByDefault)
+          .map((item) => item.id)
+      );
     }
+
+    setLastResult(null);
+    setOpen(true);
+  }
+
+  function handleOpenChange(nextOpen: boolean) {
     if (!nextOpen) {
       setLastResult(null);
     }
@@ -179,15 +178,13 @@ export function GeoOptimizationDialog({
     }
   }
 
-  if (!analysis) {
-    return null;
-  }
+  if (!analysis) return null;
 
   return (
     <>
       <Button
         variant="outline"
-        onClick={() => handleOpenChange(true)}
+        onClick={handleOpen}
         disabled={isBusy}
         className="gap-2 border-teal-300 text-teal-700 hover:bg-teal-50 hover:text-teal-800"
       >
@@ -196,29 +193,41 @@ export function GeoOptimizationDialog({
       </Button>
 
       <Dialog open={open} onOpenChange={handleOpenChange}>
-        <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto p-0">
+        <DialogContent className="max-h-[92vh] max-w-5xl overflow-y-auto p-0">
           <div className="p-6">
-            <DialogHeader className="mb-5">
+            <DialogHeader className="mb-6">
               <DialogTitle>GEO 최적화</DialogTitle>
-              <DialogDescription>{analysis.summary}</DialogDescription>
+              <DialogDescription>
+                변경 사항을 확인한 뒤 적용하세요. 현재 글 흐름은 유지하고 필요한 부분만 다듬습니다.
+              </DialogDescription>
             </DialogHeader>
 
-            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-center">
-              <div className="text-5xl font-semibold text-amber-600">{analysis.score}</div>
-              <div className="mt-1 text-sm text-slate-600">
-                / 100점, 현재 상태는 {gradeText(analysis.grade)}
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-6 py-6">
+              <div className="flex flex-col items-center justify-center gap-3 text-center md:flex-row md:gap-8">
+                <div>
+                  <div className="text-4xl font-semibold text-slate-900">{analysis.score}</div>
+                  <div className="mt-1 text-xs text-slate-500">현재</div>
+                </div>
+                <ArrowRight className="h-5 w-5 text-slate-400" />
+                <div>
+                  <div className="text-4xl font-semibold text-teal-600">{estimatedScore}</div>
+                  <div className="mt-1 text-xs text-slate-500">예상</div>
+                </div>
+                <div className="rounded-full bg-teal-100 px-3 py-1 text-sm font-medium text-teal-700">
+                  {estimatedScore >= analysis.score ? `+${estimatedScore - analysis.score}점` : `${estimatedScore - analysis.score}점`}
+                </div>
               </div>
             </div>
 
-            <div className="mt-5 grid gap-3 md:grid-cols-2">
+            <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
               {analysis.categories.map((item) => {
                 const ratio = Math.round((item.score / item.maxScore) * 100);
                 return (
-                  <div key={item.key} className="rounded-xl border border-slate-200 p-4">
+                  <div key={item.key} className="rounded-xl border border-slate-200 bg-white p-4">
                     <div className="mb-2 flex items-center justify-between text-sm">
                       <span className="font-medium text-slate-700">{item.label}</span>
                       <span className="text-slate-500">
-                        {item.score} / {item.maxScore}
+                        {item.score}/{item.maxScore}
                       </span>
                     </div>
                     <div className="h-2 rounded-full bg-slate-100">
@@ -232,85 +241,48 @@ export function GeoOptimizationDialog({
               })}
             </div>
 
-            <div className="mt-5 rounded-xl border border-slate-200 p-4">
-              <div className="mb-3 flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-slate-900">점수 반영 기준</h3>
-                <span className="text-xs text-slate-500">
-                  선택 항목 {effectiveSelectedIds.length}개
-                </span>
-              </div>
-              <div className="space-y-2">
-                {scoreReasons.map((reason) => (
-                  <p key={reason} className="text-sm leading-6 text-slate-600">
-                    - {reason}
-                  </p>
-                ))}
-              </div>
-            </div>
-
-            <div className="mt-5 rounded-xl border border-slate-200 p-4">
-              <div className="mb-3 flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-slate-900">노출 미리보기</h3>
-                <span className="text-xs text-slate-500">
-                  근거 표현 {analysis.citationDensityCount}회, {analysis.citationDensityLabel}
-                </span>
-              </div>
-              <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                <div className="text-xs text-green-600">미리보기 기준 blog.naver.com</div>
-                <div className="mt-2 text-xl font-semibold text-slate-900">
-                  {analysis.previewTitle}
-                </div>
-                <div className="mt-2 text-sm leading-6 text-slate-600">
-                  {analysis.previewDescription}
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-5">
-              <div className="mb-3 flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-slate-900">
-                  적용 가능 항목 ({analysis.recommendations.length}개)
+            <div className="mt-6 flex items-center justify-between">
+              <div>
+                <h3 className="text-base font-semibold text-slate-900">
+                  변경 사항 ({recommendations.length}건)
                 </h3>
-                <button
-                  type="button"
-                  className="text-xs text-slate-500 hover:text-slate-700"
-                  onClick={() =>
-                    setSelectedIds(
-                      analysis.recommendations.map((recommendation) => recommendation.id)
-                    )
-                  }
-                >
-                  전체 선택
-                </button>
+                <p className="mt-1 text-sm text-slate-500">
+                  병원 블로그 예시처럼 적용 전후 차이를 바로 확인할 수 있게 보여줍니다.
+                </p>
               </div>
+              <button
+                type="button"
+                className="text-sm text-teal-700 hover:text-teal-800"
+                onClick={() => setSelectedIds(recommendations.map((item) => item.id))}
+              >
+                전체 선택
+              </button>
+            </div>
 
-              <div className="space-y-3">
-                {analysis.recommendations.map((recommendation) => {
-                  const checked = effectiveSelectedIds.includes(recommendation.id);
-                  return (
-                    <button
-                      key={recommendation.id}
-                      type="button"
-                      onClick={() => toggleRecommendation(recommendation.id)}
-                      className={`w-full rounded-2xl border p-4 text-left transition ${
-                        checked
-                          ? "border-teal-400 bg-teal-50"
-                          : "border-slate-200 bg-white hover:border-slate-300"
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-2">
-                            <span
-                              className={`inline-flex h-5 w-5 items-center justify-center rounded-full border text-xs ${
-                                checked
-                                  ? "border-teal-500 bg-teal-500 text-white"
-                                  : "border-slate-300 bg-white text-slate-500"
-                              }`}
-                            >
-                              {checked ? "✓" : ""}
-                            </span>
-                            <span className="font-medium text-slate-900">
+            <div className="mt-4 space-y-4">
+              {recommendations.map((recommendation) => {
+                const checked = effectiveSelectedIds.includes(recommendation.id);
+                return (
+                  <button
+                    key={recommendation.id}
+                    type="button"
+                    onClick={() => toggleRecommendation(recommendation.id)}
+                    className={`w-full rounded-2xl border p-5 text-left transition ${
+                      checked
+                        ? "border-teal-300 bg-teal-50/40"
+                        : "border-slate-200 bg-white hover:border-slate-300"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-start gap-3">
+                        {checked ? (
+                          <CheckCircle2 className="mt-0.5 h-5 w-5 text-teal-600" />
+                        ) : (
+                          <Circle className="mt-0.5 h-5 w-5 text-slate-400" />
+                        )}
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-base font-semibold text-slate-900">
                               {recommendation.title}
                             </span>
                             <span
@@ -321,37 +293,53 @@ export function GeoOptimizationDialog({
                               {impactLabel(recommendation.impact)}
                             </span>
                           </div>
-                          <p className="text-sm text-slate-600">{recommendation.description}</p>
-                          <p className="text-xs text-slate-500">{recommendation.reason}</p>
+                          <p className="mt-1 text-sm text-slate-600">{recommendation.description}</p>
                         </div>
                       </div>
+                    </div>
 
-                      {(recommendation.before || recommendation.after) && (
-                        <div className="mt-3 grid gap-2 md:grid-cols-2">
-                          <div className="rounded-xl bg-slate-50 p-3">
-                            <div className="mb-1 text-xs text-slate-500">변경 전</div>
-                            <div className="text-sm text-slate-700">
-                              {recommendation.before ?? "없음"}
-                            </div>
-                          </div>
-                          <div className="rounded-xl bg-cyan-50 p-3">
-                            <div className="mb-1 text-xs text-teal-600">변경 후</div>
-                            <div className="text-sm text-slate-700">
-                              {recommendation.after ?? "없음"}
-                            </div>
-                          </div>
+                    <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                      <div className="rounded-2xl bg-slate-50 p-4">
+                        <div className="mb-2 text-xs font-medium text-slate-500">현재</div>
+                        <div className="min-h-20 whitespace-pre-wrap text-sm leading-6 text-slate-700">
+                          {recommendation.before?.trim() || "현재 본문에는 해당 구조가 없거나 약합니다."}
                         </div>
-                      )}
-                    </button>
-                  );
-                })}
+                      </div>
+                      <div className="rounded-2xl bg-cyan-50 p-4">
+                        <div className="mb-2 text-xs font-medium text-teal-600">최적화</div>
+                        <div className="min-h-20 whitespace-pre-wrap text-sm leading-6 text-slate-700">
+                          {buildAfterPreview(recommendation)}
+                        </div>
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold text-slate-900">검색 미리보기</div>
+                  <div className="mt-1 text-xs text-slate-500">
+                    점수만이 아니라 실제 노출 문장도 함께 확인합니다.
+                  </div>
+                </div>
+                <div className="text-xs text-slate-500">
+                  인용 밀도 {analysis.citationDensityCount}건 · {gradeText(analysis.grade)}
+                </div>
+              </div>
+              <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div className="text-xs text-emerald-600">블로그 · blog.naver.com</div>
+                <div className="mt-2 text-lg font-semibold text-slate-900">{analysis.previewTitle}</div>
+                <div className="mt-2 text-sm leading-6 text-slate-600">{analysis.previewDescription}</div>
               </div>
             </div>
           </div>
 
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setOpen(false)} disabled={isBusy}>
-              닫기
+              이전
             </Button>
             {onApplyAdvanced && (
               <Button
@@ -360,11 +348,7 @@ export function GeoOptimizationDialog({
                 disabled={isBusy || effectiveSelectedIds.length === 0}
                 className="gap-2 border-amber-300 text-amber-700 hover:bg-amber-50 hover:text-amber-800"
               >
-                {isBusy ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Sparkles className="h-4 w-4" />
-                )}
+                {isBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
                 고득점 GEO
               </Button>
             )}
@@ -373,12 +357,8 @@ export function GeoOptimizationDialog({
               disabled={isBusy || effectiveSelectedIds.length === 0}
               className="gap-2 bg-teal-600 hover:bg-teal-700"
             >
-              {isBusy ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <TrendingUp className="h-4 w-4" />
-              )}
-              선택 항목 적용 ({effectiveSelectedIds.length})
+              {isBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <TrendingUp className="h-4 w-4" />}
+              적용 ({effectiveSelectedIds.length}/{recommendations.length})
             </Button>
           </DialogFooter>
         </DialogContent>

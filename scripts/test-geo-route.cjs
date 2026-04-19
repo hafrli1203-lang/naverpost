@@ -216,6 +216,41 @@ async function main() {
     throw new Error("apply route failed");
   }
 
+  const legacyTemplateArticle = {
+    ...article,
+    content: [
+      "## 압축렌즈 굴절률는 어떤 기준으로 보면 좋을까요?",
+      "핵심 답변: 현재 상태, 생활 패턴, 기대하는 변화 기준으로 나눠 보면 훨씬 이해가 쉬워집니다.",
+      "",
+      article.content,
+      "",
+      "## FAQ",
+      "",
+      "### 압축렌즈 굴절률는 누구에게 먼저 확인이 필요할까요?",
+      "핵심 답변: 증상, 생활 패턴, 기존 관리 이력을 함께 보고 판단하는 편이 좋습니다.",
+      "",
+      "## 확인 및 안내",
+      "개인 상태에 따라 적용 방법과 우선순위는 달라질 수 있습니다.",
+    ].join("\n"),
+  };
+
+  const legacyApply = await POST(
+    mockRequest({
+      mode: "apply",
+      article: legacyTemplateArticle,
+      selectedRecommendationIds: [],
+    })
+  );
+  const legacyContent = legacyApply.body?.data?.article?.content ?? "";
+  if (
+    legacyApply.status !== 200 ||
+    legacyContent.includes("## FAQ") ||
+    legacyContent.includes("## 확인 및 안내") ||
+    legacyContent.includes("핵심 답변:")
+  ) {
+    throw new Error("apply route should strip legacy GEO template blocks");
+  }
+
   const startAdvanced = await POST(
     mockRequest({
       mode: "start-advanced",
