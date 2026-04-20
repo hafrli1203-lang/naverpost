@@ -1,4 +1,4 @@
-import { runGeoHarness } from "../src/lib/geo/harness.ts";
+import { runGeoHarness } from "../src/lib/geo/harness";
 
 const BEFORE_CONTENT = `# 난시렌즈 처방 과정에서 축 측정이 중요한 이유
 
