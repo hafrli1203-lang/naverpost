@@ -4,6 +4,38 @@ import type {
   KeywordOption,
 } from "@/types";
 
+const COMMON_STOPWORDS = new Set([
+  "관리",
+  "방법",
+  "안내",
+  "선택",
+  "기준",
+  "효과",
+  "차이",
+  "이유",
+  "원리",
+  "정리",
+  "확인",
+  "추천",
+  "비교",
+  "점검",
+  "사용",
+  "주의",
+  "팁",
+  "가이드",
+  "노하우",
+  "이야기",
+  "설명",
+  "체크",
+  "포인트",
+  "상담",
+  "의미",
+  "변화",
+  "특징",
+  "종류",
+  "용도",
+]);
+
 function normalize(text: string): string {
   return text.replace(/\s+/g, "").toLowerCase();
 }
@@ -14,12 +46,16 @@ function tokenize(text: string): string[] {
   );
 }
 
+function meaningfulTokens(text: string): string[] {
+  return tokenize(text).filter((token) => !COMMON_STOPWORDS.has(token));
+}
+
 function overlapTokens(source: string, targets: string[]): string[] {
-  const sourceTokens = new Set(tokenize(source));
+  const sourceTokens = new Set(meaningfulTokens(source));
   const overlaps = new Set<string>();
 
   for (const target of targets) {
-    for (const token of tokenize(target)) {
+    for (const token of meaningfulTokens(target)) {
       if (sourceTokens.has(token)) overlaps.add(token);
     }
   }
@@ -29,18 +65,23 @@ function overlapTokens(source: string, targets: string[]): string[] {
 
 function detectSharedTitlePattern(title: string, history: string[]): string[] {
   const normalizedTitle = normalize(title);
-  const titleTokens = tokenize(title);
+  const titleTokens = meaningfulTokens(title);
+  if (titleTokens.length === 0) return [];
 
   return history.filter((item) => {
     const normalizedItem = normalize(item);
     if (!normalizedItem) return false;
     if (normalizedItem === normalizedTitle) return true;
 
-    const itemTokens = tokenize(item);
+    const itemTokens = meaningfulTokens(item);
+    if (itemTokens.length === 0) return false;
+
     const sharedCount = itemTokens.filter((token) =>
       titleTokens.includes(token)
     ).length;
-    return sharedCount >= Math.min(2, titleTokens.length);
+
+    const threshold = Math.max(2, Math.ceil(Math.min(titleTokens.length, itemTokens.length) * 0.6));
+    return sharedCount >= threshold;
   });
 }
 
@@ -53,11 +94,12 @@ function detectKeywordCombinationOverlap(
     option.subKeyword1,
     option.subKeyword2,
   ]
-    .flatMap(tokenize)
+    .flatMap(meaningfulTokens)
     .filter(Boolean);
+  if (keywordTokens.length === 0) return [];
 
   return history.filter((item) => {
-    const itemTokens = tokenize(item);
+    const itemTokens = meaningfulTokens(item);
     const sharedCount = itemTokens.filter((token) =>
       keywordTokens.includes(token)
     ).length;
@@ -69,13 +111,19 @@ export function analyzeNetworkDuplicateRisk(params: {
   option: KeywordOption;
   forbiddenList: string[];
   referenceList: string[];
+  competitorList?: string[];
 }): DuplicatePatternAnalysis {
-  const { option, forbiddenList, referenceList } = params;
+  const { option, forbiddenList, referenceList, competitorList = [] } = params;
   const sameStoreMatches = detectSharedTitlePattern(option.title, forbiddenList);
   const crossBlogMatches = detectSharedTitlePattern(option.title, referenceList);
+  const competitorMatches = detectSharedTitlePattern(option.title, competitorList);
   const keywordCombinationOverlap = detectKeywordCombinationOverlap(
     option,
     referenceList
+  );
+  const competitorKeywordCombinationOverlap = detectKeywordCombinationOverlap(
+    option,
+    competitorList
   );
   const sharedExpressionOverlap = overlapTokens(option.title, referenceList).slice(
     0,
@@ -104,6 +152,16 @@ export function analyzeNetworkDuplicateRisk(params: {
     });
   }
 
+  if (competitorMatches.length > 0) {
+    issues.push({
+      code: "competitor-top-title-overlap",
+      label: "상위 노출 경쟁 제목 중복",
+      reason: `현재 네이버 상위 노출 중인 제목과 겹칩니다: ${competitorMatches[0]}`,
+      severity: "high",
+      source: "naver-search",
+    });
+  }
+
   if (keywordCombinationOverlap.length > 0) {
     issues.push({
       code: "cross-blog-keyword-combination-overlap",
@@ -114,9 +172,26 @@ export function analyzeNetworkDuplicateRisk(params: {
     });
   }
 
+  if (competitorKeywordCombinationOverlap.length > 0) {
+    issues.push({
+      code: "competitor-keyword-combination-overlap",
+      label: "경쟁 제목 키워드 조합 중복",
+      reason: `상위 노출 제목과 키워드 조합이 겹칩니다: ${competitorKeywordCombinationOverlap[0]}`,
+      severity: "medium",
+      source: "naver-search",
+    });
+  }
+
   return {
-    titlePatternOverlap: [...sameStoreMatches, ...crossBlogMatches].slice(0, 5),
-    keywordCombinationOverlap: keywordCombinationOverlap.slice(0, 5),
+    titlePatternOverlap: [
+      ...sameStoreMatches,
+      ...crossBlogMatches,
+      ...competitorMatches,
+    ].slice(0, 6),
+    keywordCombinationOverlap: [
+      ...keywordCombinationOverlap,
+      ...competitorKeywordCombinationOverlap,
+    ].slice(0, 6),
     sectionOrderOverlap: [],
     tableStructureOverlap: [],
     expressionOverlap: sharedExpressionOverlap,

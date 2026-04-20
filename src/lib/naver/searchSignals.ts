@@ -46,6 +46,32 @@ function stripHtml(text: string): string {
   return text.replace(/<[^>]+>/g, "").trim();
 }
 
+export async function fetchCompetitorTitles(seeds: string[]): Promise<string[]> {
+  if (!hasWorkingCredentials()) return [];
+
+  const collected = new Map<string, string>();
+  for (const seed of seeds.slice(0, 4)) {
+    if (!seed.trim()) continue;
+    try {
+      const { items } = await fetchBlogSearch(seed);
+      for (const item of items) {
+        const title = item.title.trim();
+        if (!title) continue;
+        const normalized = title.replace(/\s+/g, " ").toLowerCase();
+        if (!collected.has(normalized)) {
+          collected.set(normalized, title);
+        }
+        if (collected.size >= 40) break;
+      }
+    } catch {
+      // single-seed failure should not block competitor fetch
+    }
+    if (collected.size >= 40) break;
+  }
+
+  return Array.from(collected.values());
+}
+
 async function fetchBlogSearch(keyword: string): Promise<{
   total: number;
   items: Array<{ title: string; description: string; link: string; bloggerlink: string }>;

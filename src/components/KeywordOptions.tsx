@@ -31,98 +31,129 @@ interface KeywordOptionsProps {
 function intentLabel(intent?: string): string {
   switch (intent) {
     case "price":
-      return "가격형";
+      return "가격 정보";
     case "review":
-      return "후기형";
+      return "후기 리뷰";
     case "guide":
-      return "가이드형";
+      return "가이드";
     case "visit":
-      return "방문형";
+      return "매장 방문";
     case "info":
-      return "정보형";
+      return "정보성";
     default:
-      return "일반형";
+      return "일반";
   }
 }
 
 function trendLabel(trend?: string): string {
   switch (trend) {
     case "rising":
-      return "상승";
+      return "상승 중";
     case "steady":
-      return "유지";
+      return "꾸준함";
     case "falling":
-      return "하락";
+      return "감소 중";
     default:
       return "확인 중";
   }
 }
 
-function buildAnalysisSummary(option: KeywordOption): string[] {
+function buildExposureSummary(option: KeywordOption): {
+  tone: "positive" | "caution" | "warning";
+  message: string;
+} {
   const analysis = option.analysis;
   if (!analysis) {
-    return ["기본 규칙만 먼저 통과한 후보입니다."];
+    return {
+      tone: "caution",
+      message: "아직 분석이 부족한 후보예요. 일단 기본 규칙은 통과했어요.",
+    };
   }
+
+  const overlap = analysis.duplicateRisk?.titlePatternOverlap.length ?? 0;
+  const expandable = analysis.bodyExpansionFit?.isLikelyExpandable;
+
+  if (overlap > 0) {
+    return {
+      tone: "warning",
+      message:
+        "네이버 상위에 비슷한 제목이 이미 있어요. 그대로 쓰면 노출 경쟁에서 밀릴 수 있으니 각도를 바꿔 보세요.",
+    };
+  }
+
+  if (!expandable) {
+    return {
+      tone: "caution",
+      message:
+        "본문을 길게 쓰면 설명이 반복될 수 있어요. 소주제를 다양하게 잡으면 좋아요.",
+    };
+  }
+
+  return {
+    tone: "positive",
+    message:
+      "본문을 편하게 길게 풀 수 있는 후보예요. 겹치는 상위 제목도 적어서 노출에 유리해요.",
+  };
+}
+
+function buildAnalysisLines(option: KeywordOption): string[] {
+  const analysis = option.analysis;
+  if (!analysis) return [];
 
   const lines: string[] = [];
   const intent = intentLabel(analysis.searchIntentAxis);
-
-  lines.push(`이 후보는 ${intent} 글 방향에 가장 가깝습니다.`);
-
-  if (analysis.bodyExpansionFit?.isLikelyExpandable) {
-    lines.push("본문을 길게 풀어도 내용이 끊기지 않을 가능성이 높습니다.");
-  } else {
-    lines.push("본문을 길게 쓰면 비슷한 설명이 반복될 수 있어 주의가 필요합니다.");
-  }
+  lines.push(`주로 "${intent}" 검색 의도에 맞는 글이에요.`);
 
   if (analysis.externalSignals) {
-    lines.push("외부 검색 신호까지 확인된 후보라 우선 검토 가치가 높습니다.");
-  } else {
-    lines.push("속도를 위해 내부 분석만 먼저 적용한 후보입니다.");
+    lines.push("네이버 실시간 검색 흐름까지 확인했어요.");
   }
 
-  if ((analysis.duplicateRisk?.titlePatternOverlap.length ?? 0) > 0) {
-    lines.push("기존 제목과 비슷할 수 있어 표현을 조금 더 차별화하는 편이 안전합니다.");
+  const keywordOverlap = analysis.duplicateRisk?.keywordCombinationOverlap.length ?? 0;
+  if (keywordOverlap > 0) {
+    lines.push("같은 키워드 조합을 쓰는 글이 이미 많아요. 서브 키워드를 바꿔도 좋아요.");
   }
 
   return lines;
-}
-
-function buildExposureSummary(option: KeywordOption): string {
-  const analysis = option.analysis;
-  if (!analysis) {
-    return "노출 판단 데이터가 아직 적어 기본 규칙 기준으로만 추천합니다.";
-  }
-
-  const parts: string[] = [];
-
-  parts.push(
-    analysis.bodyExpansionFit?.isLikelyExpandable
-      ? "본문 확장성이 좋아 글 밀도를 확보하기 쉽습니다."
-      : "본문 밀도가 약해질 수 있어 보완이 필요합니다."
-  );
-
-  parts.push(
-    analysis.externalSignals
-      ? "외부 검색 신호가 확인돼 우선순위가 높습니다."
-      : "아직 외부 검색 신호 확인 전입니다."
-  );
-
-  if ((analysis.duplicateRisk?.titlePatternOverlap.length ?? 0) > 0) {
-    parts.push("기존 제목과 겹칠 위험이 있습니다.");
-  } else {
-    parts.push("제목 중복 위험은 상대적으로 낮습니다.");
-  }
-
-  return parts.join(" ");
 }
 
 function buildValidationNote(
   validation?: { isValid: boolean; failures: { rule: string; reason: string }[] }
 ): string | null {
   if (!validation) return null;
-  if (validation.isValid) return "기본 제목 규칙 검사를 통과했습니다.";
-  return validation.failures[0]?.reason ?? "추가 검토가 필요합니다.";
+  if (validation.isValid) return "제목·키워드 기본 규칙 통과";
+  return validation.failures[0]?.reason ?? "추가 검토 필요";
+}
+
+function toneStyles(tone: "positive" | "caution" | "warning"): {
+  border: string;
+  bg: string;
+  label: string;
+  labelColor: string;
+} {
+  switch (tone) {
+    case "positive":
+      return {
+        border: "border-emerald-200",
+        bg: "bg-emerald-50",
+        label: "추천",
+        labelColor: "text-emerald-700",
+      };
+    case "warning":
+      return {
+        border: "border-rose-200",
+        bg: "bg-rose-50",
+        label: "중복 위험",
+        labelColor: "text-rose-700",
+      };
+    case "caution":
+    default:
+      return {
+        border: "border-amber-200",
+        bg: "bg-amber-50",
+        label: "주의",
+        labelColor: "text-amber-700",
+      };
+  }
 }
 
 export function KeywordOptions({
@@ -148,7 +179,7 @@ export function KeywordOptions({
         const option = getDisplayOption(idx);
         return {
           option,
-          summary: buildAnalysisSummary(option),
+          lines: buildAnalysisLines(option),
           exposureSummary: buildExposureSummary(option),
         };
       }),
@@ -194,8 +225,7 @@ export function KeywordOptions({
       <div className="space-y-1 text-center">
         <h2 className="text-xl font-semibold">제목과 키워드 후보</h2>
         <p className="text-sm text-muted-foreground">
-          각 후보가 어떤 글 방향에 맞는지, 노출 가능성은 어떤지, 중복 위험은 없는지 쉽게
-          읽을 수 있게 정리했습니다.
+          각 제목이 어떤 독자를 위한 글인지, 네이버 상위 제목과 겹치지 않는지 한눈에 볼 수 있어요.
         </p>
       </div>
 
@@ -205,7 +235,7 @@ export function KeywordOptions({
         disabled={isLoading}
         className="space-y-4"
       >
-        {cards.map(({ summary, exposureSummary }, idx) => {
+        {cards.map(({ lines, exposureSummary }, idx) => {
           const validation = validations?.[idx];
           const isSelected = selectedIndex === String(idx);
           const isEditing = editingIndex === idx;
@@ -366,70 +396,61 @@ export function KeywordOptions({
                               variant="secondary"
                               className="bg-slate-100 text-slate-700 hover:bg-slate-100"
                             >
-                              글 방향: {intentLabel(displayOption.analysis.searchIntentAxis)}
+                              {intentLabel(displayOption.analysis.searchIntentAxis)} 검색 의도
                             </Badge>
-                            <Badge
-                              variant="secondary"
-                              className={
-                                displayOption.analysis.bodyExpansionFit?.isLikelyExpandable
-                                  ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-100"
-                                  : "bg-amber-100 text-amber-700 hover:bg-amber-100"
-                              }
-                            >
-                              본문 전개:{" "}
-                              {displayOption.analysis.bodyExpansionFit?.isLikelyExpandable
-                                ? "안정적"
-                                : "주의 필요"}
-                            </Badge>
-                            <Badge
-                              variant="secondary"
-                              className={
-                                displayOption.analysis.externalSignals
-                                  ? "bg-violet-100 text-violet-700 hover:bg-violet-100"
-                                  : "bg-slate-100 text-slate-500 hover:bg-slate-100"
-                              }
-                            >
-                              검증 수준:{" "}
-                              {displayOption.analysis.externalSignals
-                                ? "외부 검색 확인"
-                                : "내부 분석 우선"}
-                            </Badge>
+                            {displayOption.analysis.externalSignals && (
+                              <Badge
+                                variant="secondary"
+                                className="bg-violet-100 text-violet-700 hover:bg-violet-100"
+                              >
+                                네이버 실시간 확인
+                              </Badge>
+                            )}
                             {(displayOption.analysis.duplicateRisk?.titlePatternOverlap.length ??
                               0) > 0 && (
                               <Badge
                                 variant="secondary"
                                 className="bg-rose-100 text-rose-700 hover:bg-rose-100"
                               >
-                                리스크: 기존 제목과 유사
+                                상위 제목과 유사
                               </Badge>
                             )}
                           </div>
 
-                          <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2">
-                            <p className="text-xs font-semibold text-blue-700">노출 가능성 요약</p>
-                            <p className="mt-1 text-xs leading-5 text-blue-900">
-                              {exposureSummary}
-                            </p>
-                          </div>
-
-                          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                            <div className="space-y-1">
-                              {summary.map((line) => (
-                                <p key={line} className="text-xs leading-5 text-slate-700">
-                                  {line}
+                          {(() => {
+                            const styles = toneStyles(exposureSummary.tone);
+                            return (
+                              <div
+                                className={`rounded-lg border ${styles.border} ${styles.bg} px-3 py-2`}
+                              >
+                                <p
+                                  className={`text-xs font-semibold ${styles.labelColor}`}
+                                >
+                                  {styles.label}
                                 </p>
+                                <p className="mt-1 text-xs leading-5 text-slate-800">
+                                  {exposureSummary.message}
+                                </p>
+                              </div>
+                            );
+                          })()}
+
+                          {lines.length > 0 && (
+                            <ul className="space-y-1 text-xs leading-5 text-slate-600">
+                              {lines.map((line) => (
+                                <li key={line}>· {line}</li>
                               ))}
-                            </div>
-                          </div>
+                            </ul>
+                          )}
 
                           {displayOption.analysis.externalSignals?.searchVolume?.length ? (
                             <p className="text-xs leading-5 text-muted-foreground">
-                              외부 검색 추세:{" "}
+                              네이버 검색 추세:{" "}
                               {displayOption.analysis.externalSignals.searchVolume
                                 .slice(0, 3)
                                 .map((item) => `${item.keyword} ${trendLabel(item.trend)}`)
                                 .join(" / ")}
-                              {externalTrend ? `, 대표 흐름은 ${trendLabel(externalTrend)}입니다.` : ""}
+                              {externalTrend ? `, 전체 흐름은 ${trendLabel(externalTrend)}이에요.` : ""}
                             </p>
                           ) : null}
                         </>

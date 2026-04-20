@@ -4,6 +4,7 @@ import { CATEGORIES } from "@/lib/constants";
 import { getShopById } from "@/lib/data/shops";
 import { fetchBlogTitles } from "@/lib/naver/rssParser";
 import {
+  fetchCompetitorTitles,
   getExternalSearchSignals,
   NaverSearchDependencyError,
 } from "@/lib/naver/searchSignals";
@@ -57,27 +58,27 @@ function isTooSimilarTitle(a: KeywordOption, b: KeywordOption): boolean {
   return sameMainKeyword && sameSubKeyword1 && sameSubKeyword2;
 }
 
+const TARGET_RESULT_COUNT = 10;
+
 function pickDiverseKeywordResults<T extends KeywordOption & { _priorityScore: number }>(
   rankedResults: T[]
 ): T[] {
   const selected: T[] = [];
 
   for (const candidate of rankedResults) {
+    if (selected.length >= TARGET_RESULT_COUNT) break;
     if (selected.every((picked) => !isTooSimilarTitle(candidate, picked))) {
       selected.push(candidate);
-      continue;
-    }
-
-    if (selected.length >= Math.min(6, rankedResults.length)) {
-      continue;
     }
   }
 
-  if (selected.length === 0) return rankedResults;
+  if (selected.length >= TARGET_RESULT_COUNT) {
+    return selected;
+  }
 
   for (const candidate of rankedResults) {
     if (selected.includes(candidate)) continue;
-    if (selected.length >= rankedResults.length) break;
+    if (selected.length >= TARGET_RESULT_COUNT) break;
 
     const weakestSimilarity = Math.max(
       ...selected.map((picked) => calculateTitleSimilarity(candidate.title, picked.title))
@@ -88,6 +89,7 @@ function pickDiverseKeywordResults<T extends KeywordOption & { _priorityScore: n
     }
   }
 
+  if (selected.length === 0) return rankedResults;
   return selected;
 }
 
@@ -105,9 +107,10 @@ async function buildKeywordAnalysis(params: {
   option: KeywordOption;
   forbiddenList: string[];
   referenceList: string[];
+  competitorList: string[];
   externalSignals?: KeywordOptionAnalysis["externalSignals"];
 }): Promise<KeywordOptionAnalysis> {
-  const { option, forbiddenList, referenceList, externalSignals } = params;
+  const { option, forbiddenList, referenceList, competitorList, externalSignals } = params;
   const syntheticBody =
     `${option.title}\n${option.mainKeyword}\n${option.subKeyword1}\n${option.subKeyword2}`;
   const keywords = [option.mainKeyword, option.subKeyword1, option.subKeyword2];
@@ -128,6 +131,7 @@ async function buildKeywordAnalysis(params: {
     option,
     forbiddenList,
     referenceList,
+    competitorList,
   });
   const issues = [
     ...morphology.issues,
@@ -166,8 +170,8 @@ function getKeywordPriorityScore(params: {
   if (validation.isValid) score += 100;
   score -= validation.failures.length * 15;
   score -= analysis.issues.length * 8;
-  score -= (analysis.duplicateRisk?.titlePatternOverlap.length ?? 0) * 10;
-  score -= (analysis.duplicateRisk?.keywordCombinationOverlap.length ?? 0) * 8;
+  score -= (analysis.duplicateRisk?.titlePatternOverlap.length ?? 0) * 40;
+  score -= (analysis.duplicateRisk?.keywordCombinationOverlap.length ?? 0) * 20;
   score -= (analysis.languageRisk?.commercial.length ?? 0) * 5;
   score -= (analysis.languageRisk?.emphasis.length ?? 0) * 5;
   score -= (analysis.structure?.missingTitleKeywordCoverage.length ?? 0) * 8;
@@ -178,6 +182,52 @@ function getKeywordPriorityScore(params: {
   }
 
   return score;
+}
+
+type AnalyzedKeyword = KeywordOption & {
+  analysis: KeywordOptionAnalysis;
+  validation: ReturnType<typeof validateKeywordOption>;
+  _priorityScore: number;
+};
+
+function isCleanCandidate(option: AnalyzedKeyword): boolean {
+  const issues = option.analysis.duplicateRisk?.issues ?? [];
+  const competitorHit = issues.some(
+    (issue) =>
+      issue.code === "competitor-top-title-overlap" ||
+      issue.code === "competitor-keyword-combination-overlap"
+  );
+  const sameStoreHit = issues.some(
+    (issue) => issue.code === "same-store-title-overlap"
+  );
+  return !competitorHit && !sameStoreHit;
+}
+
+async function analyzeOptions(params: {
+  rawOptions: KeywordOption[];
+  forbiddenList: string[];
+  referenceList: string[];
+  competitorList: string[];
+}): Promise<AnalyzedKeyword[]> {
+  const { rawOptions, forbiddenList, referenceList, competitorList } = params;
+
+  return Promise.all(
+    rawOptions.map(async (option) => {
+      const validation = validateKeywordOption(option, forbiddenList, referenceList);
+      const analysis = await buildKeywordAnalysis({
+        option,
+        forbiddenList,
+        referenceList,
+        competitorList,
+      });
+      return {
+        ...option,
+        analysis,
+        validation,
+        _priorityScore: getKeywordPriorityScore({ validation, analysis }),
+      };
+    })
+  );
 }
 
 export async function POST(request: NextRequest) {
@@ -216,42 +266,105 @@ export async function POST(request: NextRequest) {
       // RSS 이력은 보조 신호이므로 실패해도 키워드 분석은 계속 진행한다.
     }
 
-    const prompt = buildTitleGenerationPrompt({
+    const competitorSeeds = [
+      category.name,
+      ...category.subcategories.slice(0, 3),
+    ].filter(Boolean);
+
+    let competitorList: string[] = [];
+    try {
+      competitorList = await fetchCompetitorTitles(competitorSeeds);
+    } catch {
+      // 네이버 검색 실패 시 경쟁 제목 없이 진행
+    }
+
+    const firstPrompt = buildTitleGenerationPrompt({
       targetStore: shop.name,
       category: category.name,
       categorySubtopics: category.subcategories,
       forbiddenList,
       referenceList,
+      competitorList,
     });
 
-    const options = await generateKeywords(prompt);
+    const firstBatch = await generateKeywords(firstPrompt);
 
-    if (!Array.isArray(options) || options.length === 0) {
+    if (!Array.isArray(firstBatch) || firstBatch.length === 0) {
       return NextResponse.json(
         { success: false, error: "키워드 후보를 생성하지 못했습니다. 입력 조건을 다시 확인해주세요." },
         { status: 500 }
       );
     }
 
-    const locallyAnalyzedResults = await Promise.all(
-      options.map(async (option) => {
-        const validation = validateKeywordOption(option, forbiddenList, referenceList);
-        const analysis = await buildKeywordAnalysis({
-          option,
+    let analyzed = await analyzeOptions({
+      rawOptions: firstBatch,
+      forbiddenList,
+      referenceList,
+      competitorList,
+    });
+
+    let cleanCandidates = analyzed.filter(isCleanCandidate);
+
+    if (cleanCandidates.length < 4) {
+      const overlapTitles = Array.from(
+        new Set(
+          analyzed
+            .filter((item) => !isCleanCandidate(item))
+            .map((item) => item.title.trim())
+            .filter(Boolean)
+        )
+      );
+
+      const strengthenedCompetitorList = Array.from(
+        new Set([...competitorList, ...overlapTitles])
+      );
+
+      try {
+        const retryPrompt = buildTitleGenerationPrompt({
+          targetStore: shop.name,
+          category: category.name,
+          categorySubtopics: category.subcategories,
           forbiddenList,
           referenceList,
+          competitorList: strengthenedCompetitorList,
         });
+        const retryBatch = await generateKeywords(retryPrompt);
+        if (Array.isArray(retryBatch) && retryBatch.length > 0) {
+          const retryAnalyzed = await analyzeOptions({
+            rawOptions: retryBatch,
+            forbiddenList,
+            referenceList,
+            competitorList,
+          });
+          const titleSeen = new Set(analyzed.map((item) => item.title.trim()));
+          for (const candidate of retryAnalyzed) {
+            if (!titleSeen.has(candidate.title.trim())) {
+              analyzed.push(candidate);
+              titleSeen.add(candidate.title.trim());
+            }
+          }
+          cleanCandidates = analyzed.filter(isCleanCandidate);
+        }
+      } catch {
+        // 재생성 실패는 1차 결과 사용
+      }
+    }
 
-        return {
-          ...option,
-          analysis,
-          validation,
-          _priorityScore: getKeywordPriorityScore({ validation, analysis }),
-        };
-      })
+    const sortedClean = [...cleanCandidates].sort(
+      (a, b) => b._priorityScore - a._priorityScore
     );
+    const sortedRisky = analyzed
+      .filter((item) => !isCleanCandidate(item))
+      .sort((a, b) => b._priorityScore - a._priorityScore);
 
-    const rankedResults = [...locallyAnalyzedResults].sort((a, b) => b._priorityScore - a._priorityScore);
+    const rankedResults: AnalyzedKeyword[] = [
+      ...sortedClean,
+      ...sortedRisky.slice(
+        0,
+        Math.max(0, TARGET_RESULT_COUNT - sortedClean.length)
+      ),
+    ];
+
     const diverseRankedResults = pickDiverseKeywordResults(rankedResults);
     const topForExternalSignals = diverseRankedResults.slice(0, EXTERNAL_SIGNAL_TOP_K);
 

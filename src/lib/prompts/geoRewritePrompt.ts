@@ -1,4 +1,9 @@
-import type { ArticleContent, GeoRecommendation } from "@/types";
+import type { ArticleContent, GeoRecommendation, ResearchCitationEntry } from "@/types";
+import {
+  PROHIBITED_WORDS,
+  CAUTION_PHRASES,
+  WORD_REPLACEMENTS,
+} from "@/lib/validation/prohibitedWords";
 
 type RecommendationId = GeoRecommendation["id"];
 
@@ -9,7 +14,24 @@ export interface BuildGeoRewritePromptOptions {
   retryFeedback?: string;
 }
 
-const TODAY = "2026-04-19";
+function formatCitationEntries(citations: ResearchCitationEntry[]): string {
+  return citations
+    .map((c) => {
+      const yearPart = c.year ? ` (${c.year})` : "";
+      return `- ${c.institution}${yearPart}: ${c.fact}`;
+    })
+    .join("\n");
+}
+
+function buildReplacementsBlock(): string {
+  const pairs: string[] = [];
+  for (const [word, replacements] of WORD_REPLACEMENTS) {
+    if (replacements.length > 0) {
+      pairs.push(`"${word}" → "${replacements[0]}"`);
+    }
+  }
+  return pairs.join(" · ");
+}
 
 function buildTransformRequirements(selectedIds: Set<RecommendationId>): string[] {
   const items: string[] = [];
@@ -73,7 +95,58 @@ function buildTransformRequirements(selectedIds: Set<RecommendationId>): string[
     );
   }
 
+  if (selectedIds.has("remove-cliches")) {
+    items.push(
+      [
+        "7) 상투적 표현 정돈",
+        "   - 다음 상투어가 있으면 자연스러운 다른 표현으로 바꿔 주세요: \"많은 분들이\", \"요즘 들어\", \"바쁜 일상\", \"누구나 한 번쯤\", \"고민이 많으신\", \"정보를 정리해 드릴게요\".",
+        "   - 상투어가 포함된 문장 **전체를 자연스럽게 재구성**하세요. 단순 삭제로 어색한 문장을 남기지 마세요.",
+        "   - 문장의 뜻·정보·수치는 그대로 유지. 표현만 덜 진부하게 바꾸기.",
+        "   - 원문의 톤·구어체·어미는 유지하세요.",
+      ].join("\n")
+    );
+  }
+
+  if (selectedIds.has("add-expert-quote")) {
+    items.push(
+      [
+        "8) 전문가 따옴표 인용 1건 추가",
+        "   - 본문 1~2 곳에 대한안경사협회·대한안과학회·식약처·한국소비자원 같은 **권위 기관의 권고/기준**을 직접 인용 따옴표로 삽입합니다.",
+        "   - 형식 예: '대한안경사협회는 \"6개월에 한 번 피팅 점검을 권장한다\"고 안내하고 있어요.'",
+        "   - 따옴표 안 문장은 사용 가능한 자료에 명시된 사실만 사용. **지어내지 마세요.**",
+        "   - 1건이면 충분합니다. 여러 번 반복하지 마세요.",
+        "   - 문단 흐름을 끊지 않는 자연스러운 위치에 삽입하세요.",
+      ].join("\n")
+    );
+  }
+
   return items;
+}
+
+function buildCitationRequirement(citations: ResearchCitationEntry[]): string {
+  if (citations.length === 0) {
+    return [
+      "6) 출처 인용 추가",
+      "   - 인용할 구체 자료가 전달되지 않았습니다. **없는 자료를 지어내지 말고** 이 항목은 건너뜁니다.",
+      "   - 기관명·연도·수치를 허구로 만들지 마세요.",
+    ].join("\n");
+  }
+
+  return [
+    "6) 출처 인용 추가",
+    "   - 아래 자료 중 본문 주제에 맞는 1~2건만 선택해 본문 문단에 자연스럽게 녹이세요.",
+    "   - 인용 형식 예: \"한국소비자원에서 2024년 발표한 자료에 따르면 ~\" 같은 자연스러운 도입구를 사용합니다.",
+    "   - 학술 각주([1], URL 직접 삽입, 본문 말미 참고 목록)는 모두 금지. 본문 문장 속에만 녹입니다.",
+    "   - 같은 기관을 여러 번 반복 인용하지 마세요.",
+    "   - 자료가 본문 주제와 어색하게 맞으면 인용하지 않습니다. 억지로 끼워넣지 마세요.",
+    "   - 인용 삽입 후에도 본문 구어체·설명체 톤이 그대로 유지되어야 합니다.",
+    "",
+    "   [사용 가능한 자료]",
+    formatCitationEntries(citations)
+      .split("\n")
+      .map((line) => `   ${line}`)
+      .join("\n"),
+  ].join("\n");
 }
 
 function formatRetryFeedback(feedback: string | undefined): string {
@@ -92,12 +165,18 @@ export function buildGeoRewritePrompt(options: BuildGeoRewritePromptOptions): st
   const { article, selectedIds = [], targetScore = 90, retryFeedback } = options;
   const selectedSet = new Set<RecommendationId>(selectedIds);
   const requirements = buildTransformRequirements(selectedSet);
+  if (selectedSet.has("add-source-citation")) {
+    requirements.push(buildCitationRequirement(article.citations ?? []));
+  }
   const requirementBlock =
     requirements.length > 0
       ? requirements.join("\n\n")
       : "- 본문의 주제·키워드·매장 정보를 유지한 채, AI 인용 구조만 자연스럽게 정돈해 주세요.";
 
   const retryBlock = formatRetryFeedback(retryFeedback);
+  const prohibitedBlock = PROHIBITED_WORDS.join(" / ");
+  const cautionBlock = CAUTION_PHRASES.join(" / ");
+  const replacementsBlock = buildReplacementsBlock();
 
   return `당신은 네이버 블로그 본문을 AI 검색(Generative Engine) 인용에 유리하게 재작성하는 전문 편집자입니다.
 
@@ -113,19 +192,46 @@ ${retryBlock}# 목표
 - 제목은 바꾸지 마세요.
 - 매장명·업종·메인 키워드·서브 키워드는 모두 자연스럽게 유지합니다.
 
+# 글자수 유지 (중요)
+- **결과물 글자수는 원문 대비 ±15% 이내로 유지하세요.** 문장을 덧붙여 본문을 부풀리지 마세요.
+- 직답·인용을 추가할 때는 기존 도입부의 일부를 줄이거나 중복되는 설명을 정돈해 균형을 맞추세요.
+- 한 섹션에 직답 + 기존 도입부 + 인용이 모두 들어가서 중복이 생기면 기존 도입 문장을 간결하게 줄입니다.
+
+# 자연스러움 (매우 중요)
+- 결과물은 사람이 쓴 글처럼 매끄럽고 읽기 편해야 합니다. 기계적 반복·딱딱한 기술 문서 투 금지.
+- 질문형 소제목을 만들 때도 한국어로 자연스러운 어미 ("~인가요?", "~하나요?", "~어떻게 다른가요?")를 사용하고 어색한 직역체 금지.
+- 직답 문장은 해당 섹션 본문 첫 문단과 자연스럽게 이어져야 합니다. 갑자기 결론만 던지는 딱딱한 문장 금지.
+- 문장 호흡을 유지하세요. 짧은 요약문과 긴 설명을 교차 배치하면 더 자연스럽습니다.
+
 # 금지 사항
 - 하단에 "## FAQ", "## 자주 묻는 질문", "## 확인 및 안내", "## 참고 및 확인 포인트" 같은 부속 블록을 덧붙이지 마세요. 원문에 있다면 오히려 제거합니다.
 - "핵심 답변:" 리터럴 문장 시작을 절대 쓰지 마세요.
-- 단정·과장 표현 금지: 100%, 무조건, 반드시, 완벽하게, 완벽히 대체.
+- 본문 끝에 "YYYY-MM-DD 기준" 같은 기준일 메타 문장을 삽입하지 마세요.
 - 본문을 통째로 새 글로 바꾸지 마세요. 구조만 정돈하고 살만 붙이는 수준입니다.
+
+# 금지 단어 (본문에 절대 사용 금지)
+${prohibitedBlock}
+
+# 주의 표현 (사용 시 반드시 순화)
+${cautionBlock}
+
+# 대체 표현 가이드
+${replacementsBlock}
+
+# 형식 금지
+- 이모지와 특수 기호(✔ ✅ ☑ ■ ● 📌 🔸 💡 등)로 시작하는 줄 금지.
+- 체크리스트·체크박스 형태의 불릿 리스트 금지.
+- "첫째, 둘째, 셋째" 기계적 나열 금지.
+- 번호 순서 목록(1. 2. 3.)을 본문 설명에 사용 금지. 설명은 문장으로 풀어쓰세요.
+- 숫자 단순 나열 금지. 글로 자연스럽게 풀어쓰기.
+- 쉼표(,)는 최소화. 접속사와 연결 어미로 문장을 이어가세요.
 
 # 반영해야 할 변환 (요청된 항목만 수행)
 ${requirementBlock}
 
 # 공통 요구사항
 - "## " 소제목 4~5개 유지
-- 본문 중 최소 2회는 다음 계열 표현을 자연스럽게 포함: 공식 가이드 / 공식 자료 / 제품 설명서 / 관리 가이드 / 전문가 점검 / 상담 / 검사
-- 본문에 정확한 기준일을 자연스럽게 1회 포함하세요. 형식은 정확히 "${TODAY} 기준".
+- 본문에 "공식 가이드", "제품 설명서", "관리 가이드" 같은 중립적 레퍼런스 표현이 자연스럽게 드러나도록 하세요. 단 "전문가 점검", "상담" 등 위 금지어에 해당하는 표현은 쓰지 마세요.
 - 매장명과 업종이 본문에 자연스럽게 드러나야 합니다.
 - 마지막 문단은 매장 안내가 자연스럽게 이어지도록 정리합니다.
 

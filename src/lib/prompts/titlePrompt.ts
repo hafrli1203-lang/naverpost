@@ -8,8 +8,16 @@ export function buildTitleGenerationPrompt(params: {
   categorySubtopics: string[];
   forbiddenList: string[];
   referenceList: string[];
+  competitorList?: string[];
 }): string {
-  const { targetStore, category, categorySubtopics, forbiddenList, referenceList } = params;
+  const {
+    targetStore,
+    category,
+    categorySubtopics,
+    forbiddenList,
+    referenceList,
+    competitorList = [],
+  } = params;
 
   const forbiddenListStr = forbiddenList.length > 0
     ? forbiddenList.join("\n")
@@ -17,6 +25,10 @@ export function buildTitleGenerationPrompt(params: {
 
   const referenceListStr = referenceList.length > 0
     ? referenceList.join("\n")
+    : "(없음)";
+
+  const competitorListStr = competitorList.length > 0
+    ? competitorList.join("\n")
     : "(없음)";
 
   const subtopicsStr = categorySubtopics.length > 0
@@ -48,6 +60,15 @@ ${forbiddenListStr}
 [참고용 – 다른 매장 글 제목]
 ────────────────────────────────────
 ${referenceListStr}
+
+────────────────────────────────────
+[상위 노출 중인 경쟁 제목 – 이 제목들과 각도·어미·구조를 다르게 만드세요]
+────────────────────────────────────
+${competitorListStr}
+
+※ 위 제목들은 현재 네이버 블로그 검색 상위에 노출 중입니다.
+※ 같은 각도·같은 키워드 조합·같은 어미·같은 구조로 제목을 만들면 상위 노출 경쟁에서 밀립니다.
+※ 반드시 다른 관점과 다른 표현으로 차별화하세요.
 
 ────────────────────────────────────
 [카테고리별 주제 범위]
@@ -84,16 +105,18 @@ ${referenceListStr}
 현재 카테고리 [${category}] 주제 범위: ${subtopicsStr}
 
 ────────────────────────────────────
-[6개 매장 콘텐츠 중복 방지 – 최우선 규칙]
+[중복 방지 – 최우선 규칙]
 ────────────────────────────────────
 1. forbidden_list에 있는 주제와 '같은 소재'는 절대 금지
 2. reference_list에 있는 글과 '같은 관점'은 금지
-3. 메인키워드 + 서브키워드 조합이 같으면 중복으로 판단
-4. 메인키워드가 같아도, 관점이 다르면 허용
+3. **competitor_list(네이버 상위 노출 중)와 같은 각도·어미·구조는 반드시 피할 것**
+4. 메인키워드 + 서브키워드 조합이 같으면 중복으로 판단
+5. 메인키워드가 같아도, 관점이 다르면 허용
 
 작성 전 반드시:
 - forbidden_list 유사 여부 확인
 - reference_list 관점 중복 여부 확인
+- competitor_list 어미·구조 중복 여부 확인 (가장 중요)
 
 ────────────────────────────────────
 [키워드 작성 규칙]

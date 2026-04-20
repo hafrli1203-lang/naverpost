@@ -36,9 +36,45 @@ interface ArticlePreviewProps {
   onApplyAdvancedGeo?: (
     selectedRecommendationIds: GeoRecommendation["id"][]
   ) => Promise<GeoOptimizationResult | null>;
+  onRevertGeo?: () => void;
   isLoading: boolean;
   isGeoLoading?: boolean;
   targetCharCount?: number;
+}
+
+function renderInline(text: string): React.ReactNode[] {
+  const nodes: React.ReactNode[] = [];
+  const matches = Array.from(text.matchAll(/\*\*([^*]+)\*\*|__([^_]+)__/g));
+  let lastIndex = 0;
+  let key = 0;
+
+  for (const match of matches) {
+    const startIndex = match.index ?? 0;
+    if (startIndex > lastIndex) {
+      nodes.push(text.slice(lastIndex, startIndex));
+    }
+    const inner = match[1] ?? match[2] ?? "";
+    nodes.push(
+      <strong key={`b-${key++}`} className="font-semibold text-gray-900">
+        {inner}
+      </strong>
+    );
+    lastIndex = startIndex + match[0].length;
+  }
+
+  if (lastIndex < text.length) {
+    nodes.push(text.slice(lastIndex));
+  }
+
+  return nodes.length > 0 ? nodes : [text];
+}
+
+function stripBulletMark(line: string): { text: string; isBullet: boolean } {
+  const bulletMatch = line.match(/^\s*[-*\u2022]\s+(.*)$/);
+  if (bulletMatch) return { text: bulletMatch[1], isBullet: true };
+  const numberedMatch = line.match(/^\s*\d+[.)]\s+(.*)$/);
+  if (numberedMatch) return { text: numberedMatch[1], isBullet: true };
+  return { text: line, isBullet: false };
 }
 
 function renderContent(content: string) {
@@ -100,27 +136,35 @@ function renderContent(content: string) {
     if (line.startsWith("# ")) {
       elements.push(
         <h2 key={i} className="text-xl font-bold mt-6 mb-2 text-gray-900">
-          {line.slice(2)}
+          {renderInline(line.slice(2))}
         </h2>
       );
     } else if (line.startsWith("## ")) {
       elements.push(
         <h3 key={i} className="text-lg font-semibold mt-5 mb-2 text-gray-800">
-          {line.slice(3)}
+          {renderInline(line.slice(3))}
         </h3>
       );
     } else if (line.startsWith("### ")) {
       elements.push(
         <h4 key={i} className="text-base font-semibold mt-4 mb-1 text-gray-700">
-          {line.slice(4)}
+          {renderInline(line.slice(4))}
         </h4>
       );
     } else if (line.trim() === "") {
       elements.push(<div key={i} className="h-3" />);
     } else {
+      const { text, isBullet } = stripBulletMark(line);
       elements.push(
-        <p key={i} className="text-sm leading-7 text-gray-700">
-          {line}
+        <p
+          key={i}
+          className={
+            isBullet
+              ? "text-sm leading-7 text-gray-700 pl-4 before:content-['\\2022'] before:mr-2 before:text-gray-400"
+              : "text-sm leading-7 text-gray-700"
+          }
+        >
+          {renderInline(text)}
         </p>
       );
     }
@@ -140,6 +184,7 @@ export function ArticlePreview({
   onLoadGeoPlan,
   onApplyGeo,
   onApplyAdvancedGeo,
+  onRevertGeo,
   isLoading,
   isGeoLoading = false,
   targetCharCount = 2000,
@@ -522,6 +567,7 @@ export function ArticlePreview({
           onLoadPlan={onLoadGeoPlan}
           onApply={onApplyGeo}
           onApplyAdvanced={onApplyAdvancedGeo}
+          onRevert={onRevertGeo}
         />
         <Button
           variant="outline"

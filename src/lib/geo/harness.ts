@@ -9,8 +9,6 @@ import type {
 export type GeoHarnessMode = "safe" | "aggressive";
 export type PostTypeGuard = "general" | "price-list" | "product-intro";
 
-const TODAY = "2026-04-19";
-
 const TEMPLATE_HEADING_PATTERNS = [
   /^##\s*FAQ\s*$/i,
   /^##\s*자주 묻는 질문\s*$/i,
@@ -123,10 +121,27 @@ function hasTemplateArtifacts(content: string): boolean {
 
 function countSourceMentions(content: string): number {
   const matches = content.match(
-    /공식 가이드|공식 자료|제품 설명서|관리 가이드|전문가 점검|상담|검사|진료|진단|권장/g
+    /공식 가이드|공식 자료|제품 설명서|관리 가이드|검사|진료|진단|권장|안내|조언|가이드라인|기준/g
   );
   return matches?.length ?? 0;
 }
+
+const SOURCE_ATTRIBUTION_PATTERNS: RegExp[] = [
+  /(한국|대한|국립|보건복지부|식약처|통계청|공정거래위원회|국민건강보험|질병관리청|국토교통부|과학기술정보통신부)[가-힣A-Za-z·]*\s*(?:에|의|이)?\s*(?:\d{4}년|20\d\d)?[^.\n]{0,40}?(?:\d+(?:\.\d+)?\s*%|\d+\s*(?:명|건|회|가지|개월|주|일))/g,
+  /[가-힣]{2,}(?:협회|연구소|공단|학회|재단)[^.\n]{0,40}?(?:\d{4}년|20\d\d|\d+(?:\.\d+)?\s*%|\d+\s*(?:명|건|회|개월|주|일))/g,
+  /(?:에 따르면|의 자료에 따르면|고시에 따르면|가 발표한|이 발표한|의 권고안|의 조사|의 통계|의 가이드라인)/g,
+];
+
+function countSourceAttributions(content: string): number {
+  let total = 0;
+  for (const pattern of SOURCE_ATTRIBUTION_PATTERNS) {
+    pattern.lastIndex = 0;
+    const matches = content.match(pattern);
+    if (matches) total += matches.length;
+  }
+  return total;
+}
+
 
 function hasClaimRisk(content: string): boolean {
   return CLAIM_REPLACEMENTS.some(({ from }) => {
@@ -135,12 +150,20 @@ function hasClaimRisk(content: string): boolean {
   });
 }
 
+const UNCERTAINTY_PHRASES = [
+  "개인차",
+  "개인마다",
+  "상황에 따라",
+  "사람마다",
+  "사람에 따라",
+  "경우에 따라",
+  "체감이 다를",
+  "체감 차이",
+  "다를 수 있",
+] as const;
+
 function hasUncertaintySignal(content: string): boolean {
-  return (
-    content.includes("개인차") ||
-    content.includes("상황에 따라") ||
-    content.includes("사람마다")
-  );
+  return UNCERTAINTY_PHRASES.some((phrase) => content.includes(phrase));
 }
 
 function buildPreviewDescription(content: string): string {
@@ -206,75 +229,175 @@ function analyzeHeadingSignals(content: string): HeadingSignals {
   };
 }
 
-function scoreAiQuoteStructure(signals: HeadingSignals, table: boolean, templateArtifacts: boolean): number {
+const CLICHE_PATTERNS: RegExp[] = [
+  /많은 분들이/g,
+  /요즘 들어/g,
+  /최근 들어/g,
+  /바쁜 일상/g,
+  /고민이\s*많으신/g,
+  /한 번쯤은 있으시/g,
+  /누구나 한 번쯤/g,
+  /정보를 정리해 드릴게요/g,
+];
+
+const CONCRETE_NUMBER_PATTERN =
+  /\d+(?:\.\d+)?\s*(?:%|°C|℃|mm|nm|μm|dB|도|시간|분|초|개월|주|일|년|회|건|명|가지)/g;
+
+function countMatches(content: string, pattern: RegExp): number {
+  const matches = content.match(pattern);
+  return matches?.length ?? 0;
+}
+
+function hasListStructure(content: string): boolean {
+  return /^\s*[-*•]\s+/m.test(content);
+}
+
+const INTENT_FRAMING_PATTERNS: RegExp[] = [
+  /\d+대\s*(?:직장인|주부|학생|여성|남성|엄마|아빠)/,
+  /한\s*번쯤/,
+  /경험[이은는,]?\s*(?:혹시\s*)?있으/,
+  /겪어\s*보/,
+  /이런\s*경험/,
+  /적\s*있으신/,
+  /있으신가요/,
+  /상황을\s*떠올려/,
+  /장면[이을]?\s*떠올/,
+  /예를\s*들어\s*.{0,40}\s*상황/,
+  /(?:출근|퇴근|운전|외출|등산|골프|여행|캠핑|수영|러닝)\s*(?:할\s*때|중|하다|하면서)/,
+  /오후\s*\d+시/,
+  /(?:아침|점심|오후|저녁|퇴근\s*후)\s*(?:에는?|이면|되면|쯤)/,
+  /(?:모니터|스마트폰|컴퓨터|노트북|태블릿)\s*(?:을|를|에|에서|보면|볼\s*때)/,
+];
+
+function hasIntentFraming(content: string): boolean {
+  const intro = content.split(/\n##\s/, 1)[0] ?? "";
+  return INTENT_FRAMING_PATTERNS.some((pattern) => pattern.test(intro));
+}
+
+function scoreAiQuoteStructure(
+  signals: HeadingSignals,
+  table: boolean,
+  content: string
+): number {
   let score = 0;
 
   if (signals.meaningful >= 4) score += 4;
   else if (signals.meaningful >= 3) score += 3;
   else if (signals.meaningful >= 2) score += 2;
 
-  if (signals.questionRatio >= 0.5) score += 12;
-  else if (signals.questionRatio >= 0.3) score += 8;
-  else if (signals.questionRatio >= 0.1) score += 4;
+  if (table) score += 10;
+  else if (hasListStructure(content)) score += 4;
 
-  if (table) score += 9;
-  if (!templateArtifacts) score += 5;
+  score += Math.round(Math.min(1, signals.directAnswerRatio) * 12);
 
   return Math.max(0, Math.min(30, score));
 }
 
-function scoreTrustAndSources(
-  content: string,
-  sourceMentions: number,
-  templateArtifacts: boolean
-): number {
-  let score = 0;
-  if (!hasClaimRisk(content)) score += 10;
-  if (sourceMentions >= 2) score += 8;
-  else if (sourceMentions === 1) score += 4;
-  if (hasUncertaintySignal(content)) score += 4;
-  if (!templateArtifacts) score += 3;
-  return Math.max(0, Math.min(25, score));
+function countDirectQuotes(content: string): number {
+  const pattern = /["“][^"“”\n]{6,}["”]/g;
+  return countMatches(content, pattern);
 }
 
-function scoreEntityAndAuthor(article: ArticleContent, templateArtifacts: boolean): number {
-  const content = article.content;
-  const hasShop = content.includes(article.shopName) ? 5 : 0;
-  const hasCategory = content.includes(article.category) ? 5 : 0;
-  const hasDate = content.includes(TODAY) ? 5 : 0;
-  const artifactPenaltyOffset = templateArtifacts ? 0 : 5;
-  return Math.max(0, Math.min(20, hasShop + hasCategory + hasDate + artifactPenaltyOffset));
+const WEAK_ATTRIBUTION_PATTERN =
+  /(?:연구\s*결과|조사\s*결과|알려져\s*있|권고되|보고되|연구진|학계|의학계|전문가들|임상\s*결과|권장하고\s*있|권장되|권장되는|발표된|제시된|분석된|에\s*따르면|의\s*자료|의\s*조사|의\s*통계|의\s*보고|의\s*발표|의\s*기준)/g;
+
+const STAT_CONTEXT_PATTERN =
+  /\d+(?:\.\d+)?\s*(?:%|℃|°C|mm|nm|μm|dB|시간|분|초|개월|주|일|년|회|건|명|가지|배|도)/g;
+
+const INSTITUTION_MENTION_PATTERN =
+  /한국[가-힣A-Za-z]{1,10}(?:소비자원|보호원|연구원|연구소|공단|재단|학회|협회|진흥원|센터)|대한[가-힣A-Za-z]{1,10}(?:협회|학회|의사협회|재단|연구회)|국립[가-힣A-Za-z]{1,10}(?:센터|원|연구원|보호원)|식약처|식품의약품안전처|보건복지부|통계청|공정거래위원회|국민건강보험|질병관리청|국토교통부|과학기술정보통신부|건강보험심사평가원|[가-힣A-Za-z]{2,10}(?:협회|연구소|공단|학회|재단|진흥원|센터)(?:\s*기술\s*자료)?/g;
+
+function countUniqueInstitutions(content: string): number {
+  const matches = content.match(INSTITUTION_MENTION_PATTERN);
+  if (!matches) return 0;
+  return new Set(matches.map((entry) => entry.trim())).size;
 }
+
+function scoreTrustAndSources(content: string): number {
+  let score = 0;
+
+  const institutionCount = countUniqueInstitutions(content);
+  score += Math.min(22, institutionCount * 10);
+
+  const weakAttributionCount = countMatches(content, WEAK_ATTRIBUTION_PATTERN);
+  score += Math.min(9, weakAttributionCount * 3);
+
+  const concreteFactCount = countMatches(content, STAT_CONTEXT_PATTERN);
+  score += Math.min(10, concreteFactCount);
+
+  const quoteCount = countDirectQuotes(content);
+  score += Math.min(5, quoteCount * 5);
+
+  return Math.max(0, Math.min(35, score));
+}
+
+function scoreEntityAndIntent(article: ArticleContent): number {
+  const content = article.content;
+  const hasShop = content.includes(article.shopName) ? 2 : 0;
+  const hasCategory = content.includes(article.category) ? 2 : 0;
+  const hasUncertainty = hasUncertaintySignal(content) ? 2 : 0;
+  const intentFraming = hasIntentFraming(content) ? 8 : 0;
+  return Math.max(0, Math.min(14, hasShop + hasCategory + hasUncertainty + intentFraming));
+}
+
+const NARRATIVE_SIGNAL_PATTERNS: RegExp[] = [
+  /쉽게\s*(?:말하면|설명하면|풀어|비유|이해|생각하면)/g,
+  /예를\s*들어/g,
+  /비유하면/g,
+  /마치\s*[^.]{0,20}처럼/g,
+  /(?:상상|떠올려)\s*보/g,
+  /비슷[해하][요다]/g,
+  /와\s*비슷한\s*(?:이유|구조|느낌|경우|상황)/g,
+];
 
 function scoreContentQuality(
   article: ArticleContent,
-  signals: HeadingSignals,
   templateArtifacts: boolean
 ): number {
   const content = article.content;
-  const charCount = content.length;
-  const hasKeywordCoverage =
-    content.includes(article.mainKeyword) &&
-    content.includes(article.subKeyword1) &&
-    content.includes(article.subKeyword2);
-  const validationPenalty = article.validation?.revisionReasons?.length ?? 0;
 
   let score = 0;
-  if (charCount >= 1800) score += 8;
-  else if (charCount >= 1400) score += 6;
-  else score += 3;
 
-  if (signals.directAnswerRatio >= 0.5) score += 8;
-  else if (signals.directAnswerRatio >= 0.3) score += 5;
-  else score += 2;
+  const concreteFacts = countMatches(content, CONCRETE_NUMBER_PATTERN);
+  score += Math.min(6, concreteFacts);
 
-  if (hasKeywordCoverage) score += 5;
-  else score += 2;
+  let clicheHits = 0;
+  for (const pattern of CLICHE_PATTERNS) {
+    clicheHits += countMatches(content, pattern);
+  }
+  score -= Math.min(4, clicheHits * 2);
 
-  if (!templateArtifacts) score += 2;
-  score += Math.max(0, 2 - validationPenalty);
+  let narrativeHits = 0;
+  for (const pattern of NARRATIVE_SIGNAL_PATTERNS) {
+    narrativeHits += countMatches(content, pattern);
+  }
+  score += Math.min(5, narrativeHits * 2);
 
-  return Math.max(0, Math.min(25, score));
+  const keywordsPresent = [
+    article.mainKeyword,
+    article.subKeyword1,
+    article.subKeyword2,
+  ].filter((keyword) => keyword && content.includes(keyword)).length;
+  score += Math.min(5, Math.round(keywordsPresent * 1.7));
+
+  const paragraphs = content
+    .split(/\n\s*\n+/)
+    .map((block) => block.trim())
+    .filter((block) => block.length > 0 && !/^##?\s/.test(block));
+  if (paragraphs.length > 0) {
+    const avgLen =
+      paragraphs.reduce((sum, p) => sum + p.length, 0) / paragraphs.length;
+    if (avgLen >= 60 && avgLen <= 260) score += 3;
+    else if (avgLen < 400) score += 1;
+  }
+
+  if (!templateArtifacts) score += 1;
+  if (content.length < 1100) score -= 3;
+
+  const validationPenalty = article.validation?.revisionReasons?.length ?? 0;
+  if (validationPenalty === 0) score += 1;
+
+  return Math.max(0, Math.min(21, score));
 }
 
 function analyzeCategories(article: ArticleContent): GeoCategoryScore[] {
@@ -282,32 +405,31 @@ function analyzeCategories(article: ArticleContent): GeoCategoryScore[] {
   const headingSignals = analyzeHeadingSignals(content);
   const table = hasTable(content);
   const templateArtifacts = hasTemplateArtifacts(content);
-  const sourceMentions = countSourceMentions(content);
 
   return [
     {
       key: "ai-quote-structure",
       label: "AI 인용 구조",
-      score: scoreAiQuoteStructure(headingSignals, table, templateArtifacts),
+      score: scoreAiQuoteStructure(headingSignals, table, content),
       maxScore: 30,
     },
     {
       key: "trust-and-sources",
       label: "신뢰성 & 근거",
-      score: scoreTrustAndSources(content, sourceMentions, templateArtifacts),
-      maxScore: 25,
+      score: scoreTrustAndSources(content),
+      maxScore: 35,
     },
     {
       key: "entity-and-author",
       label: "엔티티 & 지역성",
-      score: scoreEntityAndAuthor(article, templateArtifacts),
-      maxScore: 20,
+      score: scoreEntityAndIntent(article),
+      maxScore: 14,
     },
     {
       key: "content-quality",
       label: "본문 완성도",
-      score: scoreContentQuality(article, headingSignals, templateArtifacts),
-      maxScore: 25,
+      score: scoreContentQuality(article, templateArtifacts),
+      maxScore: 21,
     },
   ];
 }
@@ -340,40 +462,30 @@ function buildRecommendations(article: ArticleContent): GeoRecommendation[] {
   }
 
   const canRewrite = postType === "general";
+  const claimRisk = hasClaimRisk(content);
+  const articleHasTable = hasTable(content);
 
-  if (canRewrite && signals.questionRatio < 0.5 && meaningful.length >= 2) {
-    const beforeSample = sampleHeadings(
-      meaningful.filter((heading) => !heading.isQuestion),
-      1
-    )[0];
-    recommendations.push({
-      id: "question-heading",
-      title: "소제목 질문형 변환",
-      description: "AI가 질문형 소제목을 사용자 쿼리와 직접 매칭합니다.",
-      category: "ai-quote-structure",
-      impact: "high",
-      reason: "Generative Engine이 답변을 뽑을 때 가장 먼저 찾는 신호입니다.",
-      before: beforeSample ? beforeSample.raw : "설명형 소제목이 다수",
-      after: "## 예: OO는 어떤 기준으로 선택하나요?",
-      selectedByDefault: true,
-    });
-  }
-
-  if (canRewrite && signals.directAnswerRatio < 0.5 && meaningful.length >= 2) {
+  if (canRewrite) {
+    const answerShort = signals.directAnswerRatio < 0.8;
     recommendations.push({
       id: "direct-answer-lead",
-      title: "섹션별 핵심 답변 강화",
-      description: "각 섹션 첫 줄에 40~80자 직답 문장을 추가해 AI 답변 추출을 돕습니다.",
+      title: "섹션별 단정형 직답 강화",
+      description: "각 섹션 첫 줄에 40~80자 단정형 요약 문장을 배치해 AI 스니펫 추출을 돕습니다.",
       category: "trust-and-sources",
       impact: "high",
-      reason: "AEO(Answer Engine Optimization) 핵심 요소로, 스니펫 추출 확률을 높입니다.",
-      before: "섹션 첫 줄이 도입 문장으로 시작",
-      after: "섹션 첫 줄에 40~80자 요약 답변 삽입",
-      selectedByDefault: true,
+      reason:
+        "AI 검색은 질문형 소제목이 아니라 섹션 첫 문장의 **단정형 답변**을 인용합니다 (AEO 핵심).",
+      before: answerShort
+        ? "섹션 첫 줄이 도입 문장으로 시작"
+        : "이미 단정형 직답이 충분함",
+      after: "섹션 첫 줄에 40~80자 단정형 요약 배치",
+      selectedByDefault: answerShort,
     });
   }
 
-  if (canRewrite && !hasTable(content) && shouldSuggestStructuredTable(article)) {
+  if (canRewrite) {
+    const needsTable =
+      !articleHasTable || shouldSuggestStructuredTable(article);
     recommendations.push({
       id: "comparison-table",
       title: "비교 테이블 추가",
@@ -381,23 +493,74 @@ function buildRecommendations(article: ArticleContent): GeoRecommendation[] {
       category: "ai-quote-structure",
       impact: "medium",
       reason: "비교·기준·시기 정리 글에서 표는 AI가 가장 먼저 집는 구조화 신호입니다.",
-      before: "비교 표 없음",
+      before: articleHasTable ? "표가 1개 있음" : "비교 표 없음",
       after: "본문 중간에 3~4열 markdown 비교표 삽입",
-      selectedByDefault: true,
+      selectedByDefault: !articleHasTable && needsTable,
     });
   }
 
-  if (hasClaimRisk(content)) {
+  recommendations.push({
+    id: "soften-claims",
+    title: "단정 표현 완화",
+    description: "과도한 확정 표현을 덜어내고 개인차와 상황 차이를 반영합니다.",
+    category: "trust-and-sources",
+    impact: "high",
+    reason: "의료법·광고법 관점 뿐 아니라 AI 신뢰 신호에서도 단정 표현은 감점 요인입니다.",
+    before: claimRisk ? "강한 확정 표현 포함" : "단정 표현이 적음",
+    after: "상황에 따라 다를 수 있다는 표현으로 조정",
+    selectedByDefault: claimRisk,
+  });
+
+  if (canRewrite) {
+    const clicheHits = CLICHE_PATTERNS.reduce(
+      (sum, pattern) => sum + countMatches(content, pattern),
+      0
+    );
     recommendations.push({
-      id: "soften-claims",
-      title: "단정 표현 완화",
-      description: "과도한 확정 표현을 덜어내고 개인차와 상황 차이를 반영합니다.",
+      id: "remove-cliches",
+      title: "상투적 표현 정돈",
+      description: "'많은 분들이', '요즘 들어' 같은 클리셰를 자연스러운 표현으로 다듬습니다.",
+      category: "ai-quote-structure",
+      impact: "medium",
+      reason: "구체성 없는 상투어는 AI가 본문을 '흔한 일반론'으로 판단하게 만듭니다.",
+      before: clicheHits > 0 ? `클리셰 ${clicheHits}회 사용` : "클리셰 거의 없음",
+      after: "구체적·자연스러운 표현으로 교체",
+      selectedByDefault: clicheHits > 0,
+    });
+  }
+
+  if (canRewrite) {
+    const hasQuote = /["“][^"“”\n]{6,}["”]/.test(content);
+    recommendations.push({
+      id: "add-expert-quote",
+      title: "전문가 따옴표 인용",
+      description: "협회·기관 권고 내용을 따옴표 인용으로 1건 삽입합니다.",
       category: "trust-and-sources",
       impact: "high",
-      reason: "의료법·광고법 관점 뿐 아니라 AI 신뢰 신호에서도 단정 표현은 감점 요인입니다.",
-      before: "강한 확정 표현 포함",
-      after: "상황에 따라 다를 수 있다는 표현으로 조정",
-      selectedByDefault: true,
+      reason: "AI 검색은 직접 인용 따옴표를 권위 신호로 우선 추출합니다.",
+      before: hasQuote ? "이미 따옴표 인용 있음" : "직접 인용 없음",
+      after: '\'대한안경사협회는 "~를 권장한다"고 안내\' 형식으로 자연 삽입',
+      selectedByDefault: !hasQuote,
+    });
+  }
+
+  if (canRewrite) {
+    const attributionCount = countSourceAttributions(content);
+    recommendations.push({
+      id: "add-source-citation",
+      title: "출처 인용 추가",
+      description: "한국 공공기관·협회·연구소 자료를 본문 1~2곳에 자연스럽게 녹입니다.",
+      category: "trust-and-sources",
+      impact: "high",
+      reason: "AI 검색이 인용할 블로그를 고를 때 가장 크게 보는 신호입니다.",
+      before:
+        attributionCount >= 2
+          ? "출처 인용 충분함"
+          : attributionCount === 1
+            ? "출처 인용 1건"
+            : "구체 출처 인용 없음",
+      after: "'한국소비자원 2024년 자료에 따르면 ~' 식으로 1~2건 삽입",
+      selectedByDefault: attributionCount < 2,
     });
   }
 

@@ -196,7 +196,10 @@ export interface GeoRecommendation {
     | "question-heading"
     | "comparison-table"
     | "soften-claims"
-    | "remove-template-blocks";
+    | "remove-template-blocks"
+    | "add-source-citation"
+    | "add-expert-quote"
+    | "remove-cliches";
   title: string;
   description: string;
   category: GeoRecommendationCategory;
@@ -268,6 +271,13 @@ export interface ArticleBrief {
   sources: BlaiSignalSource[];
 }
 
+export interface ResearchCitationEntry {
+  institution: string;
+  year?: string;
+  fact: string;
+  url?: string;
+}
+
 export interface ArticleContent {
   title: string;
   content: string;
@@ -279,6 +289,10 @@ export interface ArticleContent {
   validation: ValidationResult;
   brief?: ArticleBrief;
   geo?: GeoAnalysisResult;
+  preGeoContent?: string;
+  preGeoValidation?: ValidationResult;
+  preGeoGeo?: GeoAnalysisResult;
+  citations?: ResearchCitationEntry[];
 }
 
 // ===== Image Types =====

@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { writeArticle, reviseArticle } from "@/lib/ai/claude";
 import { researchKeyword } from "@/lib/ai/perplexity";
+import {
+  extractCitationsFromContent,
+  mergeCitations,
+} from "@/lib/ai/citationExtractor";
 import { buildArticlePrompt } from "@/lib/prompts/articlePrompt";
 import { buildPromoPrompt } from "@/lib/prompts/promoPrompt";
 import { buildRevisionPrompt } from "@/lib/prompts/revisionPrompt";
@@ -14,7 +18,14 @@ import type { KeywordOption, ArticleContent } from "@/types";
 
 export const maxDuration = 300;
 
-const MAX_REVISION_ATTEMPTS = 1;
+const MAX_REVISION_ATTEMPTS = 2;
+
+function isCharCountOutOfRange(content: string, target: number): boolean {
+  const length = content.length;
+  const min = Math.floor(target * 0.9);
+  const max = Math.ceil(target * 1.1);
+  return length < min || length > max;
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -65,7 +76,9 @@ export async function POST(request: NextRequest) {
     }
 
     // Research keyword via Perplexity
-    const researchData = await researchKeyword(keyword.mainKeyword);
+    const researchResponse = await researchKeyword(keyword.mainKeyword);
+    const researchData = researchResponse.text;
+    const researchCitations = researchResponse.result.citations;
 
     let sameStoreHistory: string[] = [];
     let crossBlogTitles: string[] = [];
@@ -158,11 +171,10 @@ export async function POST(request: NextRequest) {
             tone: tone as "standard" | "friendly" | "casual" | undefined,
             externalReference,
             brief,
+            citations: researchCitations,
           });
 
     let content = await writeArticle(prompt);
-    // 본문에서 마크다운 볼드(**) 제거
-    content = content.replace(/\*\*([^*]+)\*\*/g, "$1");
     const keywordsForValidation = {
       title: keyword.title,
       mainKeyword: keyword.mainKeyword,
@@ -172,10 +184,19 @@ export async function POST(request: NextRequest) {
       referenceList: crossBlogTitles,
     };
     let validation = await validateContent(content, keywordsForValidation);
+    let charOutOfRange = isCharCountOutOfRange(content, charCount);
 
-    // 검증 실패 시 자동 수정 (최대 2회)
     let revisionCount = 0;
-    while (validation.needsRevision && revisionCount < MAX_REVISION_ATTEMPTS) {
+    while (
+      (validation.needsRevision || charOutOfRange) &&
+      revisionCount < MAX_REVISION_ATTEMPTS
+    ) {
+      const extraProblems = charOutOfRange
+        ? [
+            `- 글자수가 ${charCount}자 ±10% 범위를 벗어났습니다 (현재 ${content.length}자). 의미를 유지하며 분량을 맞추세요.`,
+          ]
+        : [];
+
       const revisionPrompt = buildRevisionPrompt({
         originalContent: content,
         validation,
@@ -183,13 +204,16 @@ export async function POST(request: NextRequest) {
         subKeyword1: keyword.subKeyword1,
         subKeyword2: keyword.subKeyword2,
         charCount,
+        extraProblems,
       });
       content = await reviseArticle(revisionPrompt);
-      // 수정본에서도 볼드(**) 제거
-      content = content.replace(/\*\*([^*]+)\*\*/g, "$1");
       validation = await validateContent(content, keywordsForValidation);
+      charOutOfRange = isCharCountOutOfRange(content, charCount);
       revisionCount++;
     }
+
+    const bodyCitations = extractCitationsFromContent(content);
+    const mergedCitations = mergeCitations(researchCitations, bodyCitations);
 
     const article: ArticleContent = {
       title: keyword.title,
@@ -201,6 +225,7 @@ export async function POST(request: NextRequest) {
       category: category.name,
       validation,
       brief,
+      citations: mergedCitations,
     };
 
     return NextResponse.json({ success: true, data: article });

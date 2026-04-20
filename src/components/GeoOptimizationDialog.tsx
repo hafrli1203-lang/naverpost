@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ArrowRight, CheckCircle2, Circle, Loader2, Sparkles, TrendingUp } from "lucide-react";
+import { ArrowRight, CheckCircle2, Circle, Loader2, RotateCcw, Sparkles, TrendingUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -29,6 +29,7 @@ interface GeoOptimizationDialogProps {
   onApplyAdvanced?: (
     selectedRecommendationIds: GeoRecommendation["id"][]
   ) => Promise<GeoOptimizationResult | null>;
+  onRevert?: () => void;
 }
 
 type GeoPlanStep = {
@@ -96,7 +97,7 @@ function buildGeoResultMessage(result: GeoOptimizationResult): string {
   if (after > before) return `GEO 점수 ${before} → ${after}`;
   if (after < before) return `GEO 점수 ${before} → ${after} 하락`;
   if (result.appliedRecommendationIds.length === 0) {
-    return `GEO 점수 ${before} 유지, 유의미한 변경 없음`;
+    return `이미 GEO 기준을 대체로 충족하는 글입니다. 추가 상승은 출처 인용(한국 기관·협회 자료) 확보가 필요합니다.`;
   }
   return `GEO 점수 ${before} 유지`;
 }
@@ -133,7 +134,9 @@ export function GeoOptimizationDialog({
   onLoadPlan,
   onApply,
   onApplyAdvanced,
+  onRevert,
 }: GeoOptimizationDialogProps) {
+  const canRevert = Boolean(article.preGeoContent && onRevert);
   const [open, setOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState<GeoRecommendation["id"][]>([]);
   const [lastResult, setLastResult] = useState<GeoOptimizationResult | null>(null);
@@ -217,6 +220,18 @@ export function GeoOptimizationDialog({
         <Sparkles className="h-4 w-4" />
         GEO 최적화
       </Button>
+
+      {canRevert && (
+        <Button
+          variant="outline"
+          onClick={onRevert}
+          disabled={isBusy}
+          className="gap-2 border-slate-300 text-slate-700 hover:bg-slate-50 hover:text-slate-800"
+        >
+          <RotateCcw className="h-4 w-4" />
+          GEO 이전으로 복원
+        </Button>
+      )}
 
       <Dialog open={open} onOpenChange={handleOpenChange}>
         <DialogContent className="max-h-[92vh] max-w-5xl overflow-y-auto p-0">

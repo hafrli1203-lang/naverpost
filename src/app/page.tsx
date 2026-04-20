@@ -53,7 +53,7 @@ function buildGeoToastMessage(optimization: GeoOptimizationResult): string {
   }
 
   if (optimization.appliedRecommendationIds.length === 0) {
-    return `GEO 점수 ${before} 유지, 유의미한 변경 없음`;
+    return `이미 GEO 기준을 대체로 충족합니다. 추가 상승은 한국 기관·협회 출처 인용 확보가 필요합니다.`;
   }
 
   return `GEO 점수 ${before} 유지`;
@@ -234,10 +234,18 @@ export default function Home() {
           optimization: GeoOptimizationResult;
         };
 
-        setState((prev) => ({
-          ...prev,
-          article: payload.article,
-        }));
+        setState((prev) => {
+          if (!prev.article) return prev;
+          return {
+            ...prev,
+            article: {
+              ...payload.article,
+              preGeoContent: prev.article.content,
+              preGeoValidation: prev.article.validation,
+              preGeoGeo: prev.article.geo,
+            },
+          };
+        });
         toast.success(buildGeoToastMessage(payload.optimization));
         return payload.optimization;
       } catch (error) {
@@ -249,6 +257,23 @@ export default function Home() {
     },
     [state.article, setState]
   );
+
+  const revertGeo = useCallback(() => {
+    setState((prev) => {
+      if (!prev.article?.preGeoContent) return prev;
+      const { preGeoContent, preGeoValidation, preGeoGeo, ...rest } = prev.article;
+      return {
+        ...prev,
+        article: {
+          ...rest,
+          content: preGeoContent,
+          validation: preGeoValidation ?? rest.validation,
+          geo: preGeoGeo,
+        },
+      };
+    });
+    toast.success("GEO 최적화 이전 본문으로 되돌렸습니다.");
+  }, [setState]);
 
   const applyAdvancedGeo = useCallback(
     async (
@@ -304,10 +329,18 @@ export default function Home() {
           };
 
           if (job.status === "completed" && job.article && job.optimization) {
-            setState((prev) => ({
-              ...prev,
-              article: job.article!,
-            }));
+            setState((prev) => {
+              if (!prev.article) return prev;
+              return {
+                ...prev,
+                article: {
+                  ...job.article!,
+                  preGeoContent: prev.article.content,
+                  preGeoValidation: prev.article.validation,
+                  preGeoGeo: prev.article.geo,
+                },
+              };
+            });
             toast.success(`고득점 GEO 완료: ${buildGeoToastMessage(job.optimization)}`);
             return job.optimization;
           }
@@ -921,6 +954,7 @@ export default function Home() {
             onLoadGeoPlan={() => (state.article ? loadGeoPlan(state.article) : Promise.resolve(null))}
             onApplyGeo={applyGeo}
             onApplyAdvancedGeo={applyAdvancedGeo}
+            onRevertGeo={revertGeo}
             isLoading={isLoading || isGeneratingImages}
             isGeoLoading={isGeoLoading}
             targetCharCount={articleOptions?.charCount ?? 2000}

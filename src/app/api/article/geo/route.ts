@@ -11,6 +11,11 @@ import {
   softenClaims,
 } from "@/lib/geo/harness";
 import { buildGeoRewritePrompt } from "@/lib/prompts/geoRewritePrompt";
+import {
+  extractCitationsFromContent,
+  mergeCitations,
+} from "@/lib/ai/citationExtractor";
+import { getCuratedCitations } from "@/lib/ai/curatedCitations";
 import { PROHIBITED_WORDS, CAUTION_PHRASES } from "@/lib/validation/prohibitedWords";
 import { findOverusedWords } from "@/lib/validation/repetitionCheck";
 import { analyzeLanguageRisk } from "@/lib/validation/contentSignalAnalyzer";
@@ -55,6 +60,9 @@ const AI_REWRITE_IDS: ReadonlySet<GeoRecommendation["id"]> = new Set([
   "question-heading",
   "direct-answer-lead",
   "comparison-table",
+  "add-source-citation",
+  "add-expert-quote",
+  "remove-cliches",
 ]);
 
 const PROTECTED_POST_TYPES: ReadonlySet<ReturnType<typeof detectPostType>> = new Set([
@@ -468,9 +476,9 @@ async function runAiRewrite(
       "aggressive"
     );
 
-    if (candidateAnalysis.score > bestScore) {
+    if (candidateAnalysis.score >= bestScore - 2) {
       bestContent = cleaned;
-      bestScore = candidateAnalysis.score;
+      bestScore = Math.max(bestScore, candidateAnalysis.score);
     }
 
     const nextFeedback = buildRetryFeedback({
@@ -500,7 +508,30 @@ async function optimizeArticleForGeo(
   const postType = detectPostType(article);
   const effectiveIds = filterSelectedIdsForPostType(article, selectedIds);
 
-  let workingArticle = article;
+  const existingCitations = article.citations ?? [];
+  const bodyCitations = extractCitationsFromContent(article.content);
+  const existingInstitutions = new Set(
+    [...existingCitations, ...bodyCitations].map((c) => c.institution.trim())
+  );
+  const curatedCitations = getCuratedCitations({
+    categoryName: article.category,
+    keywords: [
+      article.mainKeyword,
+      article.subKeyword1,
+      article.subKeyword2,
+    ],
+    excludeInstitutions: Array.from(existingInstitutions),
+    max: 4,
+  });
+  const hydratedCitations = mergeCitations(
+    mergeCitations(existingCitations, bodyCitations),
+    curatedCitations
+  );
+
+  let workingArticle: ArticleContent = {
+    ...article,
+    citations: hydratedCitations,
+  };
   const appliedIds: GeoRecommendation["id"][] = [];
 
   const aiRewriteIds = effectiveIds.filter((id) => AI_REWRITE_IDS.has(id));
@@ -535,7 +566,7 @@ async function optimizeArticleForGeo(
 
   const finalAnalysis = runGeoHarness(workingArticle, "safe");
 
-  if (finalAnalysis.score < analysisBefore.score) {
+  if (finalAnalysis.score < analysisBefore.score - 2) {
     return {
       appliedRecommendationIds: [],
       optimizedContent: article.content,
