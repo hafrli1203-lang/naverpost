@@ -2,7 +2,9 @@ import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 
-const IMAGES_DIR = path.join(process.cwd(), "data", "images");
+const IMAGES_DIR = process.env.VERCEL
+  ? path.join("/tmp", "data", "images")
+  : path.join(process.cwd(), "data", "images");
 const memoryParamsStore = new Map<
   string,
   {
