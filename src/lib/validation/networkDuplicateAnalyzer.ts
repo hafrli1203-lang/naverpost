@@ -40,9 +40,57 @@ function normalize(text: string): string {
   return text.replace(/\s+/g, "").toLowerCase();
 }
 
+// 한국어 조사를 말단에서 제거해 "속도에" / "속도를" / "속도" 가 같은 토큰으로 매칭되도록 한다.
+// 어간이 2자 미만으로 줄어드는 경우는 유지(과도한 절단 방지).
+const PARTICLE_SUFFIXES = [
+  "으로부터",
+  "으로서",
+  "으로써",
+  "에게서",
+  "에서의",
+  "이라고",
+  "이라도",
+  "이라는",
+  "라고",
+  "라도",
+  "라는",
+  "으로",
+  "에서",
+  "에게",
+  "에도",
+  "에만",
+  "까지",
+  "부터",
+  "이나",
+  "이며",
+  "이고",
+  "에",
+  "과",
+  "와",
+  "의",
+  "은",
+  "는",
+  "이",
+  "가",
+  "을",
+  "를",
+  "도",
+  "만",
+  "나",
+];
+
+function stripKoreanParticle(token: string): string {
+  for (const suffix of PARTICLE_SUFFIXES) {
+    if (token.length > suffix.length + 1 && token.endsWith(suffix)) {
+      return token.slice(0, -suffix.length);
+    }
+  }
+  return token;
+}
+
 function tokenize(text: string): string[] {
   return (text.match(/[가-힣A-Za-z0-9]{2,}/g) ?? []).map((token) =>
-    token.toLowerCase()
+    stripKoreanParticle(token.toLowerCase())
   );
 }
 

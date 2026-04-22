@@ -9,6 +9,7 @@ import {
   NaverSearchDependencyError,
 } from "@/lib/naver/searchSignals";
 import { buildTitleGenerationPrompt } from "@/lib/prompts/titlePrompt";
+import { listSessions } from "@/lib/storage/sessionStore";
 import { analyzeLanguageRisk } from "@/lib/validation/contentSignalAnalyzer";
 import { analyzeMorphology } from "@/lib/validation/morphologyAnalyzer";
 import { analyzeNetworkDuplicateRisk } from "@/lib/validation/networkDuplicateAnalyzer";
@@ -200,7 +201,12 @@ function isCleanCandidate(option: AnalyzedKeyword): boolean {
   const sameStoreHit = issues.some(
     (issue) => issue.code === "same-store-title-overlap"
   );
-  return !competitorHit && !sameStoreHit;
+  const crossBlogHit = issues.some(
+    (issue) =>
+      issue.code === "cross-blog-title-overlap" ||
+      issue.code === "cross-blog-keyword-combination-overlap"
+  );
+  return !competitorHit && !sameStoreHit && !crossBlogHit;
 }
 
 async function analyzeOptions(params: {
@@ -264,6 +270,28 @@ export async function POST(request: NextRequest) {
       referenceList = rssResult.referenceList;
     } catch {
       // RSS 이력은 보조 신호이므로 실패해도 키워드 분석은 계속 진행한다.
+    }
+
+    // 임시저장만 수행하는 워크플로우 특성상 RSS 에는 시스템 생성물이 반영되지 않는다.
+    // 세션 저장소에 쌓인 최근 생성 이력을 타깃=forbidden / 나머지=reference 로 합쳐
+    // 스펙의 6개 매장 중복 방지 지침이 실데이터 기반으로 동작하도록 보정한다.
+    try {
+      const sessions = await listSessions();
+      const forbiddenSet = new Set(forbiddenList);
+      const referenceSet = new Set(referenceList);
+      for (const session of sessions.slice(0, 30)) {
+        const title = (session.title ?? "").trim();
+        if (!title) continue;
+        if (session.shopName === shop.name) {
+          forbiddenSet.add(title);
+        } else {
+          referenceSet.add(title);
+        }
+      }
+      forbiddenList = Array.from(forbiddenSet);
+      referenceList = Array.from(referenceSet);
+    } catch {
+      // 세션 저장소 장애는 키워드 생성을 막지 않는다.
     }
 
     const competitorSeeds = [
@@ -350,20 +378,12 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const sortedClean = [...cleanCandidates].sort(
-      (a, b) => b._priorityScore - a._priorityScore
-    );
-    const sortedRisky = analyzed
-      .filter((item) => !isCleanCandidate(item))
-      .sort((a, b) => b._priorityScore - a._priorityScore);
-
-    const rankedResults: AnalyzedKeyword[] = [
-      ...sortedClean,
-      ...sortedRisky.slice(
-        0,
-        Math.max(0, TARGET_RESULT_COUNT - sortedClean.length)
-      ),
-    ];
+    // 스펙 line 161-162 "forbidden_list 같은 소재 절대 금지 / reference_list 같은 관점 금지"
+    // 최우선 지침에 따라 중복으로 감지된 후보는 결과에 포함하지 않는다.
+    // 결과 개수가 TARGET_RESULT_COUNT 미만이어도 risky backfill 은 하지 않는다.
+    const rankedResults: AnalyzedKeyword[] = [...cleanCandidates]
+      .sort((a, b) => b._priorityScore - a._priorityScore)
+      .slice(0, TARGET_RESULT_COUNT);
 
     const diverseRankedResults = pickDiverseKeywordResults(rankedResults);
     const topForExternalSignals = diverseRankedResults.slice(0, EXTERNAL_SIGNAL_TOP_K);
