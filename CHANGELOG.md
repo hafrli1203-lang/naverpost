@@ -5,6 +5,44 @@
 
 ---
 
+## v1.5 (2026-04-25)
+
+### 외부 API → 로컬 CLI 마이그레이션 (구독제 활용)
+
+**변경사항:**
+- `lib/ai/cli/{spawnCli,claudeCli,codexCli,gtiCli}.ts` 신규: 자식 프로세스로 CLI 호출하는 통합 어댑터 레이어 (Windows .cmd 자동 처리, stdin 주입, AbortController 타임아웃, 정규화된 `CliError`)
+- `lib/ai/claude.ts`: Anthropic SDK 제거 → `runClaude` 위임. 모델/시그니처/호출처 모두 무수정. `--system-prompt` 사용으로 프로젝트 CLAUDE.md 자동 주입 차단
+- `lib/ai/imageGen.ts`: Google AI Studio REST 제거 → `runGti` 위임. `generateBlogImage(prompt)` 시그니처 단순화 (apiKey 매개변수 제거)
+- `lib/nlp/nounExtractor.ts`: Anthropic SDK 직접 호출 → `runClaude({ model: "claude-haiku-4-5-20251001" })` 위임
+- `lib/ai/gemini.ts`: 삭제 (`generateImagePrompts` dead code, `generateTopicSuggestions`는 `runCodex`로 이전)
+- `app/api/topics/suggest/route.ts`: `gemini-2.5-flash` → `codex exec`
+- `app/api/image/{generate,one,regenerate}/route.ts`: `GOOGLE_AI_API_KEY` 가드 3곳 제거, 호출 시그니처 정리, `image/generate/route.ts:67` 잘못된 `promptModel: gemini-2.0-flash` 로그 정정 (`claude-sonnet-4-6`)
+- `lib/analysis/competitorMorphology.ts`, `app/api/article/geo/route.ts`: `process.env.ANTHROPIC_API_KEY` 가드 제거 (CLI가 OAuth로 자체 인증)
+- `src/env.ts`: `ANTHROPIC_API_KEY`, `GOOGLE_AI_API_KEY` zod 검증 제거. `.env.local`에서 두 키 삭제 가능
+- `src/app/icon.png`, `src/app/apple-icon.png`: 안경+N 모티브 favicon (gti로 생성, 인디고 단색)
+- `public/app.ico`: Windows 바탕화면 바로가기용 다중해상도 ICO (16/32/48/64/128/256). `pnpm build:icon` 으로 재생성 (`scripts/build-icon.cjs`)
+- `devDependencies` 추가: `sharp`, `png-to-ico` (아이콘 빌드 전용)
+
+**이유:**
+- 로컬 단일 사용자 운영으로 전환하면서 SaaS API 비용을 0원화
+- 이미 결제 중인 Claude Pro/Max + ChatGPT 구독을 재사용
+- 호출 시그니처를 100% 보존해 라우트·컴포넌트·검증 모듈 무수정
+
+**의존:**
+- `claude` CLI 2.1.119+ (OAuth 로그인 필요, `~/.claude/.credentials.json`)
+- `codex` CLI 0.124.0+ (ChatGPT 로그인 필요, `~/.codex/auth.json`)
+- `gti` CLI (`npm i -g god-tibo-imagen`, ChatGPT 구독 백엔드 사용)
+
+**알려진 제약:**
+- Vercel/원격 배포 동작 불가 (로컬 전용)
+- `gti`는 비공식 private 백엔드 사용 — OpenAI 측에서 차단 시 기능 정지
+- `gti --provider auto`는 Windows에서 내부 codex spawn ENOENT 발생 → `private-codex`로 강제 (gtiCli 디폴트)
+- `scripts/geo-ai-eval.cjs` (오프라인 평가 스크립트)는 여전히 `ANTHROPIC_API_KEY` 환경변수를 직접 요구. 평가 실행 시에만 일시적으로 설정 필요
+
+**설계 문서:** `docs/designs/cli-migration.md`
+
+---
+
 ## v1.4 (2026-04-13)
 
 ### ETRI 종료 대응: Claude Haiku로 경쟁 명사 추출 전환

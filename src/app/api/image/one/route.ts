@@ -21,15 +21,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const apiKey = process.env.GOOGLE_AI_API_KEY;
-    if (!apiKey) {
-      return NextResponse.json(
-        { success: false, error: "GOOGLE_AI_API_KEY가 설정되지 않았습니다." },
-        { status: 500 }
-      );
-    }
-
-    const result = await generateBlogImage(prompt, apiKey);
+    const result = await generateBlogImage(prompt);
     const saved = await saveImage(sessionId, index, result.base64Data, result.mimeType);
 
     return NextResponse.json({

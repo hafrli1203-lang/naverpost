@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { generateTopicSuggestions } from "@/lib/ai/gemini";
+import { runCodex } from "@/lib/ai/cli/codexCli";
 import { getShopById } from "@/lib/data/shops";
 import { CATEGORIES } from "@/lib/constants";
 import { fetchBlogTitles } from "@/lib/naver/rssParser";
@@ -58,8 +58,7 @@ ${existingStr}
 (주제2)
 (주제3)`;
 
-    // generateImagePrompts는 범용 Claude 호출이므로 재사용
-    const raw = await generateTopicSuggestions(prompt);
+    const raw = await runCodex({ prompt });
     const topics = raw
       .split("\n")
       .map((l) => l.trim())

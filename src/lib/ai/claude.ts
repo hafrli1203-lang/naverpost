@@ -1,28 +1,13 @@
-import Anthropic from "@anthropic-ai/sdk";
 import type { KeywordOption } from "@/types";
-
-let _anthropic: Anthropic | null = null;
-function getClient(): Anthropic {
-  if (!_anthropic) _anthropic = new Anthropic();
-  return _anthropic;
-}
+import { runClaude } from "./cli/claudeCli";
 
 const ARTICLE_MODEL = "claude-opus-4-7";
 const EDIT_MODEL = "claude-sonnet-4-6";
 const PROMPT_MODEL = "claude-sonnet-4-6";
 const GEO_MODEL = "claude-sonnet-4-6";
 
-export async function generateKeywords(
-  prompt: string
-): Promise<KeywordOption[]> {
-  const message = await getClient().messages.create({
-    model: EDIT_MODEL,
-    max_tokens: 4096,
-    messages: [{ role: "user", content: prompt }],
-  });
-
-  const text =
-    message.content[0].type === "text" ? message.content[0].text : "";
+export async function generateKeywords(prompt: string): Promise<KeywordOption[]> {
+  const text = await runClaude({ prompt, model: EDIT_MODEL });
 
   const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
   const jsonText = jsonMatch ? jsonMatch[1].trim() : text.trim();
@@ -42,46 +27,20 @@ export async function generateKeywords(
 }
 
 export async function writeArticle(prompt: string): Promise<string> {
-  const message = await getClient().messages.create({
-    model: ARTICLE_MODEL,
-    max_tokens: 4096,
-    messages: [{ role: "user", content: prompt }],
-  });
-
-  return message.content[0].type === "text" ? message.content[0].text : "";
+  return runClaude({ prompt, model: ARTICLE_MODEL });
 }
 
 export async function reviseArticle(prompt: string): Promise<string> {
-  const message = await getClient().messages.create({
-    model: EDIT_MODEL,
-    max_tokens: 4096,
-    messages: [{ role: "user", content: prompt }],
-  });
-
-  return message.content[0].type === "text" ? message.content[0].text : "";
+  return runClaude({ prompt, model: EDIT_MODEL });
 }
 
 export async function rewriteArticleForGeo(
   prompt: string,
-  timeoutMs = 60000
+  timeoutMs = 60_000
 ): Promise<string> {
-  const message = await getClient().messages.create({
-    model: GEO_MODEL,
-    max_tokens: 3200,
-    messages: [{ role: "user", content: prompt }],
-  }, {
-    timeout: timeoutMs,
-  });
-
-  return message.content[0].type === "text" ? message.content[0].text : "";
+  return runClaude({ prompt, model: GEO_MODEL, timeoutMs });
 }
 
 export async function generateImagePrompts(prompt: string): Promise<string> {
-  const message = await getClient().messages.create({
-    model: PROMPT_MODEL,
-    max_tokens: 4096,
-    messages: [{ role: "user", content: prompt }],
-  });
-
-  return message.content[0].type === "text" ? message.content[0].text : "";
+  return runClaude({ prompt, model: PROMPT_MODEL });
 }

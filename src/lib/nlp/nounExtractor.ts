@@ -1,13 +1,4 @@
-import Anthropic from "@anthropic-ai/sdk";
-
-let client: Anthropic | null = null;
-
-function getClient(): Anthropic {
-  if (!client) {
-    client = new Anthropic();
-  }
-  return client;
-}
+import { runClaude } from "@/lib/ai/cli/claudeCli";
 
 const MODEL = "claude-haiku-4-5-20251001";
 
@@ -47,13 +38,7 @@ export async function extractContentNouns(text: string): Promise<ContentNoun[]> 
     trimmed,
   ].join("\n");
 
-  const message = await getClient().messages.create({
-    model: MODEL,
-    max_tokens: 4096,
-    messages: [{ role: "user", content: prompt }],
-  });
-
-  const out = message.content[0].type === "text" ? message.content[0].text : "";
+  const out = await runClaude({ prompt, model: MODEL });
   const parsed = JSON.parse(extractJsonBlock(out)) as { nouns?: unknown };
 
   if (!Array.isArray(parsed.nouns)) return [];
@@ -86,13 +71,7 @@ export async function generateRelatedKeywords(
     .filter(Boolean)
     .join("\n");
 
-  const message = await getClient().messages.create({
-    model: MODEL,
-    max_tokens: 1024,
-    messages: [{ role: "user", content: prompt }],
-  });
-
-  const out = message.content[0].type === "text" ? message.content[0].text : "";
+  const out = await runClaude({ prompt, model: MODEL });
   const parsed = JSON.parse(extractJsonBlock(out)) as { keywords?: unknown };
 
   if (!Array.isArray(parsed.keywords)) return [];
@@ -137,13 +116,7 @@ export async function extractCompetitorNouns(
     serialized,
   ].join("\n");
 
-  const message = await getClient().messages.create({
-    model: MODEL,
-    max_tokens: 2048,
-    messages: [{ role: "user", content: prompt }],
-  });
-
-  const out = message.content[0].type === "text" ? message.content[0].text : "";
+  const out = await runClaude({ prompt, model: MODEL });
   const parsed = JSON.parse(extractJsonBlock(out)) as Partial<CompetitorNounResult>;
 
   const titleNouns = Array.isArray(parsed.titleNouns)

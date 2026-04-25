@@ -424,8 +424,6 @@ async function runAiRewrite(
   selectedIds: GeoRecommendation["id"][],
   options: { timeoutMs: number; maxAttempts: number; targetScore: number }
 ): Promise<{ content: string; appliedIds: GeoRecommendation["id"][] } | null> {
-  if (!process.env.ANTHROPIC_API_KEY?.trim()) return null;
-
   const baselineAnalysis = runGeoHarness(article, "aggressive");
   let bestContent: string | null = null;
   let bestScore = baselineAnalysis.score;

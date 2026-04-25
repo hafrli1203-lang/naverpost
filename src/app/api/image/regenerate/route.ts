@@ -21,26 +21,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const apiKey = process.env.GOOGLE_AI_API_KEY;
-    if (!apiKey) {
-      return NextResponse.json(
-        { success: false, error: "GOOGLE_AI_API_KEY가 설정되지 않았습니다." },
-        { status: 500 }
-      );
-    }
-
     const imagePrompt =
       prompt ||
       "A high-quality photo of modern eyeglasses in a clean, bright optical shop setting. Professional product photography, 4:3 aspect ratio.";
 
-    const result = await generateBlogImage(imagePrompt, apiKey);
-
-    if (!result) {
-      return NextResponse.json(
-        { success: false, error: "이미지 생성에 실패했습니다." },
-        { status: 500 }
-      );
-    }
+    const result = await generateBlogImage(imagePrompt);
 
     const saved = await saveImage(sessionId, index, result.base64Data, result.mimeType);
     const imageUrl = `/api/image/file/${saved.imageId}`;

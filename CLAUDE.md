@@ -6,9 +6,10 @@
 ## 기술 스택
 - **Framework**: TypeScript + Next.js 15 (App Router)
 - **UI**: Tailwind CSS + shadcn/ui
-- **AI 본문 작성**: Claude API (Anthropic SDK)
+- **AI 본문 작성**: Claude Code CLI (`claude -p`, Claude Pro/Max OAuth 구독)
 - **AI 리서치**: Perplexity API
-- **이미지 생성**: Google AI Studio API (나노바나나 Pro)
+- **AI 주제 추천**: Codex CLI (`codex exec`, ChatGPT 구독)
+- **이미지 생성**: god-tibo-imagen CLI (`gti`, gpt-image-2, ChatGPT 구독)
 - **블로그 연동**: Naver OpenAPI (writePost.json - 임시저장)
 - **데이터 입력**: Google Sheets API
 - **패키지 매니저**: pnpm
@@ -100,9 +101,10 @@ naverpost/
 ## API 엔드포인트
 - **Naver Blog Write**: POST `https://openapi.naver.com/blog/writePost.json`
 - **Naver Blog Categories**: GET `https://openapi.naver.com/blog/listCategory.json`
-- **Claude**: Anthropic SDK (`@anthropic-ai/sdk`)
+- **Claude**: `claude` CLI (`-p --output-format json`, OAuth 구독)
 - **Perplexity**: REST API
-- **Google AI Studio**: REST API
+- **GPT 텍스트 (주제 추천)**: `codex` CLI (`exec`, ChatGPT 구독)
+- **GPT 이미지 (gpt-image-2)**: `gti` CLI (`--provider private-codex`, ChatGPT 구독)
 
 ## 점진적 배포 계획
 1. **Phase 1**: 제목/키워드 생성 + 사용자 선택 UI
@@ -270,7 +272,7 @@ npx -y @smithery/cli@latest install @isnow890/naver-search-mcp --client claude
 
 - **설계 없이 코드 먼저 짜지 않는다**
 - **보수적·수동적 방법을 디폴트로 제안하지 않는다**
-- 기존 인프라(Claude API, Naver API, Google AI Studio, Perplexity)에 통합 가능한 형태로 구현
+- 기존 인프라(Claude Code CLI, Codex CLI, gti CLI, Naver API, Perplexity)에 통합 가능한 형태로 구현
 - **버전은 소수점으로 관리**: v1.0 → v1.1 → v2.0
 - **버그 발견 시**: 번호 부여 후 버전 올려서 수정 기록 (`CHANGELOG.md`)
 
@@ -280,9 +282,14 @@ npx -y @smithery/cli@latest install @isnow890/naver-search-mcp --client claude
 
 | 모듈 | 소유 상태 | 공유 인터페이스 |
 |------|----------|---------------|
-| `lib/ai/claude.ts` | Anthropic 클라이언트 | `generateKeywords()`, `writeArticle()`, `generateImagePrompts()` |
-| `lib/ai/perplexity.ts` | Perplexity 클라이언트 | `researchKeyword()` |
-| `lib/ai/imageGen.ts` | Google AI 클라이언트 | `generateBlogImage()` |
+| `lib/ai/cli/spawnCli.ts` | 자식 프로세스 spawn 헬퍼 | `runCli()`, `CliError` |
+| `lib/ai/cli/claudeCli.ts` | `claude -p` 호출 (OAuth 구독) | `runClaude({ prompt, model, timeoutMs?, systemPrompt? })` |
+| `lib/ai/cli/codexCli.ts` | `codex exec` 호출 (ChatGPT 구독) | `runCodex({ prompt, model?, timeoutMs? })` |
+| `lib/ai/cli/gtiCli.ts` | `gti` 호출 (gpt-image-2, ChatGPT 구독) | `runGti({ prompt, timeoutMs?, provider?, model? })` |
+| `lib/ai/claude.ts` | (CLI 위임 래퍼, SDK 미사용) | `generateKeywords()`, `writeArticle()`, `reviseArticle()`, `rewriteArticleForGeo()`, `generateImagePrompts()` |
+| `lib/ai/imageGen.ts` | (CLI 위임 래퍼) | `generateBlogImage(prompt)` |
+| `lib/ai/perplexity.ts` | Perplexity 클라이언트 (REST 직접) | `researchKeyword()` |
+| `lib/nlp/nounExtractor.ts` | (CLI 위임 래퍼, Haiku) | `extractContentNouns()`, `generateRelatedKeywords()`, `extractCompetitorNouns()` |
 | `lib/naver/blogApi.ts` | Naver API 호출 | `saveDraft()` (임시저장만) |
 | `lib/naver/tokenManager.ts` | 토큰 인메모리 저장소 | `withTokenRetry()`, `loadTokens()` |
 | `lib/storage/imageStore.ts` | 파일시스템 임시 이미지 | `saveImage()`, `getImage()`, `cleanupSession()` |

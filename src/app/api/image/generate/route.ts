@@ -5,18 +5,9 @@ import { saveImage, getGenerationParams, deleteGenerationParams } from "@/lib/st
 import { buildImagePrompts } from "@/lib/prompts/imagePrompt";
 
 export const runtime = "nodejs";
-export const maxDuration = 300; // 5 minutes for SSE
+export const maxDuration = 300;
 
-// POST: 파라미터를 body에 직접 받아 이미지 생성 (Vercel 서버리스 호환)
 export async function POST(request: NextRequest) {
-  const apiKey = process.env.GOOGLE_AI_API_KEY;
-  if (!apiKey) {
-    return new Response(
-      `data: ${JSON.stringify({ type: "complete", successCount: 0, failCount: 0, total: 0, error: "GOOGLE_AI_API_KEY not configured" })}\n\n`,
-      { headers: sseHeaders() }
-    );
-  }
-
   let body: { sessionId: string; articleContent: string; title: string; mainKeyword: string };
   try {
     body = await request.json();
@@ -35,7 +26,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  return new Response(createImageStream(apiKey, sessionId, articleContent, title, mainKeyword), {
+  return new Response(createImageStream(sessionId, articleContent, title, mainKeyword), {
     headers: sseHeaders(),
   });
 }
@@ -49,7 +40,6 @@ function sseHeaders(): HeadersInit {
 }
 
 function createImageStream(
-  apiKey: string,
   sessionId: string,
   articleContent: string,
   title: string,
@@ -63,9 +53,9 @@ function createImageStream(
       }
 
       console.log("[image.generate] start", {
-        provider: "gemini",
-        promptModel: "gemini-2.0-flash",
-        imageModel: "gemini-3-pro-image-preview",
+        provider: "cli",
+        promptModel: "claude-sonnet-4-6",
+        imageModel: "gpt-image-2 (gti)",
         sessionId,
       });
 
@@ -96,7 +86,7 @@ function createImageStream(
         for (let i = 0; i < total; i++) {
           send({ type: "progress", index: i, total });
           try {
-            const result = await generateBlogImage(prompts[i], apiKey);
+            const result = await generateBlogImage(prompts[i]);
             const saved = await saveImage(sessionId, i, result.base64Data, result.mimeType);
             send({
               type: "image-ready",
@@ -137,21 +127,11 @@ function createImageStream(
   });
 }
 
-// GET: params를 URL에서 직접 받거나 token 기반 fallback
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
   const encodedParams = searchParams.get("params") ?? "";
   const token = searchParams.get("token") ?? "";
 
-  const apiKey = process.env.GOOGLE_AI_API_KEY;
-  if (!apiKey) {
-    return new Response(
-      `data: ${JSON.stringify({ type: "complete", successCount: 0, failCount: 0, total: 0, error: "GOOGLE_AI_API_KEY not configured" })}\n\n`,
-      { headers: sseHeaders() }
-    );
-  }
-
-  // params 직접 전달 방식 (Vercel 서버리스 호환)
   if (encodedParams) {
     try {
       const decoded = decodeURIComponent(escape(atob(encodedParams)));
@@ -163,7 +143,7 @@ export async function GET(request: NextRequest) {
         );
       }
       return new Response(
-        createImageStream(apiKey, sessionId, articleContent, title, mainKeyword),
+        createImageStream(sessionId, articleContent, title, mainKeyword),
         { headers: sseHeaders() }
       );
     } catch {
@@ -174,7 +154,6 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // token 기반 fallback (하위 호환)
   if (!token) {
     return new Response(
       `data: ${JSON.stringify({ type: "complete", successCount: 0, failCount: 0, total: 0, error: "params or token parameter is required" })}\n\n`,
@@ -192,7 +171,7 @@ export async function GET(request: NextRequest) {
 
   await deleteGenerationParams(token);
   return new Response(
-    createImageStream(apiKey, params.sessionId, params.articleContent, params.title, params.mainKeyword),
+    createImageStream(params.sessionId, params.articleContent, params.title, params.mainKeyword),
     { headers: sseHeaders() }
   );
 }

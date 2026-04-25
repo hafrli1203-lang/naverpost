@@ -7,14 +7,13 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "build:icon": "node scripts/build-icon.cjs",
     "test:geo": "node scripts/test-geo-harness.cjs",
     "eval:geo:aggressive": "node scripts/geo-aggressive-eval.cjs",
     "eval:geo:ai": "node scripts/geo-ai-eval.cjs"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.78.0",
     "@base-ui/react": "^1.3.0",
-    "@google/generative-ai": "^0.24.1",
     "@supabase/supabase-js": "^2.99.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -42,6 +41,8 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
+    "png-to-ico": "^3.0.1",
+    "sharp": "^0.34.5",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

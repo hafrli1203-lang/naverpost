@@ -240,22 +240,6 @@ async function fetchTopBlogs(keyword: string): Promise<BlogItem[]> {
 export async function analyzeCompetitorMorphology(
   keyword: string
 ): Promise<CompetitorMorphologyResult> {
-  const apiKey = (process.env.ANTHROPIC_API_KEY ?? "").trim();
-  if (!apiKey) {
-    return {
-      status: "unavailable",
-      reason: "ANTHROPIC_API_KEY is missing.",
-      sampleSize: 0,
-      bodySampleSize: 0,
-      commonNouns: [],
-      titleNouns: [],
-      bodyNouns: [],
-      bodyHighlights: [],
-      titleAngles: [],
-      contentBlocks: [],
-      cautionPoints: [],
-    };
-  }
 
   let blogs: BlogItem[];
   try {
