@@ -1,3 +1,4 @@
+import os from "node:os";
 import { CliError, runCli } from "./spawnCli";
 
 const DEFAULT_SYSTEM_PROMPT =
@@ -17,10 +18,20 @@ type ClaudeJsonOutput = {
   error?: { message?: string };
 };
 
+function buildIsolatedEnv(): NodeJS.ProcessEnv {
+  // Strip Anthropic API keys so the CLI is forced to use OAuth subscription
+  // auth from ~/.claude/.credentials.json instead of billing the API.
+  const env = { ...process.env };
+  delete env.ANTHROPIC_API_KEY;
+  delete env.ANTHROPIC_AUTH_TOKEN;
+  delete env.ANTHROPIC_BASE_URL;
+  return env;
+}
+
 export async function runClaude({
   prompt,
   model,
-  timeoutMs = 60_000,
+  timeoutMs = 180_000,
   systemPrompt = DEFAULT_SYSTEM_PROMPT,
 }: ClaudeRunOptions): Promise<string> {
   const args = [
@@ -31,6 +42,9 @@ export async function runClaude({
     "json",
     "--no-session-persistence",
     "--disable-slash-commands",
+    "--strict-mcp-config",
+    "--setting-sources",
+    "user",
     "--system-prompt",
     systemPrompt,
     "--tools",
@@ -42,6 +56,8 @@ export async function runClaude({
     args,
     stdin: prompt,
     timeoutMs,
+    cwd: os.tmpdir(),
+    env: buildIsolatedEnv(),
   });
 
   let parsed: ClaudeJsonOutput;

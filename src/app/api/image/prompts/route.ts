@@ -3,7 +3,7 @@ import { generateImagePrompts } from "@/lib/ai/claude";
 import { buildImagePrompts } from "@/lib/prompts/imagePrompt";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 240;
 
 export async function POST(request: NextRequest) {
   try {

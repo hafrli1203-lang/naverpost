@@ -18,7 +18,7 @@ type GtiRunOptions = {
 
 export async function runGti({
   prompt,
-  timeoutMs = 120_000,
+  timeoutMs = 300_000,
   provider = "private-codex",
   model,
 }: GtiRunOptions): Promise<GtiResult> {

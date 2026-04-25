@@ -36,7 +36,7 @@ export async function reviseArticle(prompt: string): Promise<string> {
 
 export async function rewriteArticleForGeo(
   prompt: string,
-  timeoutMs = 60_000
+  timeoutMs = 180_000
 ): Promise<string> {
   return runClaude({ prompt, model: GEO_MODEL, timeoutMs });
 }

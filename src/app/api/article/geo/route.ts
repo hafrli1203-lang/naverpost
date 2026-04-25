@@ -53,8 +53,8 @@ type GeoRequestBody =
 
 const GEO_TARGET_SCORE = 90;
 const ADVANCED_GEO_MAX_AI_ATTEMPTS = 3;
-const ADVANCED_GEO_AI_TIMEOUT_MS = 60000;
-const SAFE_GEO_REWRITE_TIMEOUT_MS = 45000;
+const ADVANCED_GEO_AI_TIMEOUT_MS = 240000;
+const SAFE_GEO_REWRITE_TIMEOUT_MS = 180000;
 
 const AI_REWRITE_IDS: ReadonlySet<GeoRecommendation["id"]> = new Set([
   "question-heading",

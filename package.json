@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "build:icon": "node scripts/build-icon.cjs",
+    "shortcut": "powershell -ExecutionPolicy Bypass -File scripts/install-shortcut.ps1",
     "test:geo": "node scripts/test-geo-harness.cjs",
     "eval:geo:aggressive": "node scripts/geo-aggressive-eval.cjs",
     "eval:geo:ai": "node scripts/geo-ai-eval.cjs"
@@ -17,6 +18,7 @@
     "@supabase/supabase-js": "^2.99.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "cross-spawn": "^7.0.6",
     "googleapis": "^171.4.0",
     "lucide-react": "^0.577.0",
     "mammoth": "^1.12.0",
@@ -35,6 +37,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@types/cross-spawn": "^6.0.6",
     "@types/node": "^20",
     "@types/pdf-parse": "^1.1.5",
     "@types/react": "^19",

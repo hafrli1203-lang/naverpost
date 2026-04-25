@@ -3,7 +3,7 @@ import { generateBlogImage } from "@/lib/ai/imageGen";
 import { saveImage } from "@/lib/storage/imageStore";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 600;
 
 export async function POST(request: NextRequest) {
   try {

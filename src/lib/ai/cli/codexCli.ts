@@ -9,7 +9,7 @@ type CodexRunOptions = {
 export async function runCodex({
   prompt,
   model,
-  timeoutMs = 60_000,
+  timeoutMs = 120_000,
 }: CodexRunOptions): Promise<string> {
   const args = ["exec", "--skip-git-repo-check"];
   if (model) {

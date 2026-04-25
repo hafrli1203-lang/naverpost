@@ -83,34 +83,44 @@ function createImageStream(
         let successCount = 0;
         let failCount = 0;
 
+        // Fire all image jobs in parallel; SSE controller serializes the writes.
+        // gti -> private-codex backend handles concurrent calls per session.
+        // If the backend throttles, individual jobs surface as image-failed and
+        // the whole batch still completes.
         for (let i = 0; i < total; i++) {
           send({ type: "progress", index: i, total });
-          try {
-            const result = await generateBlogImage(prompts[i]);
-            const saved = await saveImage(sessionId, i, result.base64Data, result.mimeType);
-            send({
-              type: "image-ready",
-              index: i,
-              imageId: saved.imageId,
-              imageUrl: `/api/image/file/${saved.imageId}`,
-              base64Data: result.base64Data,
-              mimeType: saved.mimeType,
-              prompt: prompts[i],
-              total,
-            });
-            successCount++;
-          } catch (error) {
-            const message = error instanceof Error ? error.message : "Unknown image generation error";
-            console.error("[image.generate] image-failed", {
-              sessionId,
-              index: i,
-              prompt: prompts[i],
-              error: message,
-            });
-            send({ type: "image-failed", index: i, total, error: message });
-            failCount++;
-          }
         }
+
+        await Promise.all(
+          prompts.map(async (prompt, i) => {
+            try {
+              const result = await generateBlogImage(prompt);
+              const saved = await saveImage(sessionId, i, result.base64Data, result.mimeType);
+              send({
+                type: "image-ready",
+                index: i,
+                imageId: saved.imageId,
+                imageUrl: `/api/image/file/${saved.imageId}`,
+                base64Data: result.base64Data,
+                mimeType: saved.mimeType,
+                prompt,
+                total,
+              });
+              successCount++;
+            } catch (error) {
+              const message = error instanceof Error ? error.message : "Unknown image generation error";
+              console.error("[image.generate] image-failed", {
+                sessionId,
+                index: i,
+                prompt,
+                error: message,
+              });
+              send({ type: "image-failed", index: i, total, error: message });
+              failCount++;
+            }
+          })
+        );
+
         console.log("[image.generate] complete", { sessionId, successCount, failCount, total });
         send({ type: "complete", successCount, failCount, total });
       } catch (err) {

@@ -55,7 +55,7 @@ function buildFinalReport(state: WorkflowState) {
 
   for (let i = 0; i < actions.length; i += 1) {
     if (/FAQ|질문형|핵심 답변/.test(actions[i])) {
-      actions[i] = "ë³¸ë¬¸ íë¦„ì€ ìœ ì§€í•˜ë˜ í‘œ, ê·¼ê±° ë¬¸ìž¥, ì •ë³´ ê¸°ì¤€ ìœ„ì£¼ë¡œë§Œ ë³´ê°•í•˜ëŠ” íŽ¸ì´ ì•ˆì „í•©ë‹ˆë‹¤.";
+      actions[i] = "본문 흐름은 유지하되 표, 근거 문장, 정보 기준 위주로만 보강하는 편이 안전합니다.";
     }
   }
 
@@ -391,16 +391,6 @@ export function FinalConfirm({ state, onStartOver }: FinalConfirmProps) {
           )}
         </Card>
       )}
-
-      <Card className="border-slate-200 bg-slate-50">
-        <CardContent className="flex items-start gap-3 py-4">
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" />
-          <p className="text-sm leading-6 text-slate-700">
-            이 화면은 최종 발행 판단용입니다. 3000 포트는 사용하지 않으며, 테스트 서버가 필요하면
-            다른 포트로만 열어야 합니다.
-          </p>
-        </CardContent>
-      </Card>
 
       <Separator />
 

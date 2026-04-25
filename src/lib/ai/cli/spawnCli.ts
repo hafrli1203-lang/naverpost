@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import spawn from "cross-spawn";
 
 export type CliErrorCode = "not-found" | "timeout" | "non-zero" | "empty";
 
@@ -20,6 +20,7 @@ export type CliRunOptions = {
   stdin?: string;
   timeoutMs?: number;
   env?: NodeJS.ProcessEnv;
+  cwd?: string;
 };
 
 export type CliRunResult = {
@@ -27,23 +28,19 @@ export type CliRunResult = {
   stderr: string;
 };
 
-function resolveCommand(command: string): string {
-  return process.platform === "win32" ? `${command}.cmd` : command;
-}
-
 export function runCli({
   command,
   args,
   stdin,
   timeoutMs = 60_000,
   env,
+  cwd,
 }: CliRunOptions): Promise<CliRunResult> {
   return new Promise((resolve, reject) => {
-    const cmd = resolveCommand(command);
-    const child = spawn(cmd, args, {
-      shell: false,
+    const child = spawn(command, args, {
       stdio: ["pipe", "pipe", "pipe"],
       env: env ? { ...process.env, ...env } : process.env,
+      cwd,
     });
 
     let stdout = "";
