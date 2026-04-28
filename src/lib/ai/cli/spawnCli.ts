@@ -58,10 +58,10 @@ export function runCli({
       reject(new CliError(`${command} CLI timed out after ${timeoutMs}ms.`, "timeout", stderr));
     }, timeoutMs);
 
-    child.stdout.on("data", (chunk: Buffer) => {
+    child.stdout!.on("data", (chunk: Buffer) => {
       stdout += chunk.toString("utf8");
     });
-    child.stderr.on("data", (chunk: Buffer) => {
+    child.stderr!.on("data", (chunk: Buffer) => {
       stderr += chunk.toString("utf8");
     });
 
@@ -100,9 +100,9 @@ export function runCli({
     });
 
     if (stdin !== undefined) {
-      child.stdin.end(stdin, "utf8");
+      child.stdin!.end(stdin, "utf8");
     } else {
-      child.stdin.end();
+      child.stdin!.end();
     }
   });
 }

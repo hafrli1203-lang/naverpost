@@ -247,6 +247,12 @@ async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null
   }
 }
 
+function isTimeoutError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const code = (error as { code?: unknown }).code;
+  return code === "timeout" || /timed out|timeout/i.test(error.message);
+}
+
 function extractMeaningfulTokens(text: string): string[] {
   const stopwords = new Set([
     "안내",
@@ -436,10 +442,17 @@ async function runAiRewrite(
       targetScore: options.targetScore,
       retryFeedback,
     });
-    const rewritten = await withTimeout(
-      rewriteArticleForGeo(prompt, options.timeoutMs),
-      options.timeoutMs + 2000
-    );
+    let rewritten: string | null;
+    try {
+      rewritten = await withTimeout(
+        rewriteArticleForGeo(prompt, options.timeoutMs),
+        options.timeoutMs + 2000
+      );
+    } catch (error) {
+      if (!isTimeoutError(error)) throw error;
+      rewritten = null;
+    }
+
     if (!rewritten) {
       retryFeedback = "이전 시도가 시간 내 응답하지 못했습니다. 더 간결한 변경만 적용하세요.";
       continue;
