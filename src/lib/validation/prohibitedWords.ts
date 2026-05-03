@@ -155,7 +155,7 @@ export const CAUTION_PHRASES: string[] = [
 // Maps prohibited words/phrases to their approved replacements
 export const WORD_REPLACEMENTS: Map<string, string[]> = new Map([
   // 과장 표현
-  ["가장", ["돋보이는", "우수한", "뛰어난", "인기 있는"]],
+  ["가장", ["특히", "비교적", "많이", "자주"]],
   ["최고", ["돋보이는", "우수한", "뛰어난", "인기 있는"]],
   ["최상", ["돋보이는", "우수한", "뛰어난", "인기 있는"]],
   ["제일", ["돋보이는", "우수한", "뛰어난", "인기 있는"]],

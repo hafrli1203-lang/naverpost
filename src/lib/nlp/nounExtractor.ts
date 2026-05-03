@@ -38,7 +38,7 @@ export async function extractContentNouns(text: string): Promise<ContentNoun[]> 
     trimmed,
   ].join("\n");
 
-  const out = await runClaude({ prompt, model: MODEL });
+  const out = await runClaude({ prompt, model: MODEL, timeoutMs: 35_000 });
   const parsed = JSON.parse(extractJsonBlock(out)) as { nouns?: unknown };
 
   if (!Array.isArray(parsed.nouns)) return [];

@@ -20,8 +20,9 @@ interface BlogItem {
   link: string;
 }
 
-const BODY_FETCH_LIMIT = 5;
+const BODY_FETCH_LIMIT = 3;
 const BODY_TEXT_LIMIT = 1200;
+const BODY_FETCH_TIMEOUT_MS = 6000;
 
 function stripHtml(text: string): string {
   return text.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
@@ -192,12 +193,15 @@ function analyzeExposurePatterns(blogs: Array<BlogItem & { body: string }>): {
 
 async function fetchBlogBody(link: string): Promise<string> {
   const url = normalizeBlogLink(link);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), BODY_FETCH_TIMEOUT_MS);
   const response = await fetch(url, {
+    signal: controller.signal,
     headers: {
       "User-Agent":
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
     },
-  });
+  }).finally(() => clearTimeout(timeout));
 
   if (!response.ok) {
     return "";

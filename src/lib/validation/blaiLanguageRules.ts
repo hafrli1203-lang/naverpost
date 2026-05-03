@@ -63,8 +63,20 @@ const ADVERTISING_WORDS = [
   "파트너스",
 ];
 
+function isAllowedCompound(content: string, word: string): boolean {
+  if (word === "가장") {
+    const stripped = content.replace(/가장자리/g, "");
+    return !stripped.includes(word);
+  }
+  return false;
+}
+
 function uniqueMatches(content: string, candidates: string[]): string[] {
-  return Array.from(new Set(candidates.filter((word) => content.includes(word))));
+  return Array.from(
+    new Set(
+      candidates.filter((word) => content.includes(word) && !isAllowedCompound(content, word))
+    )
+  );
 }
 
 export function findProfanityWords(content: string): string[] {

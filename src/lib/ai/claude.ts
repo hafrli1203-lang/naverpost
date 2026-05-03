@@ -6,8 +6,11 @@ const EDIT_MODEL = "claude-sonnet-4-6";
 const PROMPT_MODEL = "claude-sonnet-4-6";
 const GEO_MODEL = "claude-sonnet-4-6";
 
-export async function generateKeywords(prompt: string): Promise<KeywordOption[]> {
-  const text = await runClaude({ prompt, model: EDIT_MODEL });
+export async function generateKeywords(
+  prompt: string,
+  timeoutMs = 300_000
+): Promise<KeywordOption[]> {
+  const text = await runClaude({ prompt, model: EDIT_MODEL, timeoutMs });
 
   const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
   const jsonText = jsonMatch ? jsonMatch[1].trim() : text.trim();

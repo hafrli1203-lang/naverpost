@@ -117,6 +117,14 @@ export interface SearchVolumeSignal {
   keyword: string;
   trend?: "rising" | "steady" | "falling" | "unknown";
   rawValue?: number | null;
+  monthlyPcSearches?: number | null;
+  monthlyMobileSearches?: number | null;
+  monthlyTotalSearches?: number | null;
+  monthlyPcSearchesLabel?: string;
+  monthlyMobileSearchesLabel?: string;
+  competitionLabel?: string;
+  monthlyAveragePcCtr?: number | null;
+  monthlyAverageMobileCtr?: number | null;
   source: BlaiSignalSource;
 }
 

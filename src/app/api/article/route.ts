@@ -19,12 +19,36 @@ import type { KeywordOption, ArticleContent } from "@/types";
 export const maxDuration = 300;
 
 const MAX_REVISION_ATTEMPTS = 2;
+const RESEARCH_TIMEOUT_MS = 45_000;
+const COMPETITOR_ANALYSIS_TIMEOUT_MS = 45_000;
+
+function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  fallback: T
+): Promise<T> {
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => resolve(fallback), timeoutMs);
+    promise
+      .then((value) => resolve(value))
+      .catch(() => resolve(fallback))
+      .finally(() => clearTimeout(timeout));
+  });
+}
 
 function isCharCountOutOfRange(content: string, target: number): boolean {
   const length = content.length;
   const min = Math.floor(target * 0.9);
   const max = Math.ceil(target * 1.1);
   return length < min || length > max;
+}
+
+function sanitizeArticleContent(content: string): string {
+  return content
+    .replace(/문의해 주세요/g, "확인해 주세요")
+    .replace(/문의해주세요/g, "확인해 주세요")
+    .replace(/문의해주시/g, "확인해 주시")
+    .replace(/문의/g, "확인");
 }
 
 export async function POST(request: NextRequest) {
@@ -75,8 +99,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Research keyword via Perplexity
-    const researchResponse = await researchKeyword(keyword.mainKeyword);
+    // Research keyword via Perplexity. If external research is slow, continue
+    // with a lean brief so article generation does not feel hung.
+    const researchResponse = await withTimeout(
+      researchKeyword(keyword.mainKeyword),
+      RESEARCH_TIMEOUT_MS,
+      {
+        text: "",
+        result: {
+          summary: "",
+          questions: [],
+          citations: [],
+        },
+      }
+    );
     const researchData = researchResponse.text;
     const researchCitations = researchResponse.result.citations;
 
@@ -105,7 +141,23 @@ export async function POST(request: NextRequest) {
         }
       | undefined;
     try {
-      const result = await analyzeCompetitorMorphology(keyword.mainKeyword);
+      const result = await withTimeout(
+        analyzeCompetitorMorphology(keyword.mainKeyword),
+        COMPETITOR_ANALYSIS_TIMEOUT_MS,
+        {
+          status: "unavailable" as const,
+          reason: "Competitor analysis timed out.",
+          sampleSize: 0,
+          bodySampleSize: 0,
+          commonNouns: [],
+          titleNouns: [],
+          bodyNouns: [],
+          bodyHighlights: [],
+          titleAngles: [],
+          contentBlocks: [],
+          cautionPoints: [],
+        }
+      );
       competitorMorphology = {
         status: result.status,
         sampleSize: result.sampleSize,
@@ -174,7 +226,7 @@ export async function POST(request: NextRequest) {
             citations: researchCitations,
           });
 
-    let content = await writeArticle(prompt);
+    let content = sanitizeArticleContent(await writeArticle(prompt));
     const keywordsForValidation = {
       title: keyword.title,
       mainKeyword: keyword.mainKeyword,
@@ -206,7 +258,7 @@ export async function POST(request: NextRequest) {
         charCount,
         extraProblems,
       });
-      content = await reviseArticle(revisionPrompt);
+      content = sanitizeArticleContent(await reviseArticle(revisionPrompt));
       validation = await validateContent(content, keywordsForValidation);
       charOutOfRange = isCharCountOutOfRange(content, charCount);
       revisionCount++;

@@ -1,4 +1,31 @@
 import type { KeywordOption, KeywordValidationResult } from "@/types";
+import { CAUTION_PHRASES, PROHIBITED_WORDS } from "./prohibitedWords";
+
+const TITLE_EXTRA_PROHIBITED_WORDS = [
+  "꼭",
+  "필독",
+  "후회",
+  "비용",
+  "가격",
+  "추천",
+  "후기",
+  "상담",
+  "문의",
+  "예약",
+  "할인",
+  "무료",
+];
+
+function findProhibitedTitleTerms(option: KeywordOption): string[] {
+  const source = `${option.title} ${option.mainKeyword} ${option.subKeyword1} ${option.subKeyword2}`;
+  const terms = [
+    ...PROHIBITED_WORDS,
+    ...CAUTION_PHRASES,
+    ...TITLE_EXTRA_PROHIBITED_WORDS,
+  ];
+
+  return Array.from(new Set(terms.filter((term) => source.includes(term))));
+}
 
 /**
  * Validates a keyword option against the 7 rules from the spec.
@@ -97,12 +124,20 @@ export function validateKeywordOption(
     });
   }
 
-  // Rule 5: Title length must be 15-25 characters
+  // Rule 5: Title length must be 15-30 characters
   const titleLength = title.length;
-  if (titleLength < 15 || titleLength > 25) {
+  if (titleLength < 15 || titleLength > 30) {
     failures.push({
       rule: "rule5",
-      reason: `제목 길이는 15~25자이어야 합니다 (현재 ${titleLength}자): "${title}"`,
+      reason: `제목 길이는 15~30자이어야 합니다 (현재 ${titleLength}자): "${title}"`,
+    });
+  }
+
+  const prohibitedTerms = findProhibitedTitleTerms(option);
+  if (prohibitedTerms.length > 0) {
+    failures.push({
+      rule: "rule8",
+      reason: `제목/키워드에 금칙어가 포함되어 사용할 수 없습니다: ${prohibitedTerms.join(", ")}`,
     });
   }
 

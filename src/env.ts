@@ -4,6 +4,9 @@ const envSchema = z.object({
   PERPLEXITY_API_KEY: z.string().min(1, "Perplexity API key is required."),
   NAVER_CLIENT_ID: z.string().min(1, "Naver client ID is required."),
   NAVER_CLIENT_SECRET: z.string().min(1, "Naver client secret is required."),
+  NAVER_SEARCHAD_API_KEY: z.string().optional(),
+  NAVER_SEARCHAD_SECRET_KEY: z.string().optional(),
+  NAVER_SEARCHAD_CUSTOMER_ID: z.string().optional(),
   GOOGLE_SHEETS_ID: z.string().optional(),
 });
 

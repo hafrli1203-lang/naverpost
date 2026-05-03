@@ -5,6 +5,7 @@ import type {
   SearchVolumeSignal,
 } from "@/types";
 import { generateRelatedKeywords } from "@/lib/nlp/nounExtractor";
+import { createHmac } from "crypto";
 
 export class NaverSearchDependencyError extends Error {
   constructor(message: string) {
@@ -34,11 +35,46 @@ function hasWorkingCredentials(): boolean {
   );
 }
 
+function hasWorkingSearchAdCredentials(): boolean {
+  const apiKey = normalizeNaverCredential(process.env.NAVER_SEARCHAD_API_KEY);
+  const secretKey = normalizeNaverCredential(process.env.NAVER_SEARCHAD_SECRET_KEY);
+  const customerId = normalizeNaverCredential(process.env.NAVER_SEARCHAD_CUSTOMER_ID);
+
+  return (
+    apiKey.length > 0 &&
+    secretKey.length > 0 &&
+    customerId.length > 0 &&
+    !apiKey.startsWith("your_") &&
+    !secretKey.startsWith("your_") &&
+    !customerId.startsWith("your_")
+  );
+}
+
 function getHeaders(): HeadersInit {
   return {
     "X-Naver-Client-Id": normalizeNaverCredential(process.env.NAVER_CLIENT_ID),
     "X-Naver-Client-Secret": normalizeNaverCredential(process.env.NAVER_CLIENT_SECRET),
     "Content-Type": "application/json",
+  };
+}
+
+function buildSearchAdSignature(params: {
+  timestamp: string;
+  method: string;
+  path: string;
+}): string {
+  const secretKey = normalizeNaverCredential(process.env.NAVER_SEARCHAD_SECRET_KEY);
+  const message = `${params.timestamp}.${params.method}.${params.path}`;
+  return createHmac("sha256", secretKey).update(message).digest("base64");
+}
+
+function getSearchAdHeaders(method: string, path: string): HeadersInit {
+  const timestamp = Date.now().toString();
+  return {
+    "X-Timestamp": timestamp,
+    "X-API-KEY": normalizeNaverCredential(process.env.NAVER_SEARCHAD_API_KEY),
+    "X-Customer": normalizeNaverCredential(process.env.NAVER_SEARCHAD_CUSTOMER_ID),
+    "X-Signature": buildSearchAdSignature({ timestamp, method, path }),
   };
 }
 
@@ -176,6 +212,155 @@ async function fetchSearchTrend(keywords: string[]): Promise<SearchVolumeSignal[
   });
 }
 
+function normalizeKeywordKey(keyword: string): string {
+  return keyword.replace(/\s+/g, "").trim().toLowerCase();
+}
+
+function parseSearchAdCount(value: string | number | undefined): {
+  value: number | null;
+  label?: string;
+} {
+  if (typeof value === "number") {
+    return { value };
+  }
+  if (!value) {
+    return { value: null };
+  }
+
+  const label = String(value);
+  const numeric = Number(label.replace(/[^0-9.]/g, ""));
+  return {
+    value: Number.isFinite(numeric) ? numeric : null,
+    label,
+  };
+}
+
+async function fetchSearchAdKeywordStats(
+  keywords: string[]
+): Promise<Map<string, SearchVolumeSignal>> {
+  const uniqueKeywords = Array.from(
+    new Set(keywords.map((keyword) => keyword.trim()).filter(Boolean))
+  );
+
+  const resultMap = new Map<string, SearchVolumeSignal>();
+  if (uniqueKeywords.length === 0 || !hasWorkingSearchAdCredentials()) {
+    return resultMap;
+  }
+
+  const path = "/keywordstool";
+  const url = new URL(`https://api.searchad.naver.com${path}`);
+  url.searchParams.set("hintKeywords", uniqueKeywords.join(","));
+  url.searchParams.set("showDetail", "1");
+
+  const response = await fetch(url, {
+    method: "GET",
+    headers: getSearchAdHeaders("GET", path),
+  });
+
+  if (!response.ok) {
+    throw new NaverSearchDependencyError(
+      `네이버 검색광고 키워드 도구 API 호출에 실패했습니다. (${response.status})`
+    );
+  }
+
+  const json = (await response.json()) as {
+    keywordList?: Array<{
+      relKeyword?: string;
+      monthlyPcQcCnt?: string | number;
+      monthlyMobileQcCnt?: string | number;
+      monthlyAvePcCtr?: string | number;
+      monthlyAveMobileCtr?: string | number;
+      compIdx?: string;
+    }>;
+  };
+
+  const requested = new Map(
+    uniqueKeywords.map((keyword) => [normalizeKeywordKey(keyword), keyword])
+  );
+
+  for (const item of json.keywordList ?? []) {
+    const relKeyword = item.relKeyword ?? "";
+    const matchedKeyword = requested.get(normalizeKeywordKey(relKeyword));
+    if (!matchedKeyword) continue;
+
+    const pc = parseSearchAdCount(item.monthlyPcQcCnt);
+    const mobile = parseSearchAdCount(item.monthlyMobileQcCnt);
+    const monthlyTotal =
+      pc.value !== null || mobile.value !== null
+        ? (pc.value ?? 0) + (mobile.value ?? 0)
+        : null;
+
+    resultMap.set(normalizeKeywordKey(matchedKeyword), {
+      keyword: matchedKeyword,
+      monthlyPcSearches: pc.value,
+      monthlyMobileSearches: mobile.value,
+      monthlyTotalSearches: monthlyTotal,
+      monthlyPcSearchesLabel: pc.label,
+      monthlyMobileSearchesLabel: mobile.label,
+      competitionLabel: item.compIdx,
+      monthlyAveragePcCtr:
+        typeof item.monthlyAvePcCtr === "number"
+          ? item.monthlyAvePcCtr
+          : Number(item.monthlyAvePcCtr) || null,
+      monthlyAverageMobileCtr:
+        typeof item.monthlyAveMobileCtr === "number"
+          ? item.monthlyAveMobileCtr
+          : Number(item.monthlyAveMobileCtr) || null,
+      source: "naver-search",
+    });
+  }
+
+  return resultMap;
+}
+
+export async function fetchKeywordDemandSignals(
+  keywords: string[]
+): Promise<SearchVolumeSignal[]> {
+  const uniqueKeywords = Array.from(
+    new Set(keywords.map((keyword) => keyword.trim()).filter(Boolean))
+  );
+  const merged = new Map<string, SearchVolumeSignal>();
+
+  for (let i = 0; i < uniqueKeywords.length; i += 5) {
+    const chunk = uniqueKeywords.slice(i, i + 5);
+    const chunkMap = await fetchSearchAdKeywordStats(chunk);
+    for (const [key, signal] of chunkMap.entries()) {
+      merged.set(key, signal);
+    }
+  }
+
+  return uniqueKeywords
+    .map((keyword) => merged.get(normalizeKeywordKey(keyword)))
+    .filter((signal): signal is SearchVolumeSignal => Boolean(signal));
+}
+
+function mergeSearchTrendAndAdStats(
+  trendSignals: SearchVolumeSignal[],
+  adStats: Map<string, SearchVolumeSignal>,
+  keywords: string[]
+): SearchVolumeSignal[] {
+  const byKeyword = new Map<string, SearchVolumeSignal>();
+
+  for (const signal of trendSignals) {
+    byKeyword.set(normalizeKeywordKey(signal.keyword), signal);
+  }
+
+  for (const [key, adSignal] of adStats.entries()) {
+    const trendSignal = byKeyword.get(key);
+    byKeyword.set(key, {
+      ...trendSignal,
+      ...adSignal,
+      trend: trendSignal?.trend,
+      rawValue: trendSignal?.rawValue,
+      source: "naver-search",
+    });
+  }
+
+  return keywords
+    .map((keyword) => byKeyword.get(normalizeKeywordKey(keyword)))
+    .filter((signal): signal is SearchVolumeSignal => Boolean(signal));
+}
+
 function buildExposureFromBlogSearch(total: number): ExposureSignal[] {
   return [
     {
@@ -296,11 +481,17 @@ export async function getExternalSearchSignals(params: {
     )
   );
 
-  const [blogSearch, searchVolume, autocompleteRelated] = await Promise.all([
+  const [blogSearch, trendSignals, searchAdStats, autocompleteRelated] = await Promise.all([
     fetchBlogSearch(mainKeyword),
     fetchSearchTrend(tokens),
+    fetchSearchAdKeywordStats(autocompleteSeeds),
     buildRelatedFromAutocomplete(autocompleteSeeds),
   ]);
+  const searchVolume = mergeSearchTrendAndAdStats(
+    trendSignals,
+    searchAdStats,
+    Array.from(new Set([...autocompleteSeeds, ...tokens]))
+  );
   const exposures = buildExposureFromBlogSearch(blogSearch.total);
 
   if (searchVolume.length === 0) {
@@ -311,8 +502,14 @@ export async function getExternalSearchSignals(params: {
 
   let relatedKeywords: RelatedKeywordSignal[] = autocompleteRelated;
   const notes: string[] = [
-    "네이버 블로그 검색 API와 데이터랩 검색어 트렌드 API로 수집한 실데이터입니다.",
+    searchAdStats.size > 0
+      ? "네이버 블로그 검색 API, 데이터랩 검색어 트렌드 API, 검색광고 키워드 도구 API로 수집한 실데이터입니다."
+      : "네이버 블로그 검색 API와 데이터랩 검색어 트렌드 API로 수집한 실데이터입니다.",
   ];
+
+  if (hasWorkingSearchAdCredentials() && searchAdStats.size === 0) {
+    notes.push("검색광고 키워드 도구에서 입력 키워드와 정확히 일치하는 월간 검색량을 찾지 못했습니다.");
+  }
 
   if (relatedKeywords.length === 0) {
     try {
@@ -340,7 +537,9 @@ export async function getExternalSearchSignals(params: {
 
   return {
     status: "available",
-    provider: "naver-openapi",
+    provider: searchVolume.some((signal) => signal.monthlyTotalSearches !== undefined)
+      ? "naver-openapi+searchad"
+      : "naver-openapi",
     checkedAt: new Date().toISOString(),
     searchVolume,
     relatedKeywords,

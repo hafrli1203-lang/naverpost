@@ -58,6 +58,43 @@ function trendLabel(trend?: string): string {
   }
 }
 
+function formatMonthlySearches(value?: number | null, fallback?: string): string | null {
+  if (typeof value === "number") {
+    return `${value.toLocaleString("ko-KR")}회`;
+  }
+  if (fallback) {
+    return `${fallback}회`;
+  }
+  return null;
+}
+
+function buildSearchVolumeLine(option: KeywordOption): string | null {
+  const signals = option.analysis?.externalSignals?.searchVolume ?? [];
+  const withMonthly = signals.find((signal) => signal.monthlyTotalSearches !== undefined);
+  if (!withMonthly) return null;
+
+  const total = formatMonthlySearches(withMonthly.monthlyTotalSearches);
+  const pc = formatMonthlySearches(
+    withMonthly.monthlyPcSearches,
+    withMonthly.monthlyPcSearchesLabel
+  );
+  const mobile = formatMonthlySearches(
+    withMonthly.monthlyMobileSearches,
+    withMonthly.monthlyMobileSearchesLabel
+  );
+  const competition = withMonthly.competitionLabel
+    ? `, 경쟁 ${withMonthly.competitionLabel}`
+    : "";
+
+  if (total) {
+    return `${withMonthly.keyword} 월간 검색량 ${total}${competition}`;
+  }
+  if (pc || mobile) {
+    return `${withMonthly.keyword} 월간 검색량 PC ${pc ?? "-"} / 모바일 ${mobile ?? "-"}${competition}`;
+  }
+  return null;
+}
+
 function buildExposureSummary(option: KeywordOption): {
   tone: "positive" | "caution" | "warning";
   message: string;
@@ -444,14 +481,19 @@ export function KeywordOptions({
                           )}
 
                           {displayOption.analysis.externalSignals?.searchVolume?.length ? (
-                            <p className="text-xs leading-5 text-muted-foreground">
-                              네이버 검색 추세:{" "}
-                              {displayOption.analysis.externalSignals.searchVolume
-                                .slice(0, 3)
-                                .map((item) => `${item.keyword} ${trendLabel(item.trend)}`)
-                                .join(" / ")}
-                              {externalTrend ? `, 전체 흐름은 ${trendLabel(externalTrend)}이에요.` : ""}
-                            </p>
+                            <div className="space-y-1 text-xs leading-5 text-muted-foreground">
+                              {buildSearchVolumeLine(displayOption) && (
+                                <p>네이버 월간 검색량: {buildSearchVolumeLine(displayOption)}</p>
+                              )}
+                              <p>
+                                네이버 검색 추세:{" "}
+                                {displayOption.analysis.externalSignals.searchVolume
+                                  .slice(0, 3)
+                                  .map((item) => `${item.keyword} ${trendLabel(item.trend)}`)
+                                  .join(" / ")}
+                                {externalTrend ? `, 전체 흐름은 ${trendLabel(externalTrend)}이에요.` : ""}
+                              </p>
+                            </div>
                           ) : null}
                         </>
                       )}

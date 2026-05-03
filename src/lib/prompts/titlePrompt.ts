@@ -9,6 +9,7 @@ export function buildTitleGenerationPrompt(params: {
   forbiddenList: string[];
   referenceList: string[];
   competitorList?: string[];
+  strategyGuide?: string;
 }): string {
   const {
     targetStore,
@@ -17,6 +18,7 @@ export function buildTitleGenerationPrompt(params: {
     forbiddenList,
     referenceList,
     competitorList = [],
+    strategyGuide = "",
   } = params;
 
   const forbiddenListStr = forbiddenList.length > 0
@@ -103,6 +105,8 @@ ${competitorListStr}
 ※ 다른 카테고리와 절대 겹치지 않는다.
 
 현재 카테고리 [${category}] 주제 범위: ${subtopicsStr}
+
+${strategyGuide}
 
 ────────────────────────────────────
 [중복 방지 – 최우선 규칙]
@@ -312,9 +316,10 @@ ${competitorListStr}
   ]
 }
 
-※ 반드시 10개의 서로 다른 소재/관점의 결과를 생성한다.
-※ 10개 모두 서로 다른 메인 키워드를 사용해야 한다.
-※ results 배열에 10개 항목을 담아 출력한다.
+※ 반드시 12개의 서로 다른 소재/관점의 결과를 생성한다.
+※ 12개 모두 서로 다른 메인 키워드를 사용해야 한다.
+※ 시스템이 이 중 10개를 선별하므로 후보를 넉넉하게 만든다.
+※ results 배열에 12개 항목을 담아 출력한다.
 
 ────────────────────────────────────
 [CRITICAL: Response Format]
