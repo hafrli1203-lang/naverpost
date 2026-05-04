@@ -41,6 +41,7 @@ export async function generateKeywordCandidatesWithGpt(params: {
   categoryName: string;
   topic?: string;
   demandSignals: SearchVolumeSignal[];
+  strategyGuide?: string;
   fallbackCandidates: KeywordOption[];
 }): Promise<KeywordOption[] | null> {
   const fallbackLines = params.fallbackCandidates
@@ -61,20 +62,29 @@ export async function generateKeywordCandidatesWithGpt(params: {
 [네이버 검색광고 조회]
 ${formatDemandSignals(params.demandSignals)}
 
+${params.strategyGuide ?? ""}
+
 [기본 후보]
 ${fallbackLines}
 
 [역할]
 - 최종 편집은 Claude가 하므로, 당신은 좋은 후보를 넓고 빠르게 제안합니다.
 - 지역형, 증상형, 상황형, 선택기준형을 섞으세요.
+- 지역형은 큰 도시명만 쓰지 말고 실제 생활권/구/동/역세권 단위가 있으면 그 표현을 우선하세요.
+- 시즌형은 현재 월과 카테고리에 맞을 때만 넣고, 억지 계절어는 쓰지 마세요.
+- 좋은 구조: 지역/생활권 + 핵심키워드 + 시즌·상황 + 확인 기준.
 - 월간 10~1,000 구간과 지역 키워드를 우선하세요.
 - 금지어 사용 금지: 추천, 가격, 비용, 후기, 꼭, 필독, 후회, 상담, 문의, 예약, 할인, 무료, 최고, 완벽, 보장.
 - 모든 키워드는 정확히 2단어 조합.
 - title에는 main_keyword를 원형 그대로 포함.
-- sub_keyword_1과 sub_keyword_2의 두 번째 단어가 title에 그대로 보여야 합니다.
+- sub_keyword_1과 sub_keyword_2는 본문 확장 소재입니다. 제목에 억지로 모두 넣지 마세요.
+- 제목은 main_keyword와 독자 상황이 자연스럽게 읽혀야 합니다.
 - 좋은 예: title="누진렌즈 울렁임 원인과 적응 기준", main="누진렌즈 울렁임", sub1="누진렌즈 원인", sub2="누진렌즈 적응"
 - 좋은 예: title="장림 안경점 안경렌즈와 안경테 고를 때", main="장림 안경점", sub1="장림 안경렌즈", sub2="장림 안경테"
-- 나쁜 예: "누진렌즈 울렁임 적응 시야 살펴보기", "장림 안경점 소재와 선택 기준"
+- 좋은 예: title="안경수리 맡기기 전 확인할 부분", main="안경수리 기준", sub1="안경수리 나사", sub2="안경수리 테"
+- 좋은 예: title="안경피팅 코패드가 눌릴 때", main="안경피팅 기준", sub1="안경피팅 코패드", sub2="안경피팅 착용감"
+- 나쁜 예: "누진렌즈 울렁임 적응 시야 살펴보기", "심곡 안경수리 안경피팅과 코패드 달라지는 이유", "장림 안경점 소재와 선택 기준"
+- 나쁜 예: "안경수리 기준 코패드가 불편할 때"처럼 행동과 증상이 논리적으로 맞지 않는 제목
 
 JSON만 출력:
 {

@@ -27,6 +27,8 @@ interface ArticlePreviewProps {
   onApprove: () => void;
   onRewrite: () => void;
   onManualEdit: (content: string) => void | Promise<void>;
+  onWash?: () => void | Promise<void>;
+  onRevertWash?: () => void;
   onSave?: () => void;
   onRefreshGeoAnalysis?: () => Promise<GeoAnalysisResult | null>;
   onLoadGeoPlan?: () => Promise<unknown | null>;
@@ -179,6 +181,8 @@ export function ArticlePreview({
   onApprove,
   onRewrite,
   onManualEdit,
+  onWash,
+  onRevertWash,
   onSave,
   onRefreshGeoAnalysis,
   onLoadGeoPlan,
@@ -368,6 +372,22 @@ export function ArticlePreview({
               )}
 
               <Separator />
+
+              {article.washingApplied && (
+                <>
+                  <div className="flex items-start gap-2 text-blue-600">
+                    <CheckCircle className="w-4 h-4 mt-0.5 shrink-0" />
+                    <span className="text-sm">
+                      워싱 적용 완료
+                      {article.washingTone ? ` (${article.washingTone})` : ""}
+                    </span>
+                  </div>
+                  <p className="text-xs leading-5 text-muted-foreground">
+                    수동 워싱을 적용했습니다. 필요하면 아래 버튼으로 워싱 전 본문으로 되돌릴 수 있습니다.
+                  </p>
+                  <Separator />
+                </>
+              )}
 
               {/* Character count */}
               <div className="space-y-1">
@@ -569,9 +589,39 @@ export function ArticlePreview({
           onApplyAdvanced={onApplyAdvancedGeo}
           onRevert={onRevertGeo}
         />
+        {article.washingApplied && article.preWashContent && onRevertWash ? (
+          <Button
+            variant="outline"
+            onClick={onRevertWash}
+            disabled={isLoading}
+            className="gap-2 border-slate-300 text-slate-600 hover:bg-slate-50 hover:text-slate-700"
+          >
+            <RotateCcw className="w-4 h-4" />
+            워싱 전으로
+          </Button>
+        ) : (
+          onWash && (
+            <Button
+              variant="outline"
+              onClick={onWash}
+              disabled={isLoading}
+              className="gap-2 border-blue-300 text-blue-600 hover:bg-blue-50 hover:text-blue-700"
+            >
+              {isLoading ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <PenLine className="w-4 h-4" />
+              )}
+              워싱하기
+            </Button>
+          )
+        )}
         <Button
           variant="outline"
-          onClick={() => setIsEditing((v) => !v)}
+          onClick={() => {
+            setEditContent(article.content);
+            setIsEditing((v) => !v);
+          }}
           disabled={isLoading}
           className="gap-2"
         >

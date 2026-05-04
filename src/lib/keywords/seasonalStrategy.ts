@@ -198,48 +198,49 @@ export function inferShopRegion(shop: Shop): string {
 }
 
 function getRegionalKeywordExamples(region: string, category: Category): string[] {
+  const keywordRegion = region.trim().split(/\s+/).at(-1) ?? region;
   const examplesByCategory: Record<string, string[]> = {
     progressive: [
-      `${region} 다초점렌즈`,
-      `${region} 누진렌즈`,
-      `${region} 누진다초점`,
-      `${region} 노안안경`,
+      `${keywordRegion} 다초점렌즈`,
+      `${keywordRegion} 누진렌즈`,
+      `${keywordRegion} 누진다초점`,
+      `${keywordRegion} 노안안경`,
     ],
     contacts: [
-      `${region} 콘택트렌즈`,
-      `${region} 원데이렌즈`,
-      `${region} 난시렌즈`,
-      `${region} 렌즈검사`,
+      `${keywordRegion} 콘택트렌즈`,
+      `${keywordRegion} 원데이렌즈`,
+      `${keywordRegion} 난시렌즈`,
+      `${keywordRegion} 렌즈검사`,
     ],
     lenses: [
-      `${region} 안경렌즈`,
-      `${region} 렌즈교체`,
-      `${region} 안경알`,
-      `${region} 블루라이트렌즈`,
-      `${region} 어린이안경`,
-      `${region} 근시억제렌즈`,
+      `${keywordRegion} 안경렌즈`,
+      `${keywordRegion} 렌즈교체`,
+      `${keywordRegion} 안경알`,
+      `${keywordRegion} 블루라이트렌즈`,
+      `${keywordRegion} 어린이안경`,
+      `${keywordRegion} 근시억제렌즈`,
     ],
     frames: [
-      `${region} 안경테`,
-      `${region} 안경피팅`,
-      `${region} 가벼운안경`,
-      `${region} 코패드`,
+      `${keywordRegion} 안경테`,
+      `${keywordRegion} 안경피팅`,
+      `${keywordRegion} 가벼운안경`,
+      `${keywordRegion} 코패드`,
     ],
     "eye-info": [
-      `${region} 시력검사`,
-      `${region} 눈피로`,
-      `${region} 안구건조`,
-      `${region} 눈초점`,
+      `${keywordRegion} 시력검사`,
+      `${keywordRegion} 눈피로`,
+      `${keywordRegion} 안구건조`,
+      `${keywordRegion} 눈초점`,
     ],
     "glasses-story": [
-      `${region} 안경수리`,
-      `${region} 안경피팅`,
-      `${region} 안경세척`,
-      `${region} 안경김서림`,
+      `${keywordRegion} 안경수리`,
+      `${keywordRegion} 안경피팅`,
+      `${keywordRegion} 안경세척`,
+      `${keywordRegion} 안경김서림`,
     ],
   };
 
-  return examplesByCategory[category.id] ?? [`${region} ${category.name}`];
+  return examplesByCategory[category.id] ?? [`${keywordRegion} ${category.name}`];
 }
 
 export function buildKeywordDiscoverySeeds(params: {
@@ -249,23 +250,24 @@ export function buildKeywordDiscoverySeeds(params: {
 }): string[] {
   const { shop, category, topic } = params;
   const region = inferShopRegion(shop);
+  const keywordRegion = region.trim().split(/\s+/).at(-1) ?? region;
   const commonLocal = [
-    `${region} 안경`,
-    `${region} 안경점`,
-    `${region} 안경원`,
-    `${region} 시력검사`,
-    `${region} 안경렌즈`,
-    `${region} 안경테`,
+    `${keywordRegion} 안경`,
+    `${keywordRegion} 안경점`,
+    `${keywordRegion} 안경원`,
+    `${keywordRegion} 시력검사`,
+    `${keywordRegion} 안경렌즈`,
+    `${keywordRegion} 안경테`,
   ];
 
   const byCategory: Record<string, string[]> = {
     progressive: [
-      `${region} 다초점렌즈`,
-      `${region} 누진렌즈`,
-      `${region} 누진다초점`,
-      `${region} 노안안경`,
-      `${region} 돋보기`,
-      `${region} 돋보기안경`,
+      `${keywordRegion} 다초점렌즈`,
+      `${keywordRegion} 누진렌즈`,
+      `${keywordRegion} 누진다초점`,
+      `${keywordRegion} 노안안경`,
+      `${keywordRegion} 돋보기`,
+      `${keywordRegion} 돋보기안경`,
       "누진렌즈 적응",
       "누진렌즈 울렁임",
       "노안 안경",
@@ -279,11 +281,11 @@ export function buildKeywordDiscoverySeeds(params: {
       "눈 초점",
     ],
     contacts: [
-      `${region} 콘택트렌즈`,
-      `${region} 렌즈`,
-      `${region} 원데이렌즈`,
-      `${region} 난시렌즈`,
-      `${region} 컬러렌즈`,
+      `${keywordRegion} 콘택트렌즈`,
+      `${keywordRegion} 렌즈`,
+      `${keywordRegion} 원데이렌즈`,
+      `${keywordRegion} 난시렌즈`,
+      `${keywordRegion} 컬러렌즈`,
       "렌즈 건조",
       "렌즈 충혈",
       "렌즈 이물감",
@@ -294,12 +296,12 @@ export function buildKeywordDiscoverySeeds(params: {
       "소프트 렌즈",
     ],
     lenses: [
-      `${region} 렌즈교체`,
-      `${region} 안경알`,
-      `${region} 안경렌즈`,
-      `${region} 변색렌즈`,
-      `${region} 어린이렌즈`,
-      `${region} 근시완화렌즈`,
+      `${keywordRegion} 렌즈교체`,
+      `${keywordRegion} 안경알`,
+      `${keywordRegion} 안경렌즈`,
+      `${keywordRegion} 변색렌즈`,
+      `${keywordRegion} 어린이렌즈`,
+      `${keywordRegion} 근시완화렌즈`,
       "안경렌즈 압축",
       "안경렌즈 코팅",
       "블루라이트렌즈",
@@ -317,10 +319,10 @@ export function buildKeywordDiscoverySeeds(params: {
       "눈피로 렌즈",
     ],
     frames: [
-      `${region} 안경테`,
-      `${region} 안경피팅`,
-      `${region} 안경흘러내림`,
-      `${region} 코패드`,
+      `${keywordRegion} 안경테`,
+      `${keywordRegion} 안경피팅`,
+      `${keywordRegion} 안경흘러내림`,
+      `${keywordRegion} 코패드`,
       "가벼운 안경",
       "티타늄 안경",
       "뿔테 안경",
@@ -333,7 +335,7 @@ export function buildKeywordDiscoverySeeds(params: {
       "코패드 자국",
     ],
     "eye-info": [
-      `${region} 시력검사`,
+      `${keywordRegion} 시력검사`,
       "눈 피로",
       "안구 건조",
       "시력 저하",
@@ -350,10 +352,10 @@ export function buildKeywordDiscoverySeeds(params: {
       "노안",
     ],
     "glasses-story": [
-      `${region} 안경수리`,
-      `${region} 안경피팅`,
-      `${region} 안경세척`,
-      `${region} 코패드교체`,
+      `${keywordRegion} 안경수리`,
+      `${keywordRegion} 안경피팅`,
+      `${keywordRegion} 안경세척`,
+      `${keywordRegion} 코패드교체`,
       "안경 김서림",
       "안경 세척",
       "안경 흘러내림",
@@ -427,6 +429,7 @@ export function buildKeywordStrategyGuide(params: {
   const month = now.getMonth() + 1;
   const season = getMonthSeason(month);
   const region = inferShopRegion(shop);
+  const keywordRegion = region.trim().split(/\s+/).at(-1) ?? region;
   const intentAxes = CATEGORY_INTENT_AXES[category.id] ?? [
     "지역 이용형: 지역명 + 핵심 카테고리",
     "정보 탐색형: 원인, 기준, 방법, 관리",
@@ -446,6 +449,8 @@ export function buildKeywordStrategyGuide(params: {
 ${topicLine}
 - 현재 기준 월: ${month}월 (${season.label})
 - 지역명 후보: ${region}
+- 2단어 키워드에는 생활권 핵심 지역명 "${keywordRegion}"을 우선 사용한다.
+- 제목에는 필요하면 "${region}"처럼 시/생활권 전체를 자연스럽게 드러낼 수 있다.
 - 카테고리는 글 관리용 분류일 뿐, 키워드 탐색 범위를 막는 기준이 아니다.
 - 검색자는 카테고리명이 아니라 지역명, 증상, 상황, 선택 기준으로 검색한다.
 - 지역형 롱테일은 실제 이용 의도가 강하므로 최소 4개 이상 포함한다.

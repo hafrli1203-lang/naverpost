@@ -82,11 +82,14 @@ function stripHtml(text: string): string {
   return text.replace(/<[^>]+>/g, "").trim();
 }
 
-export async function fetchCompetitorTitles(seeds: string[]): Promise<string[]> {
+export async function fetchCompetitorTitles(
+  seeds: string[],
+  maxSeeds = 4
+): Promise<string[]> {
   if (!hasWorkingCredentials()) return [];
 
   const collected = new Map<string, string>();
-  for (const seed of seeds.slice(0, 4)) {
+  for (const seed of seeds.slice(0, maxSeeds)) {
     if (!seed.trim()) continue;
     try {
       const { items } = await fetchBlogSearch(seed);

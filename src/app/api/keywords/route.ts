@@ -12,6 +12,7 @@ import {
 } from "@/lib/naver/searchSignals";
 import {
   buildKeywordDiscoverySeeds,
+  buildKeywordStrategyGuide,
   inferShopRegion,
 } from "@/lib/keywords/seasonalStrategy";
 import { buildTitleGenerationPrompt } from "@/lib/prompts/titlePrompt";
@@ -24,7 +25,8 @@ import { analyzeTitleBodyAlignment } from "@/lib/validation/titleBodyAlignment";
 import type { KeywordOption, KeywordOptionAnalysis, SearchVolumeSignal } from "@/types";
 
 export const maxDuration = 360;
-const EXTERNAL_SIGNAL_TOP_K = 5;
+const TARGET_RESULT_COUNT = 10;
+const EXTERNAL_SIGNAL_TOP_K = TARGET_RESULT_COUNT;
 
 function normalizeTitleForComparison(title: string): string {
   return title.replace(/\s+/g, " ").trim().toLowerCase();
@@ -96,7 +98,6 @@ function isTooSimilarTitle(a: KeywordOption, b: KeywordOption): boolean {
   return sameMainKeyword && sameSubKeyword1 && sameSubKeyword2;
 }
 
-const TARGET_RESULT_COUNT = 10;
 const COMMON_TITLE_WORDS = new Set([
   "기준",
   "부분",
@@ -148,7 +149,70 @@ const DEFAULT_CORES_BY_HEAD: Record<string, string[]> = {
   어린이시력: ["검사", "근시", "관리", "도수", "습관", "렌즈"],
   안경김서림: ["렌즈", "관리", "마스크", "코팅", "습기", "세척"],
   안경세척: ["렌즈", "코팅", "방법", "관리", "얼룩", "습관"],
-  안경수리: ["피팅", "코패드", "나사", "테", "착용감", "기준"],
+  안경수리: ["나사", "테", "코받침", "파손", "흘러내림", "착용감"],
+};
+
+const SEMANTIC_TITLE_TEMPLATES: Record<string, string[]> = {
+  안경수리: [
+    "{main} 맡기기 전 확인할 부분",
+    "{main} 가능한 경우와 어려운 경우",
+    "{main} 전에 상태를 보는 기준",
+  ],
+  안경피팅: [
+    "{main} 코패드가 눌릴 때",
+    "{main} 흘러내림이 반복될 때",
+    "{main} 착용감이 달라졌을 때",
+  ],
+  안경흘러내림: [
+    "{main} 반복될 때 보는 부분",
+    "{main} 코패드와 균형 문제",
+    "{main} 피팅으로 확인할 부분",
+  ],
+  안경세척: [
+    "{main} 렌즈 얼룩 남을 때",
+    "{main} 코팅 손상 줄이는 습관",
+    "{main} 물세척 전 확인할 부분",
+  ],
+  안경보관: [
+    "{main} 렌즈 흠집 줄이는 습관",
+    "{main} 테 변형 줄이는 방법",
+    "{main} 습기 많은 날 주의점",
+  ],
+  안경김서림: [
+    "{main} 겨울에 반복될 때",
+    "{main} 마스크 쓸 때 줄이는 방법",
+    "{main} 렌즈 관리로 보는 부분",
+  ],
+  원데이렌즈: [
+    "{main} 건조할 때 확인할 점",
+    "{main} 오래 낄 때 주의할 부분",
+    "{main} 오후에 불편할 때",
+  ],
+  렌즈건조: [
+    "{main} 오후에 심해지는 이유",
+    "{main} 착용시간부터 보는 이유",
+    "{main} 실내 환경과 관리 기준",
+  ],
+  안구건조: [
+    "{main} 생활 습관에서 볼 부분",
+    "{main} 렌즈 착용 때 심한 이유",
+    "{main} 계절마다 달라지는 이유",
+  ],
+  어린이시력: [
+    "{main} 근시가 의심될 때",
+    "{main} 검사 시기를 보는 이유",
+    "{main} 새학기 후 확인할 부분",
+  ],
+  누진렌즈: [
+    "{main} 울렁임이 반복될 때",
+    "{main} 시야가 어색할 때",
+    "{main} 운전할 때 불편한 이유",
+  ],
+  노안안경: [
+    "{main} 돋보기와 달라지는 부분",
+    "{main} 가까운 글씨가 흐릴 때",
+    "{main} 부모님 시야 확인할 때",
+  ],
 };
 
 function getCompetitionScore(label?: string): number {
@@ -179,12 +243,6 @@ function splitKeyword(keyword: string): [string, string] | null {
   const parts = keyword.trim().split(/\s+/);
   if (parts.length !== 2) return null;
   return [parts[0], parts[1]];
-}
-
-function isSubKeywordVisibleInTitle(title: string, keyword: string): boolean {
-  const parts = splitKeyword(keyword);
-  if (!parts) return false;
-  return title.includes(keyword) || (title.includes(parts[0]) && title.includes(parts[1]));
 }
 
 function inferRegionFromShopName(shopName: string): string {
@@ -280,6 +338,17 @@ function composeRegionalTitle(mainKeyword: string, core1: string, core2: string)
   return null;
 }
 
+function renderSemanticTitle(mainKeyword: string, index: number): string | null {
+  const head = splitKeyword(mainKeyword)?.[0] ?? "";
+  const templates = SEMANTIC_TITLE_TEMPLATES[head];
+  if (!templates?.length) return null;
+
+  const ordered = templates.slice(index % templates.length).concat(templates);
+  return ordered
+    .map((template) => template.replace("{main}", mainKeyword))
+    .find((title) => title.length >= 15 && title.length <= 30) ?? null;
+}
+
 function composeAlignedTitle(params: {
   mainKeyword: string;
   core1: string;
@@ -289,30 +358,135 @@ function composeAlignedTitle(params: {
   const { mainKeyword, core1, core2, index } = params;
   const regionalTitle = composeRegionalTitle(mainKeyword, core1, core2);
   if (regionalTitle) return regionalTitle;
+  const semanticTitle = renderSemanticTitle(mainKeyword, index);
+  if (semanticTitle) return semanticTitle;
 
-  const corePair = joinCores(core1, core2);
   const mainCore = splitKeyword(mainKeyword)?.[1] ?? "";
   const situationalTemplates = /적응|착용|관리|운전|선택/.test(mainCore)
-    ? [`${mainKeyword} 중 ${corePair} 차이`, `${mainKeyword} 때 ${corePair} 기준`]
+    ? [`${mainKeyword} 중 불편할 때`, `${mainKeyword} 전 확인할 부분`]
     : [];
   const templates = [
     ...situationalTemplates,
-    `${mainKeyword} ${corePair} 기준`,
-    `${mainKeyword} ${corePair} 차이`,
-    `${mainKeyword} ${corePair} 달라지는 이유`,
-    `${mainKeyword} ${corePair} 확인할 점`,
+    `${mainKeyword} ${core1} 확인할 점`,
+    `${mainKeyword} 불편할 때 보는 부분`,
+    `${mainKeyword} 관리할 때 볼 부분`,
+    `${mainKeyword} 달라지는 이유`,
   ];
   const preferred = templates.slice(index % templates.length).concat(templates);
   return (
     preferred.find((title) => title.length >= 15 && title.length <= 30) ??
-    `${mainKeyword} ${corePair}`.slice(0, 30)
+    `${mainKeyword} ${core1}`.slice(0, 30)
   );
+}
+
+function getSeasonalFallbackOptions(params: {
+  categoryId: string;
+  region: string;
+  month: number;
+}): KeywordOption[] {
+  const { categoryId, region, month } = params;
+  const keywordRegion = region.trim().split(/\s+/).at(-1) ?? region;
+  const options: KeywordOption[] = [];
+
+  if ((month === 3 || month === 9) && (categoryId === "eye-info" || categoryId === "lenses")) {
+    options.push(
+      {
+        title: `${region} 어린이시력 검사 새학기 근시 확인`,
+        mainKeyword: `${keywordRegion} 어린이시력`,
+        subKeyword1: `${keywordRegion} 시력검사`,
+        subKeyword2: `${keywordRegion} 어린이근시`,
+      },
+      {
+        title: `어린이시력 관리 개학 후 근시 확인`,
+        mainKeyword: "어린이시력 관리",
+        subKeyword1: "어린이시력 검사",
+        subKeyword2: "어린이시력 근시",
+      }
+    );
+  }
+
+  if ((month === 4 || month === 5) && (categoryId === "eye-info" || categoryId === "lenses")) {
+    options.push(
+      {
+        title: `${region} 어린이시력 검사 근시 확인할 때`,
+        mainKeyword: `${keywordRegion} 어린이시력`,
+        subKeyword1: `${keywordRegion} 시력검사`,
+        subKeyword2: `${keywordRegion} 어린이근시`,
+      },
+      {
+        title: `안구건조 증상 봄철 알레르기와 차이`,
+        mainKeyword: "안구건조 증상",
+        subKeyword1: "안구건조 원인",
+        subKeyword2: "안구건조 관리",
+      }
+    );
+  }
+
+  if ((month === 4 || month === 5) && categoryId === "progressive") {
+    options.push({
+      title: `${region} 노안안경 부모님 시야 확인할 때`,
+      mainKeyword: `${keywordRegion} 노안안경`,
+      subKeyword1: `${keywordRegion} 노안렌즈`,
+      subKeyword2: `${keywordRegion} 시력검사`,
+    });
+  }
+
+  if (month >= 6 && month <= 8) {
+    if (categoryId === "contacts") {
+      options.push(
+        {
+          title: `${region} 렌즈건조 여름 착용과 관리`,
+          mainKeyword: `${keywordRegion} 렌즈건조`,
+          subKeyword1: `${keywordRegion} 렌즈착용`,
+          subKeyword2: `${keywordRegion} 렌즈관리`,
+        },
+        {
+          title: `원데이렌즈 착용시간 여름 건조 기준`,
+          mainKeyword: "원데이렌즈 착용시간",
+          subKeyword1: "원데이렌즈 건조",
+          subKeyword2: "원데이렌즈 관리",
+        }
+      );
+    }
+    if (categoryId === "lenses") {
+      options.push({
+        title: `${region} 변색렌즈 자외선 많은 날 기준`,
+        mainKeyword: `${keywordRegion} 변색렌즈`,
+        subKeyword1: `${keywordRegion} 자외선렌즈`,
+        subKeyword2: `${keywordRegion} 안경렌즈`,
+      });
+    }
+  }
+
+  if (month >= 10 || month <= 2) {
+    if (categoryId === "glasses-story") {
+      options.push({
+        title: `${region} 안경김서림 겨울 관리 방법`,
+        mainKeyword: `${keywordRegion} 안경김서림`,
+        subKeyword1: `${keywordRegion} 안경관리`,
+        subKeyword2: `${keywordRegion} 안경세척`,
+      });
+    }
+    if (categoryId === "eye-info" || categoryId === "contacts") {
+      options.push({
+        title: `안구건조 증상 겨울 실내에서 심할 때`,
+        mainKeyword: "안구건조 증상",
+        subKeyword1: "안구건조 원인",
+        subKeyword2: "안구건조 관리",
+      });
+    }
+  }
+
+  return options;
 }
 
 function isAwkwardGeneratedTitle(title: string): boolean {
   return (
     /이 있을 때|가 있을 때|소재와 선택 기준|가입도|주방|수치|재방문/.test(title) ||
     /다른 점|보는 것|파악하기|확인하는 방법|확인하는 법|진행 확인/.test(title) ||
+    /안경수리.*(코패드|피팅).*달라지는 이유/.test(title) ||
+    /안경수리 기준.*코패드/.test(title) ||
+    /방법 원인과|관리와 코팅|피팅과 코패드/.test(title) ||
     /확인 확인|기준 기준|선택 선택/.test(title)
   );
 }
@@ -344,7 +518,7 @@ const FALLBACK_KEYWORD_SETS: Record<
     { main: "근시완화렌즈 기준", sub1: "근시완화렌즈 어린이", sub2: "근시완화렌즈 검사", title: "근시완화렌즈 기준을 확인할 부분" },
   ],
   frames: [
-    { main: "안경피팅 기준", sub1: "안경피팅 코패드", sub2: "안경피팅 착용감", title: "안경피팅 기준이 필요한 순간" },
+    { main: "안경피팅 기준", sub1: "안경피팅 코패드", sub2: "안경피팅 착용감", title: "안경피팅 코패드가 눌릴 때" },
     { main: "안경흘러내림 원인", sub1: "안경흘러내림 코패드", sub2: "안경흘러내림 피팅", title: "안경흘러내림 원인부터 살펴보기" },
     { main: "가벼운안경 선택", sub1: "가벼운안경 소재", sub2: "가벼운안경 착용감", title: "가벼운안경 선택할 때 보는 부분" },
   ],
@@ -361,7 +535,7 @@ const FALLBACK_KEYWORD_SETS: Record<
   "glasses-story": [
     { main: "안경김서림 원인", sub1: "안경김서림 관리", sub2: "안경김서림 렌즈", title: "안경김서림 원인과 관리 방법" },
     { main: "안경세척 방법", sub1: "안경세척 렌즈", sub2: "안경세척 코팅", title: "안경세척 방법을 바꿔야 할 때" },
-    { main: "안경수리 기준", sub1: "안경수리 피팅", sub2: "안경수리 코패드", title: "안경수리 기준이 되는 불편함" },
+    { main: "안경수리 기준", sub1: "안경수리 나사", sub2: "안경수리 테", title: "안경수리 맡기기 전 확인할 부분" },
   ],
 };
 
@@ -371,18 +545,20 @@ function buildFallbackKeywordOptions(params: {
   demandSignals: SearchVolumeSignal[];
 }): KeywordOption[] {
   const region = params.region || inferRegionFromShopName("");
+  const keywordRegion = region.trim().split(/\s+/).at(-1) ?? region;
+  const month = new Date().getMonth() + 1;
   const regionalOptions: KeywordOption[] = [
     {
       title: `${region} 안경 맞출 때 먼저 보는 기준`,
-      mainKeyword: `${region} 안경`,
-      subKeyword1: `${region} 안경점`,
-      subKeyword2: `${region} 시력검사`,
+      mainKeyword: `${keywordRegion} 안경`,
+      subKeyword1: `${keywordRegion} 안경점`,
+      subKeyword2: `${keywordRegion} 시력검사`,
     },
     {
       title: `${region} 안경점 렌즈와 테 고르는 기준`,
-      mainKeyword: `${region} 안경점`,
-      subKeyword1: `${region} 안경렌즈`,
-      subKeyword2: `${region} 안경테`,
+      mainKeyword: `${keywordRegion} 안경점`,
+      subKeyword1: `${keywordRegion} 안경렌즈`,
+      subKeyword2: `${keywordRegion} 안경테`,
     },
   ];
 
@@ -414,7 +590,13 @@ function buildFallbackKeywordOptions(params: {
       subKeyword2: item.sub2,
     }));
 
-  return [...regionalOptions, ...demandOptions, ...categoryOptions].slice(0, 24);
+  const seasonalOptions = getSeasonalFallbackOptions({
+    categoryId: params.categoryId,
+    region,
+    month,
+  });
+
+  return [...seasonalOptions, ...regionalOptions, ...demandOptions, ...categoryOptions].slice(0, 28);
 }
 
 function alignTitleWithKeywords(option: KeywordOption, index: number): KeywordOption {
@@ -428,8 +610,6 @@ function alignTitleWithKeywords(option: KeywordOption, index: number): KeywordOp
 
   if (
     option.title.includes(option.mainKeyword) &&
-    isSubKeywordVisibleInTitle(option.title, subKeyword1) &&
-    isSubKeywordVisibleInTitle(option.title, subKeyword2) &&
     option.title.length >= 15 &&
     option.title.length <= 30 &&
     !isAwkwardGeneratedTitle(option.title)
@@ -465,10 +645,7 @@ function normalizeGeneratedOptions(options: KeywordOption[]): KeywordOption[] {
     .map((option, index) => alignTitleWithKeywords(option, index))
     .filter((option) => {
       if (!option.title.includes(option.mainKeyword)) return false;
-      return (
-        isSubKeywordVisibleInTitle(option.title, option.subKeyword1) &&
-        isSubKeywordVisibleInTitle(option.title, option.subKeyword2)
-      );
+      return true;
     })
     .filter(
       (option) =>
@@ -486,6 +663,7 @@ function buildCandidateEditingPrompt(params: {
   forbiddenList: string[];
   referenceList: string[];
   competitorList: string[];
+  strategyGuide: string;
 }): string {
   const candidateLines = params.candidates
     .map(
@@ -517,19 +695,26 @@ ${references}
 [경쟁 제목]
 ${competitors}
 
+${params.strategyGuide}
+
 [규칙]
 - 제목 15~30자.
 - 메인 키워드는 제목 첫머리 또는 앞쪽에 원형 그대로 반드시 포함.
 - 메인/서브 키워드는 정확히 2단어 조합.
-- 서브 키워드 2개는 제목 안에서 두 번째 단어가 그대로 보여야 함.
+- 서브 키워드 2개는 본문 확장 소재입니다. 제목에 억지로 모두 넣지 마세요.
 - 예: title="누진렌즈 울렁임 원인과 적응 기준" / main="누진렌즈 울렁임" / sub1="누진렌즈 원인" / sub2="누진렌즈 적응"
 - 예: title="장림 안경점 안경렌즈와 안경테 고를 때" / main="장림 안경점" / sub1="장림 안경렌즈" / sub2="장림 안경테"
-- 제목을 읽었을 때 메인/서브 키워드 3개가 왜 붙었는지 바로 이해되어야 함.
+- 제목은 메인 키워드와 독자의 상황이 자연스럽게 읽혀야 합니다.
 - 같은 소재 반복 금지.
 - 금지어 사용 금지: 추천, 가격, 비용, 후기, 꼭, 필독, 후회, 상담, 문의, 예약, 할인, 무료, 최고, 완벽, 보장.
 - 의료 단정 금지. 근시억제/근시완화는 정보형 기준 문장으로만 다룰 것.
 - 사람이 직접 쓴 제목처럼 자연스럽게 작성. 키워드 나열식 금지.
+- 지역 키워드는 방문 전환형 후보에 자연스럽게 사용하되 모든 제목에 억지로 넣지 말 것.
+- 큰 도시는 시 전체보다 구/동/역세권·생활권 지역명을 우선할 것. 예: 부산 전체보다 장림/서면, 대전 전체보다 둔산동/유성.
+- 시즌 키워드는 현재 월과 카테고리가 맞을 때만 제목 각도로 반영할 것. 억지로 계절어를 붙이지 말 것.
+- 좋은 구조: 지역/생활권 + 핵심키워드 + 시즌·상황 + 확인 기준.
 - "A와 B 선택 기준", "A B C 기준", "소재와 선택 기준", "확인 기준과 관리", "살펴보기"처럼 기계적인 제목 금지.
+- "안경피팅과 코패드 달라지는 이유", "관리와 코팅 확인할 점"처럼 두 소재를 억지로 붙인 제목 금지.
 - 실제 검색어로 어색한 조합 금지: 주방, 가입도, 수치, 재방문 같은 단어를 억지로 붙이지 말 것.
 - 제목에 넣기 어려운 서브 키워드는 만들지 말고, 제목에 자연스럽게 들어갈 수 있는 서브 키워드로 바꿀 것.
 - 좋은 제목 예:
@@ -721,6 +906,24 @@ type AnalyzedKeyword = KeywordOption & {
   _priorityScore: number;
 };
 
+function collectCandidateSearchSeeds(options: KeywordOption[]): string[] {
+  const seen = new Set<string>();
+  const seeds: string[] = [];
+
+  for (const option of options) {
+    for (const value of [option.mainKeyword, option.subKeyword1, option.subKeyword2]) {
+      const seed = value.trim();
+      const key = seed.replace(/\s+/g, "").toLowerCase();
+      if (!seed || seen.has(key)) continue;
+      seen.add(key);
+      seeds.push(seed);
+      if (seeds.length >= 12) return seeds;
+    }
+  }
+
+  return seeds;
+}
+
 function getExternalDemandScore(
   externalSignals: KeywordOptionAnalysis["externalSignals"] | undefined
 ): number {
@@ -870,6 +1073,13 @@ export async function POST(request: NextRequest) {
       // 검색광고 월간 검색량 조회 실패 시에도 기존 네이버 검색/트렌드 기반 생성은 계속한다.
     }
 
+    const strategyGuide = buildKeywordStrategyGuide({
+      shop,
+      category,
+      topic,
+      demandSignals,
+    });
+
     const fallbackBatch = buildFallbackKeywordOptions({
       region: inferShopRegion(shop),
       categoryId: category.id,
@@ -884,6 +1094,7 @@ export async function POST(request: NextRequest) {
         categoryName: category.name,
         topic,
         demandSignals,
+        strategyGuide,
         fallbackCandidates: fallbackBatch,
       });
       if (gptCandidates && gptCandidates.length > 0) {
@@ -906,6 +1117,7 @@ export async function POST(request: NextRequest) {
       forbiddenList,
       referenceList,
       competitorList,
+      strategyGuide,
     });
 
     let firstBatch: KeywordOption[] = [];
@@ -930,6 +1142,16 @@ export async function POST(request: NextRequest) {
         { success: false, error: "키워드 후보를 생성하지 못했습니다. 입력 조건을 다시 확인해주세요." },
         { status: 500 }
       );
+    }
+
+    try {
+      const candidateCompetitorList = await fetchCompetitorTitles(
+        collectCandidateSearchSeeds(firstBatch),
+        10
+      );
+      competitorList = Array.from(new Set([...competitorList, ...candidateCompetitorList]));
+    } catch {
+      // 후보 키워드별 상위 제목 조회 실패 시 기존 카테고리 기반 경쟁 제목만 사용한다.
     }
 
     const analyzed = await analyzeOptions({
@@ -964,6 +1186,7 @@ export async function POST(request: NextRequest) {
           forbiddenList,
           referenceList,
           competitorList: strengthenedCompetitorList,
+          strategyGuide,
         });
         const retryBatch = await generateKeywords(retryPrompt, 180_000);
         if (Array.isArray(retryBatch) && retryBatch.length > 0) {

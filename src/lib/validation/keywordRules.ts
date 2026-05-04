@@ -34,7 +34,7 @@ function findProhibitedTitleTerms(option: KeywordOption): string[] {
  * 1. All keywords must be exactly 2-word combinations
  * 2. Main keyword's first word must appear in both sub keywords
  * 3. Main keyword must appear verbatim in the title
- * 4. Both sub keywords' meanings must be reflected in the title
+ * 4. Sub keywords are body expansion hints; they do not all need to appear in the title
  * 5. Title length must be 15-30 characters
  * 6. Title must not overlap with forbiddenList
  * 7. Title must not share same perspective as referenceList
@@ -97,32 +97,8 @@ export function validateKeywordOption(
     });
   }
 
-  // Rule 4: Both sub keywords' meanings must be reflected in the title
-  // Check by verifying each word of sub keywords appears in the title
-  const sub1FirstWord = sub1Words[0] ?? "";
-  const sub1SecondWord = sub1Words[1] ?? "";
-  const sub2FirstWord = sub2Words[0] ?? "";
-  const sub2SecondWord = sub2Words[1] ?? "";
-
-  const sub1Reflected =
-    title.includes(subKeyword1) ||
-    (title.includes(sub1FirstWord) && title.includes(sub1SecondWord));
-  const sub2Reflected =
-    title.includes(subKeyword2) ||
-    (title.includes(sub2FirstWord) && title.includes(sub2SecondWord));
-
-  if (!sub1Reflected) {
-    failures.push({
-      rule: "rule4",
-      reason: `서브 키워드1 "${subKeyword1}"의 의미가 제목에 드러나야 합니다`,
-    });
-  }
-  if (!sub2Reflected) {
-    failures.push({
-      rule: "rule4",
-      reason: `서브 키워드2 "${subKeyword2}"의 의미가 제목에 드러나야 합니다`,
-    });
-  }
+  // Rule 4: Sub keywords are used to guide the body. Forcing both into the title
+  // creates unnatural titles, so only the main keyword is mandatory in the title.
 
   // Rule 5: Title length must be 15-30 characters
   const titleLength = title.length;

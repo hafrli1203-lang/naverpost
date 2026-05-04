@@ -369,6 +369,8 @@ export default function Home() {
     if (!state.article || state.article.geo || isGeoLoading) return;
 
     let cancelled = false;
+    // Initial background GEO sync for newly generated/restored articles.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsGeoLoading(true);
     analyzeGeo(state.article)
       .then((geo) => {
@@ -503,6 +505,66 @@ export default function Home() {
     if (!state.selectedKeyword) return;
     await handleKeywordSelect(state.selectedKeyword);
   }, [state.selectedKeyword, handleKeywordSelect]);
+
+  const handleArticleWash = useCallback(async () => {
+    if (!state.article) return;
+
+    setIsLoading(true);
+    try {
+      const res = await fetch("/api/article/wash", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          article: state.article,
+          tone: articleOptions?.tone ?? state.article.washingTone ?? "standard",
+          charCount: articleOptions?.charCount ?? 2000,
+        }),
+      });
+      const json = await safeJson(res);
+      if (!res.ok || !json.success) {
+        throw new Error(json.error ?? "워싱에 실패했습니다.");
+      }
+
+      const washedArticle = json.data as ArticleContent;
+      setIsGeoLoading(true);
+      const geo = await analyzeGeo(washedArticle);
+      setIsGeoLoading(false);
+
+      setState((prev) => ({
+        ...prev,
+        article: geo ? { ...washedArticle, geo } : washedArticle,
+      }));
+      toast.success("워싱을 적용했습니다.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "워싱 중 오류가 발생했습니다.");
+    } finally {
+      setIsLoading(false);
+      setIsGeoLoading(false);
+    }
+  }, [analyzeGeo, articleOptions, setState, state.article]);
+
+  const handleRevertWash = useCallback(() => {
+    if (!state.article?.preWashContent) return;
+
+    setState((prev) => {
+      if (!prev.article?.preWashContent) return prev;
+      const { preWashContent, preWashValidation, preWashGeo, ...rest } = prev.article;
+      return {
+        ...prev,
+        article: {
+          ...rest,
+          content: preWashContent,
+          validation: preWashValidation ?? rest.validation,
+          geo: preWashGeo ?? rest.geo,
+          washingApplied: false,
+          preWashContent: undefined,
+          preWashValidation: undefined,
+          preWashGeo: undefined,
+        },
+      };
+    });
+    toast.success("워싱 전 본문으로 되돌렸습니다.");
+  }, [setState, state.article]);
 
   const handleManualEdit = useCallback(
     async (content: string) => {
@@ -949,6 +1011,8 @@ export default function Home() {
             onApprove={handleArticleApprove}
             onRewrite={handleArticleRewrite}
             onManualEdit={handleManualEdit}
+            onWash={handleArticleWash}
+            onRevertWash={handleRevertWash}
             onSave={handleSaveSession}
             onRefreshGeoAnalysis={refreshGeoForCurrentArticle}
             onLoadGeoPlan={() => (state.article ? loadGeoPlan(state.article) : Promise.resolve(null))}

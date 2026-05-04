@@ -277,6 +277,7 @@ export async function POST(request: NextRequest) {
       category: category.name,
       validation,
       brief,
+      washingTone: tone,
       citations: mergedCitations,
     };
 

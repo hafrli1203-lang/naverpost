@@ -2,7 +2,6 @@
 
 import { useMemo, useState } from "react";
 import {
-  AlertTriangle,
   Check,
   CheckCircle,
   ChevronDown,
@@ -110,9 +109,9 @@ function buildFinalReport(state: WorkflowState) {
   return {
     exposureLabel:
       geo && geo.score >= 85
-        ? "상위노출 가능성 높음"
+        ? "발행 준비 상태 좋음"
         : geo && geo.score >= 70
-          ? "상위노출 가능성 보통 이상"
+          ? "발행 전 점검 양호"
           : "발행 전 보강 권장",
     strengths: strengths.slice(0, 4),
     risks: risks.slice(0, 4),

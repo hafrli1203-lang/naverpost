@@ -103,7 +103,7 @@ function buildExposureSummary(option: KeywordOption): {
   if (!analysis) {
     return {
       tone: "caution",
-      message: "아직 분석이 부족한 후보예요. 일단 기본 규칙은 통과했어요.",
+      message: "검색 신호가 충분하지 않아 기본 규칙 위주로만 판단한 후보입니다.",
     };
   }
 
@@ -114,7 +114,7 @@ function buildExposureSummary(option: KeywordOption): {
     return {
       tone: "warning",
       message:
-        "네이버 상위에 비슷한 제목이 이미 있어요. 그대로 쓰면 노출 경쟁에서 밀릴 수 있으니 각도를 바꿔 보세요.",
+        "수집된 네이버 상위 제목과 겹치는 부분이 있습니다. 그대로 쓰기보다 각도를 바꾸는 편이 안전합니다.",
     };
   }
 
@@ -122,14 +122,14 @@ function buildExposureSummary(option: KeywordOption): {
     return {
       tone: "caution",
       message:
-        "본문을 길게 쓰면 설명이 반복될 수 있어요. 소주제를 다양하게 잡으면 좋아요.",
+        "본문 확장 소재가 부족할 수 있습니다. 소주제를 더 구체적으로 나누는 편이 좋습니다.",
     };
   }
 
   return {
     tone: "positive",
     message:
-      "본문을 편하게 길게 풀 수 있는 후보예요. 겹치는 상위 제목도 적어서 노출에 유리해요.",
+      "본문으로 풀 소재가 있고, 현재 수집된 제목 기준에서는 중복 신호가 낮은 후보입니다.",
   };
 }
 
@@ -142,12 +142,12 @@ function buildAnalysisLines(option: KeywordOption): string[] {
   lines.push(`주로 "${intent}" 검색 의도에 맞는 글이에요.`);
 
   if (analysis.externalSignals) {
-    lines.push("네이버 실시간 검색 흐름까지 확인했어요.");
+    lines.push("네이버 검색량·연관 신호를 함께 확인했습니다.");
   }
 
   const keywordOverlap = analysis.duplicateRisk?.keywordCombinationOverlap.length ?? 0;
   if (keywordOverlap > 0) {
-    lines.push("같은 키워드 조합을 쓰는 글이 이미 많아요. 서브 키워드를 바꿔도 좋아요.");
+    lines.push("같은 키워드 조합 신호가 있어 서브 키워드 조정 여지가 있습니다.");
   }
 
   return lines;
@@ -262,9 +262,15 @@ export function KeywordOptions({
       <div className="space-y-1 text-center">
         <h2 className="text-xl font-semibold">제목과 키워드 후보</h2>
         <p className="text-sm text-muted-foreground">
-          각 제목이 어떤 독자를 위한 글인지, 네이버 상위 제목과 겹치지 않는지 한눈에 볼 수 있어요.
+          검색량, 제목 중복 신호, 본문 확장 가능성을 함께 보고 후보를 고릅니다.
         </p>
       </div>
+
+      {isLoading && (
+        <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+          본문 생성과 기본 검수를 진행 중입니다. 워싱은 본문 확인 화면에서 직접 실행할 수 있습니다.
+        </div>
+      )}
 
       <RadioGroup
         value={selectedIndex}
@@ -282,7 +288,7 @@ export function KeywordOptions({
           return (
             <Label key={idx} htmlFor={`keyword-${idx}`} className="cursor-pointer">
               <Card
-                className={`transition-all duration-200 ${
+                className={`min-h-[204px] transition-all duration-200 ${
                   isSelected
                     ? "border-blue-500 shadow-md shadow-blue-100 ring-1 ring-blue-500"
                     : "border-border hover:border-blue-300"
@@ -303,7 +309,7 @@ export function KeywordOptions({
                             prev ? { ...prev, title: event.target.value } : prev
                           )
                         }
-                        className="h-8 text-base font-semibold"
+                        className="h-10 text-base font-semibold"
                         placeholder="제목을 수정하세요"
                         onClick={(event) => event.stopPropagation()}
                       />
@@ -360,7 +366,7 @@ export function KeywordOptions({
                   </div>
                 </CardHeader>
 
-                <CardContent className="pl-10 pt-0">
+                <CardContent className="min-h-[140px] pl-10 pt-0">
                   {isEditing && editDraft ? (
                     <div className="space-y-2">
                       <div className="flex items-center gap-2">
@@ -449,7 +455,7 @@ export function KeywordOptions({
                                 variant="secondary"
                                 className="bg-rose-100 text-rose-700 hover:bg-rose-100"
                               >
-                                상위 제목과 유사
+                                제목 중복 신호
                               </Badge>
                             )}
                           </div>

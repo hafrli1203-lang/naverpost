@@ -10,14 +10,223 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { Shop } from "@/types";
 
+type ShopForm = {
+  name: string;
+  blogId: string;
+  address: string;
+  naverPlaceUrl: string;
+  homepageUrl: string;
+  brandBannerText: string;
+  parkingInfo: string;
+  businessHours: string;
+  mainProducts: string;
+  serviceStrengths: string;
+  visitChecklist: string;
+  avoidClaims: string;
+};
+
+const EMPTY_FORM: ShopForm = {
+  name: "",
+  blogId: "",
+  address: "",
+  naverPlaceUrl: "",
+  homepageUrl: "",
+  brandBannerText: "",
+  parkingInfo: "",
+  businessHours: "",
+  mainProducts: "",
+  serviceStrengths: "",
+  visitChecklist: "",
+  avoidClaims: "",
+};
+
+function listToText(items?: string[]): string {
+  return items?.join("\n") ?? "";
+}
+
+function shopToForm(shop: Shop): ShopForm {
+  return {
+    name: shop.name,
+    blogId: shop.blogId,
+    address: shop.address ?? "",
+    naverPlaceUrl: shop.naverPlaceUrl ?? "",
+    homepageUrl: shop.homepageUrl ?? "",
+    brandBannerText: shop.brandBannerText ?? "",
+    parkingInfo: shop.parkingInfo ?? "",
+    businessHours: shop.businessHours ?? "",
+    mainProducts: listToText(shop.mainProducts),
+    serviceStrengths: listToText(shop.serviceStrengths),
+    visitChecklist: listToText(shop.visitChecklist),
+    avoidClaims: listToText(shop.avoidClaims),
+  };
+}
+
+function textToList(value: string): string[] | undefined {
+  const items = value
+    .split(/\r?\n|,/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return items.length > 0 ? items : undefined;
+}
+
+function formToPayload(form: ShopForm) {
+  return {
+    name: form.name.trim(),
+    blogId: form.blogId.trim(),
+    address: form.address.trim(),
+    naverPlaceUrl: form.naverPlaceUrl.trim(),
+    homepageUrl: form.homepageUrl.trim(),
+    brandBannerText: form.brandBannerText.trim(),
+    parkingInfo: form.parkingInfo.trim(),
+    businessHours: form.businessHours.trim(),
+    mainProducts: textToList(form.mainProducts) ?? [],
+    serviceStrengths: textToList(form.serviceStrengths) ?? [],
+    visitChecklist: textToList(form.visitChecklist) ?? [],
+    avoidClaims: textToList(form.avoidClaims) ?? [],
+  };
+}
+
+function ShopDetailFields({
+  form,
+  onChange,
+}: {
+  form: ShopForm;
+  onChange: (key: keyof ShopForm, value: string) => void;
+}) {
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="space-y-1.5">
+          <Label>상점명</Label>
+          <Input value={form.name} onChange={(e) => onChange("name", e.target.value)} />
+        </div>
+        <div className="space-y-1.5">
+          <Label>네이버 블로그 ID</Label>
+          <Input value={form.blogId} onChange={(e) => onChange("blogId", e.target.value)} />
+        </div>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="space-y-1.5">
+          <Label>매장 주소</Label>
+          <Input
+            value={form.address}
+            onChange={(e) => onChange("address", e.target.value)}
+            placeholder="네이버 플레이스와 동일한 주소"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label>네이버 플레이스 링크</Label>
+          <Input
+            value={form.naverPlaceUrl}
+            onChange={(e) => onChange("naverPlaceUrl", e.target.value)}
+            placeholder="https://naver.me/..."
+          />
+        </div>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="space-y-1.5">
+          <Label>홈페이지 링크</Label>
+          <Input
+            value={form.homepageUrl}
+            onChange={(e) => onChange("homepageUrl", e.target.value)}
+            placeholder="https://..."
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label>하단 안내 문구</Label>
+          <Input
+            value={form.brandBannerText}
+            onChange={(e) => onChange("brandBannerText", e.target.value)}
+            placeholder="예: 네이버 플레이스에서 위치 확인"
+          />
+        </div>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="space-y-1.5">
+          <Label>운영시간</Label>
+          <Input
+            value={form.businessHours}
+            onChange={(e) => onChange("businessHours", e.target.value)}
+            placeholder="예: 평일 10:00~20:00"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label>주차/방문 정보</Label>
+          <Input
+            value={form.parkingInfo}
+            onChange={(e) => onChange("parkingInfo", e.target.value)}
+            placeholder="예: 인근 공영주차장 이용"
+          />
+        </div>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <TextareaField
+          label="주력 품목/서비스"
+          value={form.mainProducts}
+          onChange={(value) => onChange("mainProducts", value)}
+          placeholder={"누진다초점\n안경렌즈 교체\n안경피팅"}
+        />
+        <TextareaField
+          label="현장 확인/관리 항목"
+          value={form.serviceStrengths}
+          onChange={(value) => onChange("serviceStrengths", value)}
+          placeholder={"도수 확인\n피팅 조정\n기존 안경 상태 확인"}
+        />
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <TextareaField
+          label="방문 전 확인 포인트"
+          value={form.visitChecklist}
+          onChange={(value) => onChange("visitChecklist", value)}
+          placeholder={"현재 쓰는 안경 지참\n불편한 거리 메모\n운전·독서·컴퓨터 중 불편한 상황 확인"}
+        />
+        <TextareaField
+          label="매장별 금지 표현"
+          value={form.avoidClaims}
+          onChange={(value) => onChange("avoidClaims", value)}
+          placeholder={"최고\n완벽\n치료\n진단"}
+        />
+      </div>
+    </div>
+  );
+}
+
+function TextareaField({
+  label,
+  value,
+  onChange,
+  placeholder,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <Label>{label}</Label>
+      <textarea
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="min-h-24 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+      />
+      <p className="text-xs text-muted-foreground">줄바꿈 또는 쉼표로 여러 항목을 입력할 수 있습니다.</p>
+    </div>
+  );
+}
+
 export default function AdminPage() {
   const [shops, setShops] = useState<Shop[]>([]);
   const [isAdding, setIsAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [newName, setNewName] = useState("");
-  const [newBlogId, setNewBlogId] = useState("");
-  const [editName, setEditName] = useState("");
-  const [editBlogId, setEditBlogId] = useState("");
+  const [newForm, setNewForm] = useState<ShopForm>(EMPTY_FORM);
+  const [editForm, setEditForm] = useState<ShopForm>(EMPTY_FORM);
 
   const loadShops = useCallback(async () => {
     try {
@@ -32,11 +241,13 @@ export default function AdminPage() {
   }, []);
 
   useEffect(() => {
+    // Initial admin data load; fetch completion updates the shop list.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadShops();
   }, [loadShops]);
 
   async function handleAdd() {
-    if (!newName.trim() || !newBlogId.trim()) {
+    if (!newForm.name.trim() || !newForm.blogId.trim()) {
       toast.error("상점명과 네이버 블로그 ID를 입력해 주세요.");
       return;
     }
@@ -45,10 +256,7 @@ export default function AdminPage() {
       const res = await fetch("/api/shops", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: newName.trim(),
-          blogId: newBlogId.trim(),
-        }),
+        body: JSON.stringify(formToPayload(newForm)),
       });
       const json = (await res.json()) as { success: boolean; data: Shop[]; error?: string };
       if (!json.success) {
@@ -56,8 +264,7 @@ export default function AdminPage() {
       }
 
       setShops(json.data);
-      setNewName("");
-      setNewBlogId("");
+      setNewForm(EMPTY_FORM);
       setIsAdding(false);
       toast.success("상점을 추가했습니다.");
     } catch (err) {
@@ -66,7 +273,7 @@ export default function AdminPage() {
   }
 
   async function handleUpdate(shopId: string) {
-    if (!editName.trim() || !editBlogId.trim()) {
+    if (!editForm.name.trim() || !editForm.blogId.trim()) {
       toast.error("상점명과 네이버 블로그 ID를 입력해 주세요.");
       return;
     }
@@ -75,10 +282,7 @@ export default function AdminPage() {
       const res = await fetch(`/api/shops/${shopId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: editName.trim(),
-          blogId: editBlogId.trim(),
-        }),
+        body: JSON.stringify(formToPayload(editForm)),
       });
       const json = (await res.json()) as { success: boolean; data: Shop[]; error?: string };
       if (!json.success) {
@@ -114,8 +318,7 @@ export default function AdminPage() {
 
   function startEdit(shop: Shop) {
     setEditingId(shop.id);
-    setEditName(shop.name);
-    setEditBlogId(shop.blogId);
+    setEditForm(shopToForm(shop));
   }
 
   return (
@@ -149,26 +352,10 @@ export default function AdminPage() {
               <CardTitle className="text-base">새 상점 등록</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <Label htmlFor="new-name">상점명</Label>
-                  <Input
-                    id="new-name"
-                    placeholder="예: 안경원 본점"
-                    value={newName}
-                    onChange={(e) => setNewName(e.target.value)}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="new-blogid">네이버 블로그 ID</Label>
-                  <Input
-                    id="new-blogid"
-                    placeholder="예: top50jn"
-                    value={newBlogId}
-                    onChange={(e) => setNewBlogId(e.target.value)}
-                  />
-                </div>
-              </div>
+              <ShopDetailFields
+                form={newForm}
+                onChange={(key, value) => setNewForm((prev) => ({ ...prev, [key]: value }))}
+              />
               <p className="text-xs text-muted-foreground">
                 블로그 ID는 네이버 블로그 URL의 마지막 값입니다. 예: <code>blog.naver.com/top50jn</code>
               </p>
@@ -178,8 +365,7 @@ export default function AdminPage() {
                   size="sm"
                   onClick={() => {
                     setIsAdding(false);
-                    setNewName("");
-                    setNewBlogId("");
+                    setNewForm(EMPTY_FORM);
                   }}
                 >
                   <X className="mr-1 h-4 w-4" />
@@ -212,19 +398,10 @@ export default function AdminPage() {
               <CardContent className="py-4">
                 {editingId === shop.id ? (
                   <div className="space-y-3">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-1.5">
-                        <Label>상점명</Label>
-                        <Input value={editName} onChange={(e) => setEditName(e.target.value)} />
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label>네이버 블로그 ID</Label>
-                        <Input
-                          value={editBlogId}
-                          onChange={(e) => setEditBlogId(e.target.value)}
-                        />
-                      </div>
-                    </div>
+                    <ShopDetailFields
+                      form={editForm}
+                      onChange={(key, value) => setEditForm((prev) => ({ ...prev, [key]: value }))}
+                    />
                     <div className="flex justify-end gap-2">
                       <Button variant="outline" size="sm" onClick={() => setEditingId(null)}>
                         <X className="mr-1 h-4 w-4" />

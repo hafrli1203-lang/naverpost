@@ -5,6 +5,16 @@ export interface Shop {
   name: string;
   blogId: string;
   rssUrl: string;
+  address?: string;
+  naverPlaceUrl?: string;
+  homepageUrl?: string;
+  brandBannerText?: string;
+  parkingInfo?: string;
+  businessHours?: string;
+  mainProducts?: string[];
+  serviceStrengths?: string[];
+  visitChecklist?: string[];
+  avoidClaims?: string[];
 }
 
 export interface Category {
@@ -296,6 +306,11 @@ export interface ArticleContent {
   category: string;
   validation: ValidationResult;
   brief?: ArticleBrief;
+  washingApplied?: boolean;
+  washingTone?: string;
+  preWashContent?: string;
+  preWashValidation?: ValidationResult;
+  preWashGeo?: GeoAnalysisResult;
   geo?: GeoAnalysisResult;
   preGeoContent?: string;
   preGeoValidation?: ValidationResult;
