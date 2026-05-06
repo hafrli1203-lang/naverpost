@@ -4,7 +4,7 @@ import { validateContent } from "@/lib/validation/contentValidator";
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { content } = body as { content: string };
+    const { content, tone } = body as { content: string; tone?: string };
 
     if (!content) {
       return NextResponse.json(
@@ -13,7 +13,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const validation = await validateContent(content);
+    const validation = await validateContent(
+      content,
+      tone
+        ? {
+            mainKeyword: "",
+            subKeyword1: "",
+            subKeyword2: "",
+            tone,
+          }
+        : undefined
+    );
 
     return NextResponse.json({ success: true, data: validation });
   } catch (err) {

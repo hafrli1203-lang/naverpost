@@ -84,6 +84,10 @@ export interface LanguageRiskAnalysis {
   commercial: string[];
   emphasis: string[];
   advertising: string[];
+  aiCliches?: string[];
+  toneMismatches?: string[];
+  weakHooks?: string[];
+  mechanicalSignals?: string[];
   issues: AnalysisIssue[];
 }
 
@@ -114,6 +118,15 @@ export interface KeywordOptionAnalysis {
   languageRisk?: LanguageRiskAnalysis;
   structure?: StructureActivationAnalysis;
   duplicateRisk?: DuplicatePatternAnalysis;
+  competitorTitleSimilarity?: {
+    percent: number;
+    risk?: "low" | "medium" | "high";
+    matchedTitle?: string;
+    sharedTokens?: string[];
+    structureOverlap?: boolean;
+    endingOverlap?: boolean;
+    reason?: string;
+  };
   externalSignals?: ExternalSearchSignals;
   searchIntentAxis?: string;
   bodyExpansionFit?: {
@@ -254,12 +267,7 @@ export interface ArticleBrief {
   topic: string;
   articleType: "info" | "promo";
   charCount: 1000 | 1500 | 2000 | 2500;
-  tone:
-    | "standard"
-    | "friendly"
-    | "casual"
-    | "business"
-    | "expert";
+  tone: "standard" | "friendly" | "casual";
   contentSubtype?: "blog" | "event" | "season" | "short";
   shop: Shop;
   category: Category;
@@ -316,6 +324,7 @@ export interface ArticleContent {
   preGeoValidation?: ValidationResult;
   preGeoGeo?: GeoAnalysisResult;
   citations?: ResearchCitationEntry[];
+  generationNote?: string;
 }
 
 // ===== Image Types =====

@@ -165,6 +165,10 @@ export function analyzeNetworkDuplicateRisk(params: {
   const sameStoreMatches = detectSharedTitlePattern(option.title, forbiddenList);
   const crossBlogMatches = detectSharedTitlePattern(option.title, referenceList);
   const competitorMatches = detectSharedTitlePattern(option.title, competitorList);
+  const sameStoreKeywordCombinationOverlap = detectKeywordCombinationOverlap(
+    option,
+    forbiddenList
+  );
   const keywordCombinationOverlap = detectKeywordCombinationOverlap(
     option,
     referenceList
@@ -210,6 +214,16 @@ export function analyzeNetworkDuplicateRisk(params: {
     });
   }
 
+  if (sameStoreKeywordCombinationOverlap.length > 0) {
+    issues.push({
+      code: "same-store-keyword-combination-overlap",
+      label: "같은 매장 키워드 조합 중복",
+      reason: `같은 매장 기존 제목에서 같은 키워드 조합이 감지되었습니다: ${sameStoreKeywordCombinationOverlap[0]}`,
+      severity: "high",
+      source: "rss-history",
+    });
+  }
+
   if (keywordCombinationOverlap.length > 0) {
     issues.push({
       code: "cross-blog-keyword-combination-overlap",
@@ -237,6 +251,7 @@ export function analyzeNetworkDuplicateRisk(params: {
       ...competitorMatches,
     ].slice(0, 6),
     keywordCombinationOverlap: [
+      ...sameStoreKeywordCombinationOverlap,
       ...keywordCombinationOverlap,
       ...competitorKeywordCombinationOverlap,
     ].slice(0, 6),

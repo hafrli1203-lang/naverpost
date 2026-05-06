@@ -27,11 +27,7 @@ const TONES_INFO = [
   { value: "casual", label: "캐주얼(대화체)" },
 ];
 
-const TONES_PROMO = [
-  { value: "business", label: "비즈니스형" },
-  { value: "friendly", label: "친근형" },
-  { value: "expert", label: "전문가형" },
-];
+const TONES_PROMO = TONES_INFO;
 
 const CHAR_COUNTS = [1000, 1500, 2000, 2500];
 
@@ -81,11 +77,6 @@ export function ShopSelector({ shops, onStart, isLoading }: ShopSelectorProps) {
   const showCharCount = articleType === "info" || !FIXED_LENGTH_SUBTYPES.includes(promoSubtype);
   const showEventFields = articleType === "promo" && promoSubtype === "event";
   const showPromoSubtype = articleType === "promo";
-
-  // Reset tone when article type changes
-  useEffect(() => {
-    setTone(articleType === "info" ? "standard" : "business");
-  }, [articleType]);
 
   // 매장 + 카테고리 선택 시 자동 주제 추천
   useEffect(() => {

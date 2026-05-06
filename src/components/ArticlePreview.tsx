@@ -7,8 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { GeoOptimizationDialog } from "@/components/GeoOptimizationDialog";
-import { ArticleContent, GeoAnalysisResult, GeoOptimizationResult, GeoRecommendation } from "@/types";
+import { ArticleContent } from "@/types";
 import {
   CheckCircle,
   AlertTriangle,
@@ -27,20 +26,8 @@ interface ArticlePreviewProps {
   onApprove: () => void;
   onRewrite: () => void;
   onManualEdit: (content: string) => void | Promise<void>;
-  onWash?: () => void | Promise<void>;
-  onRevertWash?: () => void;
   onSave?: () => void;
-  onRefreshGeoAnalysis?: () => Promise<GeoAnalysisResult | null>;
-  onLoadGeoPlan?: () => Promise<unknown | null>;
-  onApplyGeo: (
-    selectedRecommendationIds: GeoRecommendation["id"][]
-  ) => Promise<GeoOptimizationResult | null>;
-  onApplyAdvancedGeo?: (
-    selectedRecommendationIds: GeoRecommendation["id"][]
-  ) => Promise<GeoOptimizationResult | null>;
-  onRevertGeo?: () => void;
   isLoading: boolean;
-  isGeoLoading?: boolean;
   targetCharCount?: number;
 }
 
@@ -181,16 +168,8 @@ export function ArticlePreview({
   onApprove,
   onRewrite,
   onManualEdit,
-  onWash,
-  onRevertWash,
   onSave,
-  onRefreshGeoAnalysis,
-  onLoadGeoPlan,
-  onApplyGeo,
-  onApplyAdvancedGeo,
-  onRevertGeo,
   isLoading,
-  isGeoLoading = false,
   targetCharCount = 2000,
 }: ArticlePreviewProps) {
   const [isEditing, setIsEditing] = useState(false);
@@ -373,22 +352,6 @@ export function ArticlePreview({
 
               <Separator />
 
-              {article.washingApplied && (
-                <>
-                  <div className="flex items-start gap-2 text-blue-600">
-                    <CheckCircle className="w-4 h-4 mt-0.5 shrink-0" />
-                    <span className="text-sm">
-                      워싱 적용 완료
-                      {article.washingTone ? ` (${article.washingTone})` : ""}
-                    </span>
-                  </div>
-                  <p className="text-xs leading-5 text-muted-foreground">
-                    수동 워싱을 적용했습니다. 필요하면 아래 버튼으로 워싱 전 본문으로 되돌릴 수 있습니다.
-                  </p>
-                  <Separator />
-                </>
-              )}
-
               {/* Character count */}
               <div className="space-y-1">
                 <div className="flex justify-between text-xs text-muted-foreground">
@@ -444,39 +407,6 @@ export function ArticlePreview({
                   </Badge>
                 </div>
               </div>
-
-              {article.geo && (
-                <>
-                  <Separator />
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <p className="text-xs font-medium text-muted-foreground">GEO 점수</p>
-                      <span className="text-sm font-semibold text-teal-600">
-                        {article.geo.score} / 100
-                      </span>
-                    </div>
-                    <p className="text-xs leading-5 text-muted-foreground">{article.geo.summary}</p>
-                    <div className="space-y-2">
-                      {article.geo.categories.map((item) => (
-                        <div key={item.key} className="space-y-1">
-                          <div className="flex justify-between text-[11px] text-muted-foreground">
-                            <span>{item.label}</span>
-                            <span>
-                              {item.score}/{item.maxScore}
-                            </span>
-                          </div>
-                          <div className="h-1.5 rounded-full bg-slate-100">
-                            <div
-                              className="h-1.5 rounded-full bg-teal-500"
-                              style={{ width: `${Math.round((item.score / item.maxScore) * 100)}%` }}
-                            />
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </>
-              )}
 
               {article.brief?.competitorMorphology?.status === "available" && (
                 <>
@@ -579,42 +509,6 @@ export function ArticlePreview({
             <Save className="w-4 h-4" />
             저장
           </Button>
-        )}
-        <GeoOptimizationDialog
-          article={article}
-          isBusy={isLoading || isGeoLoading}
-          onRefreshAnalysis={onRefreshGeoAnalysis}
-          onLoadPlan={onLoadGeoPlan}
-          onApply={onApplyGeo}
-          onApplyAdvanced={onApplyAdvancedGeo}
-          onRevert={onRevertGeo}
-        />
-        {article.washingApplied && article.preWashContent && onRevertWash ? (
-          <Button
-            variant="outline"
-            onClick={onRevertWash}
-            disabled={isLoading}
-            className="gap-2 border-slate-300 text-slate-600 hover:bg-slate-50 hover:text-slate-700"
-          >
-            <RotateCcw className="w-4 h-4" />
-            워싱 전으로
-          </Button>
-        ) : (
-          onWash && (
-            <Button
-              variant="outline"
-              onClick={onWash}
-              disabled={isLoading}
-              className="gap-2 border-blue-300 text-blue-600 hover:bg-blue-50 hover:text-blue-700"
-            >
-              {isLoading ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <PenLine className="w-4 h-4" />
-              )}
-              워싱하기
-            </Button>
-          )
         )}
         <Button
           variant="outline"

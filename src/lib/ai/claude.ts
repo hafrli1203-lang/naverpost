@@ -1,10 +1,9 @@
 import type { KeywordOption } from "@/types";
 import { runClaude } from "./cli/claudeCli";
 
-const ARTICLE_MODEL = "claude-opus-4-7";
+const ARTICLE_MODEL = "claude-sonnet-4-6";
 const EDIT_MODEL = "claude-sonnet-4-6";
 const PROMPT_MODEL = "claude-sonnet-4-6";
-const GEO_MODEL = "claude-sonnet-4-6";
 
 export async function generateKeywords(
   prompt: string,
@@ -29,19 +28,12 @@ export async function generateKeywords(
   }));
 }
 
-export async function writeArticle(prompt: string): Promise<string> {
-  return runClaude({ prompt, model: ARTICLE_MODEL });
+export async function writeArticle(prompt: string, timeoutMs = 220_000): Promise<string> {
+  return runClaude({ prompt, model: ARTICLE_MODEL, timeoutMs });
 }
 
-export async function reviseArticle(prompt: string): Promise<string> {
-  return runClaude({ prompt, model: EDIT_MODEL });
-}
-
-export async function rewriteArticleForGeo(
-  prompt: string,
-  timeoutMs = 180_000
-): Promise<string> {
-  return runClaude({ prompt, model: GEO_MODEL, timeoutMs });
+export async function reviseArticle(prompt: string, timeoutMs = 160_000): Promise<string> {
+  return runClaude({ prompt, model: EDIT_MODEL, timeoutMs });
 }
 
 export async function generateImagePrompts(prompt: string): Promise<string> {

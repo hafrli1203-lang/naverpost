@@ -34,10 +34,12 @@ function findProhibitedTitleTerms(option: KeywordOption): string[] {
  * 1. All keywords must be exactly 2-word combinations
  * 2. Main keyword's first word must appear in both sub keywords
  * 3. Main keyword must appear verbatim in the title
- * 4. Sub keywords are body expansion hints; they do not all need to appear in the title
+ * 4. Sub keywords are body expansion hints. At least one sub-keyword core
+ *    should be visible in the title; forcing both makes titles read like
+ *    keyword lists.
  * 5. Title length must be 15-30 characters
  * 6. Title must not overlap with forbiddenList
- * 7. Title must not share same perspective as referenceList
+ * 7. Cross-store perspective overlap is handled by networkDuplicateAnalyzer.
  */
 export function validateKeywordOption(
   option: KeywordOption,
@@ -97,8 +99,19 @@ export function validateKeywordOption(
     });
   }
 
-  // Rule 4: Sub keywords are used to guide the body. Forcing both into the title
-  // creates unnatural titles, so only the main keyword is mandatory in the title.
+  // Rule 4: Sub keywords guide body expansion. The title should expose at
+  // least one core subtopic, while the second subtopic can be expanded in the
+  // body. Requiring both cores caused mechanical titles such as "A B와 C 확인".
+  const sub1Core = sub1Words[1];
+  const sub2Core = sub2Words[1];
+  const hasSub1Core = Boolean(sub1Core && (title.includes(sub1Core) || title.includes(subKeyword1)));
+  const hasSub2Core = Boolean(sub2Core && (title.includes(sub2Core) || title.includes(subKeyword2)));
+  if (sub1Core && sub2Core && !hasSub1Core && !hasSub2Core) {
+    failures.push({
+      rule: "rule4",
+      reason: `제목에서 서브 키워드 "${subKeyword1}" 또는 "${subKeyword2}" 중 하나의 의미는 확인되어야 합니다`,
+    });
+  }
 
   // Rule 5: Title length must be 15-30 characters
   const titleLength = title.length;
@@ -117,7 +130,8 @@ export function validateKeywordOption(
     });
   }
 
-  // Rule 6: Title must not overlap with forbiddenList (same topic = same store)
+  // Rule 6: Same-store duplicate protection. The target blog must not reuse the
+  // same title or the same main keyword/material from its own history.
   const titleNormalized = title.replace(/\s/g, "");
   for (const forbidden of forbiddenList) {
     const forbiddenNormalized = forbidden.replace(/\s/g, "");
@@ -132,20 +146,15 @@ export function validateKeywordOption(
       break;
     }
   }
-
-  // Rule 7: Title must not share same perspective as referenceList
-  // Check if main keyword appears in reference titles (same keyword = same perspective risk)
-  const duplicatePerspective = referenceList.some((refTitle) => {
-    if (!refTitle) return false;
-    // Same main keyword in another store's title implies same perspective
-    return refTitle.includes(mainKeyword);
-  });
-  if (duplicatePerspective) {
+  const sameStoreMainKeyword = forbiddenList.some((forbidden) => forbidden.includes(mainKeyword));
+  if (sameStoreMainKeyword) {
     failures.push({
-      rule: "rule7",
-      reason: `메인 키워드 "${mainKeyword}"는 다른 매장의 글과 관점이 겹칩니다 (참고 목록 확인 필요)`,
+      rule: "rule6",
+      reason: `같은 매장 기존 글에 메인 키워드 "${mainKeyword}"가 이미 사용되었습니다`,
     });
   }
+
+  void referenceList;
 
   return {
     isValid: failures.length === 0,

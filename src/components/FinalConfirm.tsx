@@ -29,7 +29,6 @@ interface FinalConfirmProps {
 function buildFinalReport(state: WorkflowState) {
   const article = state.article;
   const keyword = state.selectedKeyword;
-  const geo = article?.geo;
   const competitor = article?.brief?.competitorMorphology;
 
   if (!article || !keyword) {
@@ -39,24 +38,6 @@ function buildFinalReport(state: WorkflowState) {
   const strengths: string[] = [];
   const risks: string[] = [];
   const actions: string[] = [];
-
-  if (geo) {
-    if (geo.score >= 85) {
-      strengths.push(`GEO 점수 ${geo.score}점으로 구조와 신뢰성 상태가 좋습니다.`);
-    } else if (geo.score >= 70) {
-      strengths.push(`GEO 점수 ${geo.score}점으로 기본 구조는 안정적입니다.`);
-      actions.push("FAQ, 비교표, 출처 블록 중 빠진 항목이 있으면 한 번 더 보강하는 편이 좋습니다.");
-    } else {
-      risks.push(`GEO 점수 ${geo.score}점으로 발행 전 구조 보강이 더 필요합니다.`);
-      actions.push("GEO 최적화를 다시 열어 질문형 소제목, FAQ, 출처 블록을 우선 적용하세요.");
-    }
-  }
-
-  for (let i = 0; i < actions.length; i += 1) {
-    if (/FAQ|질문형|핵심 답변/.test(actions[i])) {
-      actions[i] = "본문 흐름은 유지하되 표, 근거 문장, 정보 기준 위주로만 보강하는 편이 안전합니다.";
-    }
-  }
 
   if (article.validation.revisionReasons.length === 0) {
     strengths.push("본문 검증에서 큰 수정 사유가 잡히지 않았습니다.");
@@ -108,9 +89,9 @@ function buildFinalReport(state: WorkflowState) {
 
   return {
     exposureLabel:
-      geo && geo.score >= 85
+      risks.length === 0
         ? "발행 준비 상태 좋음"
-        : geo && geo.score >= 70
+        : risks.length <= 2
           ? "발행 전 점검 양호"
           : "발행 전 보강 권장",
     strengths: strengths.slice(0, 4),
@@ -169,7 +150,7 @@ export function FinalConfirm({ state, onStartOver }: FinalConfirmProps) {
           <div className="space-y-1">
             <p className="font-medium text-green-800">발행 가능한 상태입니다.</p>
             <p className="text-sm text-green-700">
-              제목, 본문, 이미지, GEO 구조를 한 흐름으로 확인할 수 있습니다. 아래 리포트만 마지막으로
+              제목, 본문, 이미지 흐름을 한눈에 확인할 수 있습니다. 아래 리포트만 마지막으로
               보고 바로 발행하면 됩니다.
             </p>
           </div>
@@ -274,13 +255,6 @@ export function FinalConfirm({ state, onStartOver }: FinalConfirmProps) {
               {images.filter((image) => image.status === "success").length}장 준비됨
             </span>
           </div>
-          {article?.geo && (
-            <div className="flex items-center gap-3">
-              <TrendingUp className="h-4 w-4 shrink-0 text-muted-foreground" />
-              <span className="w-16 shrink-0 text-sm text-muted-foreground">GEO</span>
-              <span className="text-sm font-medium">{article.geo.score}점</span>
-            </div>
-          )}
         </CardContent>
       </Card>
 

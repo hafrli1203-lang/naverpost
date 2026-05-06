@@ -128,7 +128,7 @@ export function buildArticleBrief(params: {
   topic: string;
   articleType: "info" | "promo";
   charCount: 1000 | 1500 | 2000 | 2500;
-  tone: "standard" | "friendly" | "casual" | "business" | "expert";
+  tone: "standard" | "friendly" | "casual";
   contentSubtype?: "blog" | "event" | "season" | "short";
   researchData: string;
   sameStoreHistory: string[];

@@ -1,10 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { writeArticle, reviseArticle } from "@/lib/ai/claude";
 import { researchKeyword } from "@/lib/ai/perplexity";
-import {
-  extractCitationsFromContent,
-  mergeCitations,
-} from "@/lib/ai/citationExtractor";
 import { buildArticlePrompt } from "@/lib/prompts/articlePrompt";
 import { buildPromoPrompt } from "@/lib/prompts/promoPrompt";
 import { buildRevisionPrompt } from "@/lib/prompts/revisionPrompt";
@@ -18,9 +14,9 @@ import type { KeywordOption, ArticleContent } from "@/types";
 
 export const maxDuration = 300;
 
-const MAX_REVISION_ATTEMPTS = 2;
-const RESEARCH_TIMEOUT_MS = 45_000;
-const COMPETITOR_ANALYSIS_TIMEOUT_MS = 45_000;
+const MAX_REVISION_ATTEMPTS = 1;
+const RESEARCH_TIMEOUT_MS = 12_000;
+const COMPETITOR_ANALYSIS_TIMEOUT_MS = 12_000;
 
 function withTimeout<T>(
   promise: Promise<T>,
@@ -49,6 +45,35 @@ function sanitizeArticleContent(content: string): string {
     .replace(/문의해주세요/g, "확인해 주세요")
     .replace(/문의해주시/g, "확인해 주시")
     .replace(/문의/g, "확인");
+}
+
+function stripLeadingTitleLine(content: string, title: string): string {
+  const lines = content.replace(/^\uFEFF/, "").split(/\r?\n/);
+  const firstMeaningfulIndex = lines.findIndex((line) => line.trim().length > 0);
+  if (firstMeaningfulIndex === -1) return content.trim();
+
+  const firstLine = lines[firstMeaningfulIndex].trim().replace(/^#+\s*/, "");
+  if (firstLine === title.trim()) {
+    lines.splice(firstMeaningfulIndex, 1);
+    return lines.join("\n").replace(/^\s+/, "").trim();
+  }
+
+  return content.trim();
+}
+
+function needsHardRevision(
+  validation: Awaited<ReturnType<typeof validateContent>>,
+  charOutOfRange: boolean
+): boolean {
+  return (
+    validation.prohibitedWords.length > 0 ||
+    validation.cautionPhrases.length > 0 ||
+    validation.overusedWords.length > 0 ||
+    !validation.hasTable ||
+    validation.missingKeywords.length > 0 ||
+    (validation.structure?.missingTitleKeywordCoverage.length ?? 0) > 0 ||
+    charOutOfRange
+  );
 }
 
 export async function POST(request: NextRequest) {
@@ -114,7 +139,6 @@ export async function POST(request: NextRequest) {
       }
     );
     const researchData = researchResponse.text;
-    const researchCitations = researchResponse.result.citations;
 
     let sameStoreHistory: string[] = [];
     let crossBlogTitles: string[] = [];
@@ -181,7 +205,7 @@ export async function POST(request: NextRequest) {
       topic: topic || keyword.title,
       articleType,
       charCount,
-      tone,
+      tone: tone as "standard" | "friendly" | "casual",
       contentSubtype,
       researchData,
       sameStoreHistory,
@@ -223,10 +247,24 @@ export async function POST(request: NextRequest) {
             tone: tone as "standard" | "friendly" | "casual" | undefined,
             externalReference,
             brief,
-            citations: researchCitations,
           });
 
-    let content = sanitizeArticleContent(await writeArticle(prompt));
+    let rawContent: string;
+    try {
+      rawContent = await writeArticle(prompt, 180_000);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      if (!/timed out|timeout/i.test(message)) throw error;
+      rawContent = await writeArticle(
+        `${prompt}\n\n[재시도 지시]\n이전 시도가 시간 초과되었습니다. 위 조건은 유지하되 더 간결하게 작성하세요. 본문만 출력하세요.`,
+        180_000
+      );
+    }
+
+    let content = stripLeadingTitleLine(
+      sanitizeArticleContent(rawContent),
+      keyword.title
+    );
     const keywordsForValidation = {
       title: keyword.title,
       mainKeyword: keyword.mainKeyword,
@@ -235,20 +273,17 @@ export async function POST(request: NextRequest) {
       forbiddenList: sameStoreHistory,
       referenceList: crossBlogTitles,
     };
-    let validation = await validateContent(content, keywordsForValidation);
+    let validation = await validateContent(content, keywordsForValidation, {
+      fast: true,
+    });
     let charOutOfRange = isCharCountOutOfRange(content, charCount);
 
     let revisionCount = 0;
+    let revisionError: string | undefined;
     while (
-      (validation.needsRevision || charOutOfRange) &&
+      needsHardRevision(validation, charOutOfRange) &&
       revisionCount < MAX_REVISION_ATTEMPTS
     ) {
-      const extraProblems = charOutOfRange
-        ? [
-            `- 글자수가 ${charCount}자 ±10% 범위를 벗어났습니다 (현재 ${content.length}자). 의미를 유지하며 분량을 맞추세요.`,
-          ]
-        : [];
-
       const revisionPrompt = buildRevisionPrompt({
         originalContent: content,
         validation,
@@ -256,16 +291,29 @@ export async function POST(request: NextRequest) {
         subKeyword1: keyword.subKeyword1,
         subKeyword2: keyword.subKeyword2,
         charCount,
-        extraProblems,
       });
-      content = sanitizeArticleContent(await reviseArticle(revisionPrompt));
-      validation = await validateContent(content, keywordsForValidation);
-      charOutOfRange = isCharCountOutOfRange(content, charCount);
+      try {
+        content = stripLeadingTitleLine(
+          sanitizeArticleContent(await reviseArticle(revisionPrompt, 90_000)),
+          keyword.title
+        );
+        validation = await validateContent(content, keywordsForValidation, {
+          fast: true,
+        });
+        charOutOfRange = isCharCountOutOfRange(content, charCount);
+      } catch (error) {
+        revisionError =
+          error instanceof Error
+            ? error.message
+            : "자동 재수정 중 오류가 발생했습니다.";
+        console.warn("[api/article] revision skipped", {
+          revisionError,
+          revisionReasons: validation.revisionReasons,
+        });
+        break;
+      }
       revisionCount++;
     }
-
-    const bodyCitations = extractCitationsFromContent(content);
-    const mergedCitations = mergeCitations(researchCitations, bodyCitations);
 
     const article: ArticleContent = {
       title: keyword.title,
@@ -278,13 +326,19 @@ export async function POST(request: NextRequest) {
       validation,
       brief,
       washingTone: tone,
-      citations: mergedCitations,
+      generationNote: revisionError
+        ? `자동 재수정은 건너뛰었습니다: ${revisionError}`
+        : undefined,
     };
 
     return NextResponse.json({ success: true, data: article });
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "본문 작성 중 오류가 발생했습니다.";
+    console.error("[api/article] failed", {
+      message,
+      stack: err instanceof Error ? err.stack : undefined,
+    });
     return NextResponse.json(
       { success: false, error: message },
       { status: 500 }

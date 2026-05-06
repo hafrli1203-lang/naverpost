@@ -14,9 +14,6 @@ import { CATEGORIES } from "@/lib/constants";
 import type {
   ArticleContent,
   BlogImage,
-  GeoAnalysisResult,
-  GeoOptimizationResult,
-  GeoRecommendation,
   KeywordOption,
   Shop,
   WorkflowState,
@@ -27,37 +24,6 @@ type LooseApiResponse = {
   error?: string;
   data?: unknown;
 };
-
-type GeoPlanStep = {
-  pass: number;
-  recommendation: GeoRecommendation;
-  projectedScore: number;
-};
-
-type GeoPlanData = {
-  analysis: GeoAnalysisResult;
-  projectedScore: number;
-  steps: GeoPlanStep[];
-};
-
-function buildGeoToastMessage(optimization: GeoOptimizationResult): string {
-  const before = optimization.analysisBefore.score;
-  const after = optimization.analysisAfter.score;
-
-  if (after > before) {
-    return `GEO 점수 ${before} → ${after}`;
-  }
-
-  if (after < before) {
-    return `GEO 점수 ${before} → ${after} 하락`;
-  }
-
-  if (optimization.appliedRecommendationIds.length === 0) {
-    return `이미 GEO 기준을 대체로 충족합니다. 추가 상승은 한국 기관·협회 출처 인용 확보가 필요합니다.`;
-  }
-
-  return `GEO 점수 ${before} 유지`;
-}
 
 async function safeJson(res: Response): Promise<LooseApiResponse> {
   if (res.status === 401) {
@@ -102,7 +68,6 @@ export default function Home() {
 
   const [maxStageReached, setMaxStageReached] = useState<number>(state.currentStage);
   const [isLoading, setIsLoading] = useState(false);
-  const [isGeoLoading, setIsGeoLoading] = useState(false);
   const [isGeneratingImages, setIsGeneratingImages] = useState(false);
   const [imageProgress, setImageProgress] = useState({ current: 0, total: 0 });
   const [keywordOptions, setKeywordOptions] = useState<KeywordOption[]>([]);
@@ -146,251 +111,6 @@ export default function Home() {
       .catch(() => {});
     loadSavedSessions();
   }, [loadSavedSessions]);
-
-  const analyzeGeo = useCallback(async (article: ArticleContent): Promise<GeoAnalysisResult | null> => {
-    try {
-      const res = await fetch("/api/article/geo", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mode: "analyze",
-          article,
-        }),
-      });
-      const json = await safeJson(res);
-      if (!res.ok || !json.success) {
-        throw new Error(json.error ?? "GEO 분석에 실패했습니다.");
-      }
-      return json.data as GeoAnalysisResult;
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "GEO 분석 중 오류가 발생했습니다.");
-      return null;
-    }
-  }, []);
-
-  const loadGeoPlan = useCallback(async (article: ArticleContent): Promise<GeoPlanData | null> => {
-    try {
-      const res = await fetch("/api/article/geo", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mode: "plan",
-          article,
-        }),
-      });
-      const json = await safeJson(res);
-      if (!res.ok || !json.success) {
-        throw new Error(json.error ?? "GEO 계획 분석에 실패했습니다.");
-      }
-      return json.data as GeoPlanData;
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "GEO 계획 분석 중 오류가 발생했습니다.");
-      return null;
-    }
-  }, []);
-
-  const refreshGeoForCurrentArticle = useCallback(async (): Promise<GeoAnalysisResult | null> => {
-    if (!state.article) return null;
-
-    setIsGeoLoading(true);
-    try {
-      const geo = await analyzeGeo(state.article);
-      if (geo) {
-        setState((prev) => ({
-          ...prev,
-          article: prev.article ? { ...prev.article, geo } : prev.article,
-        }));
-      }
-      return geo;
-    } finally {
-      setIsGeoLoading(false);
-    }
-  }, [analyzeGeo, setState, state.article]);
-
-  const applyGeo = useCallback(
-    async (
-      selectedRecommendationIds: GeoRecommendation["id"][]
-    ): Promise<GeoOptimizationResult | null> => {
-      if (!state.article) return null;
-
-      setIsGeoLoading(true);
-      try {
-        const res = await fetch("/api/article/geo", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            mode: "apply",
-            article: state.article,
-            selectedRecommendationIds,
-          }),
-        });
-        const json = await safeJson(res);
-        if (!res.ok || !json.success) {
-          throw new Error(json.error ?? "GEO 최적화 적용에 실패했습니다.");
-        }
-
-        const payload = json.data as {
-          article: ArticleContent;
-          optimization: GeoOptimizationResult;
-        };
-
-        setState((prev) => {
-          if (!prev.article) return prev;
-          return {
-            ...prev,
-            article: {
-              ...payload.article,
-              preGeoContent: prev.article.content,
-              preGeoValidation: prev.article.validation,
-              preGeoGeo: prev.article.geo,
-            },
-          };
-        });
-        toast.success(buildGeoToastMessage(payload.optimization));
-        return payload.optimization;
-      } catch (error) {
-        toast.error(error instanceof Error ? error.message : "GEO 적용 중 오류가 발생했습니다.");
-        return null;
-      } finally {
-        setIsGeoLoading(false);
-      }
-    },
-    [state.article, setState]
-  );
-
-  const revertGeo = useCallback(() => {
-    setState((prev) => {
-      if (!prev.article?.preGeoContent) return prev;
-      const { preGeoContent, preGeoValidation, preGeoGeo, ...rest } = prev.article;
-      return {
-        ...prev,
-        article: {
-          ...rest,
-          content: preGeoContent,
-          validation: preGeoValidation ?? rest.validation,
-          geo: preGeoGeo,
-        },
-      };
-    });
-    toast.success("GEO 최적화 이전 본문으로 되돌렸습니다.");
-  }, [setState]);
-
-  const applyAdvancedGeo = useCallback(
-    async (
-      selectedRecommendationIds: GeoRecommendation["id"][]
-    ): Promise<GeoOptimizationResult | null> => {
-      if (!state.article) return null;
-
-      setIsGeoLoading(true);
-      try {
-        const startRes = await fetch("/api/article/geo", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            mode: "start-advanced",
-            article: state.article,
-            selectedRecommendationIds,
-          }),
-        });
-        const startJson = await safeJson(startRes);
-        if (!startRes.ok || !startJson.success) {
-          throw new Error(startJson.error ?? "고득점 GEO 시작에 실패했습니다.");
-        }
-
-        const jobId = (startJson.data as { jobId?: string } | undefined)?.jobId;
-        if (!jobId) {
-          throw new Error("고득점 GEO 작업 ID를 받지 못했습니다.");
-        }
-
-        const startedAt = Date.now();
-        const timeoutMs = 15 * 60 * 1000;
-
-        while (Date.now() - startedAt < timeoutMs) {
-          await new Promise((resolve) => setTimeout(resolve, 2000));
-
-          const statusRes = await fetch("/api/article/geo", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              mode: "advanced-status",
-              jobId,
-            }),
-          });
-          const statusJson = await safeJson(statusRes);
-          if (!statusRes.ok || !statusJson.success) {
-            throw new Error(statusJson.error ?? "고득점 GEO 상태 확인에 실패했습니다.");
-          }
-
-          const job = statusJson.data as {
-            status: "pending" | "running" | "completed" | "failed";
-            article?: ArticleContent;
-            optimization?: GeoOptimizationResult;
-            error?: string;
-          };
-
-          if (job.status === "completed" && job.article && job.optimization) {
-            setState((prev) => {
-              if (!prev.article) return prev;
-              return {
-                ...prev,
-                article: {
-                  ...job.article!,
-                  preGeoContent: prev.article.content,
-                  preGeoValidation: prev.article.validation,
-                  preGeoGeo: prev.article.geo,
-                },
-              };
-            });
-            toast.success(`고득점 GEO 완료: ${buildGeoToastMessage(job.optimization)}`);
-            return job.optimization;
-          }
-
-          if (job.status === "failed") {
-            throw new Error(job.error ?? "고득점 GEO 작업이 실패했습니다.");
-          }
-        }
-
-        throw new Error("고득점 GEO 작업 시간이 초과되었습니다.");
-      } catch (error) {
-        toast.error(
-          error instanceof Error
-            ? error.message
-            : "고득점 GEO 적용 중 오류가 발생했습니다."
-        );
-        return null;
-      } finally {
-        setIsGeoLoading(false);
-      }
-    },
-    [state.article, setState]
-  );
-
-  useEffect(() => {
-    if (!state.article || state.article.geo || isGeoLoading) return;
-
-    let cancelled = false;
-    // Initial background GEO sync for newly generated/restored articles.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setIsGeoLoading(true);
-    analyzeGeo(state.article)
-      .then((geo) => {
-        if (!cancelled && geo) {
-          setState((prev) => ({
-            ...prev,
-            article: prev.article ? { ...prev.article, geo } : prev.article,
-          }));
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setIsGeoLoading(false);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [analyzeGeo, isGeoLoading, setState, state.article]);
 
   const handleStart = useCallback(
     async (shopId: string, categoryId: string, topic: string, opts?: ArticleOptions) => {
@@ -481,14 +201,11 @@ export default function Home() {
         }
 
         const article = json.data as ArticleContent;
-        setIsGeoLoading(true);
-        const geo = await analyzeGeo(article);
-        setIsGeoLoading(false);
 
         setState({
           ...state,
           selectedKeyword: option,
-          article: geo ? { ...article, geo } : article,
+          article,
           currentStage: 2,
         });
         setMaxStageReached((prev) => Math.max(prev, 2));
@@ -498,7 +215,7 @@ export default function Home() {
         setIsLoading(false);
       }
     },
-    [analyzeGeo, articleOptions, state, setState]
+    [articleOptions, state, setState]
   );
 
   const handleArticleRewrite = useCallback(async () => {
@@ -506,87 +223,13 @@ export default function Home() {
     await handleKeywordSelect(state.selectedKeyword);
   }, [state.selectedKeyword, handleKeywordSelect]);
 
-  const handleArticleWash = useCallback(async () => {
-    if (!state.article) return;
-
-    setIsLoading(true);
-    try {
-      const res = await fetch("/api/article/wash", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          article: state.article,
-          tone: articleOptions?.tone ?? state.article.washingTone ?? "standard",
-          charCount: articleOptions?.charCount ?? 2000,
-        }),
-      });
-      const json = await safeJson(res);
-      if (!res.ok || !json.success) {
-        throw new Error(json.error ?? "워싱에 실패했습니다.");
-      }
-
-      const washedArticle = json.data as ArticleContent;
-      setIsGeoLoading(true);
-      const geo = await analyzeGeo(washedArticle);
-      setIsGeoLoading(false);
-
-      setState((prev) => ({
-        ...prev,
-        article: geo ? { ...washedArticle, geo } : washedArticle,
-      }));
-      toast.success("워싱을 적용했습니다.");
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "워싱 중 오류가 발생했습니다.");
-    } finally {
-      setIsLoading(false);
-      setIsGeoLoading(false);
-    }
-  }, [analyzeGeo, articleOptions, setState, state.article]);
-
-  const handleRevertWash = useCallback(() => {
-    if (!state.article?.preWashContent) return;
-
-    setState((prev) => {
-      if (!prev.article?.preWashContent) return prev;
-      const { preWashContent, preWashValidation, preWashGeo, ...rest } = prev.article;
-      return {
-        ...prev,
-        article: {
-          ...rest,
-          content: preWashContent,
-          validation: preWashValidation ?? rest.validation,
-          geo: preWashGeo ?? rest.geo,
-          washingApplied: false,
-          preWashContent: undefined,
-          preWashValidation: undefined,
-          preWashGeo: undefined,
-        },
-      };
-    });
-    toast.success("워싱 전 본문으로 되돌렸습니다.");
-  }, [setState, state.article]);
-
   const handleManualEdit = useCallback(
     async (content: string) => {
       if (!state.article) return;
-
       const updatedArticle = { ...state.article, content };
       setState({ ...state, article: updatedArticle });
-
-      setIsGeoLoading(true);
-      try {
-        const geo = await analyzeGeo(updatedArticle);
-        if (geo) {
-          setState((prev) => ({
-            ...prev,
-            article: prev.article ? { ...prev.article, content, geo } : prev.article,
-          }));
-        }
-      } finally {
-        setIsGeoLoading(false);
-      }
     },
-    [analyzeGeo, state, setState]
+    [state, setState]
   );
 
   const handleArticleApprove = useCallback(() => {
@@ -863,9 +506,6 @@ export default function Home() {
           revisionReasons: [],
         },
       };
-      setIsGeoLoading(true);
-      const geo = await analyzeGeo(article);
-      setIsGeoLoading(false);
       const restoredImages: BlogImage[] = (session.images ?? []).map((img) => ({
         index: img.index,
         imageId: img.imageId,
@@ -888,13 +528,13 @@ export default function Home() {
           subKeyword1: session.subKeyword1,
           subKeyword2: session.subKeyword2,
         },
-        article: geo ? { ...article, geo } : article,
+        article,
         images: restoredImages,
       });
       setMaxStageReached(hasImages ? 3 : 2);
       toast.success("저장된 세션을 불러왔습니다.");
     },
-    [analyzeGeo, setState, shops]
+    [setState, shops]
   );
 
   const handleDeleteSession = useCallback(
@@ -1011,16 +651,8 @@ export default function Home() {
             onApprove={handleArticleApprove}
             onRewrite={handleArticleRewrite}
             onManualEdit={handleManualEdit}
-            onWash={handleArticleWash}
-            onRevertWash={handleRevertWash}
             onSave={handleSaveSession}
-            onRefreshGeoAnalysis={refreshGeoForCurrentArticle}
-            onLoadGeoPlan={() => (state.article ? loadGeoPlan(state.article) : Promise.resolve(null))}
-            onApplyGeo={applyGeo}
-            onApplyAdvancedGeo={applyAdvancedGeo}
-            onRevertGeo={revertGeo}
             isLoading={isLoading || isGeneratingImages}
-            isGeoLoading={isGeoLoading}
             targetCharCount={articleOptions?.charCount ?? 2000}
           />
         )}

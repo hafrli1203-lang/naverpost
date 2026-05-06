@@ -1,7 +1,7 @@
 import type { ValidationResult } from "@/types";
 import { PROHIBITED_WORDS, CAUTION_PHRASES } from "./prohibitedWords";
 import { findOverusedWords } from "./repetitionCheck";
-import { analyzeMorphologyAsync } from "./morphologyAnalyzer";
+import { analyzeMorphology, analyzeMorphologyAsync } from "./morphologyAnalyzer";
 import { analyzeLanguageRisk } from "./contentSignalAnalyzer";
 import { analyzeTitleBodyAlignment } from "./titleBodyAlignment";
 import { analyzeNetworkDuplicateRisk } from "./networkDuplicateAnalyzer";
@@ -59,8 +59,12 @@ export async function validateContent(
     mainKeyword: string;
     subKeyword1: string;
     subKeyword2: string;
+    tone?: string;
     forbiddenList?: string[];
     referenceList?: string[];
+  },
+  options?: {
+    fast?: boolean;
   }
 ): Promise<ValidationResult> {
   const foundProhibited = PROHIBITED_WORDS.filter((word) =>
@@ -94,12 +98,18 @@ export async function validateContent(
     ? [keywords.mainKeyword, keywords.subKeyword1, keywords.subKeyword2].filter(Boolean)
     : [];
   const title = keywords?.title ?? keywords?.mainKeyword ?? "";
-  const morphology = await analyzeMorphologyAsync({
-    title,
-    content,
-    keywords: keywordCandidates,
-  });
-  const languageRisk = analyzeLanguageRisk(content);
+  const morphology = options?.fast
+    ? analyzeMorphology({
+        title,
+        content,
+        keywords: keywordCandidates,
+      })
+    : await analyzeMorphologyAsync({
+        title,
+        content,
+        keywords: keywordCandidates,
+      });
+  const languageRisk = analyzeLanguageRisk(content, keywords?.tone);
   const structure = analyzeTitleBodyAlignment({
     title,
     content,
@@ -176,6 +186,18 @@ export async function validateContent(
   }
   if (languageRisk.emphasis.length > 0) {
     revisionReasons.push(`강조어 사용: ${languageRisk.emphasis.join(", ")}`);
+  }
+  if (languageRisk.aiCliches && languageRisk.aiCliches.length > 0) {
+    revisionReasons.push(`AI 문체 신호: ${languageRisk.aiCliches.join(", ")}`);
+  }
+  if (languageRisk.toneMismatches && languageRisk.toneMismatches.length > 0) {
+    revisionReasons.push(`문체 불일치: ${languageRisk.toneMismatches.join(", ")}`);
+  }
+  if (languageRisk.weakHooks && languageRisk.weakHooks.length > 0) {
+    revisionReasons.push(`도입/마무리 약함: ${languageRisk.weakHooks.join(", ")}`);
+  }
+  if (languageRisk.mechanicalSignals && languageRisk.mechanicalSignals.length > 0) {
+    revisionReasons.push(`기계식 문장 구조: ${languageRisk.mechanicalSignals.join(", ")}`);
   }
   if (structure.missingTitleKeywordCoverage.length > 0) {
     revisionReasons.push(
