@@ -26,8 +26,11 @@ interface ArticlePreviewProps {
   onApprove: () => void;
   onRewrite: () => void;
   onManualEdit: (content: string) => void | Promise<void>;
+  onWash?: () => void | Promise<void>;
+  onRevertWash?: () => void;
   onSave?: () => void;
   isLoading: boolean;
+  isWashing?: boolean;
   targetCharCount?: number;
 }
 
@@ -168,8 +171,11 @@ export function ArticlePreview({
   onApprove,
   onRewrite,
   onManualEdit,
+  onWash,
+  onRevertWash,
   onSave,
   isLoading,
+  isWashing = false,
   targetCharCount = 2000,
 }: ArticlePreviewProps) {
   const [isEditing, setIsEditing] = useState(false);
@@ -509,6 +515,33 @@ export function ArticlePreview({
             <Save className="w-4 h-4" />
             저장
           </Button>
+        )}
+        {article.washingApplied && article.preWashContent && onRevertWash ? (
+          <Button
+            variant="outline"
+            onClick={onRevertWash}
+            disabled={isLoading || isWashing}
+            className="gap-2 border-slate-300 text-slate-600 hover:bg-slate-50 hover:text-slate-700"
+          >
+            <RotateCcw className="w-4 h-4" />
+            워싱 전으로
+          </Button>
+        ) : (
+          onWash && (
+            <Button
+              variant="outline"
+              onClick={onWash}
+              disabled={isLoading || isWashing}
+              className="gap-2 border-blue-300 text-blue-600 hover:bg-blue-50 hover:text-blue-700"
+            >
+              {isWashing ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <PenLine className="w-4 h-4" />
+              )}
+              {isWashing ? "워싱 중..." : "워싱하기"}
+            </Button>
+          )
         )}
         <Button
           variant="outline"

@@ -68,6 +68,7 @@ export default function Home() {
 
   const [maxStageReached, setMaxStageReached] = useState<number>(state.currentStage);
   const [isLoading, setIsLoading] = useState(false);
+  const [isWashing, setIsWashing] = useState(false);
   const [isGeneratingImages, setIsGeneratingImages] = useState(false);
   const [imageProgress, setImageProgress] = useState({ current: 0, total: 0 });
   const [keywordOptions, setKeywordOptions] = useState<KeywordOption[]>([]);
@@ -222,6 +223,52 @@ export default function Home() {
     if (!state.selectedKeyword) return;
     await handleKeywordSelect(state.selectedKeyword);
   }, [state.selectedKeyword, handleKeywordSelect]);
+
+  const handleArticleWash = useCallback(async () => {
+    if (!state.article) return;
+    setIsWashing(true);
+    try {
+      const res = await fetch("/api/article/wash", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          article: state.article,
+          charCount: articleOptions?.charCount ?? 2000,
+        }),
+      });
+      const json = await safeJson(res);
+      if (!res.ok || !json.success) {
+        throw new Error(json.error ?? "워싱에 실패했습니다.");
+      }
+      const washedArticle = json.data as ArticleContent;
+      setState((prev) => ({ ...prev, article: washedArticle }));
+      toast.success("워싱을 적용했습니다.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "워싱 중 오류가 발생했습니다.");
+    } finally {
+      setIsWashing(false);
+    }
+  }, [articleOptions, setState, state.article]);
+
+  const handleRevertWash = useCallback(() => {
+    if (!state.article?.preWashContent) return;
+    setState((prev) => {
+      if (!prev.article?.preWashContent) return prev;
+      const { preWashContent, preWashValidation, ...rest } = prev.article;
+      return {
+        ...prev,
+        article: {
+          ...rest,
+          content: preWashContent,
+          validation: preWashValidation ?? rest.validation,
+          washingApplied: false,
+          preWashContent: undefined,
+          preWashValidation: undefined,
+        },
+      };
+    });
+    toast.success("워싱 전 본문으로 되돌렸습니다.");
+  }, [setState, state.article]);
 
   const handleManualEdit = useCallback(
     async (content: string) => {
@@ -651,8 +698,11 @@ export default function Home() {
             onApprove={handleArticleApprove}
             onRewrite={handleArticleRewrite}
             onManualEdit={handleManualEdit}
+            onWash={handleArticleWash}
+            onRevertWash={handleRevertWash}
             onSave={handleSaveSession}
             isLoading={isLoading || isGeneratingImages}
+            isWashing={isWashing}
             targetCharCount={articleOptions?.charCount ?? 2000}
           />
         )}
