@@ -3,19 +3,34 @@
     "id": "top50jn",
     "name": "으뜸50안경 장림시장점",
     "blogId": "top50jn",
-    "rssUrl": "https://rss.blog.naver.com/top50jn.xml"
+    "rssUrl": "https://rss.blog.naver.com/top50jn.xml",
+    "address": "부산 사하구 장림번영로 33 1층",
+    "naverPlaceUrl": "https://map.naver.com/p/entry/place/1266565660",
+    "brandBannerText": "네이버 플레이스에서 위치 확인",
+    "parkingInfo": "기업은행 뒤 K2주차장 30분 주차비 지원, 장림시장 공영주차장 1시간 지원",
+    "businessHours": "10:00 - 20:30"
   },
   {
     "id": "jinysgongju",
     "name": "지니스안경 공주신관점",
     "blogId": "jinysgongju",
-    "rssUrl": "https://rss.blog.naver.com/jinysgongju.xml"
+    "rssUrl": "https://rss.blog.naver.com/jinysgongju.xml",
+    "address": "충남 공주시 번영1로 50 1층",
+    "naverPlaceUrl": "https://map.naver.com/p/entry/place/1883799026",
+    "brandBannerText": "네이버 플레이스에서 위치 확인",
+    "parkingInfo": "매장옆 건물주차장 및 신관공영주차장(주차권증정)가능합니다",
+    "businessHours": "10:00 - 20:00"
   },
   {
     "id": "attractiger",
     "name": "지니스안경 김해장유점",
     "blogId": "attractiger",
-    "rssUrl": "https://rss.blog.naver.com/attractiger.xml"
+    "rssUrl": "https://rss.blog.naver.com/attractiger.xml",
+    "address": "경남 김해시 능동로149번길 9",
+    "naverPlaceUrl": "https://map.naver.com/p/entry/place/1578439069",
+    "brandBannerText": "네이버 플레이스에서 위치 확인",
+    "parkingInfo": "매장 건물 2층~4층(최대 1시간 지원)주차장 또는 상가 인근 노상 주차가 가능",
+    "businessHours": "10:00 - 20:30"
   },
   {
     "id": "leesi7007",
@@ -51,18 +66,29 @@
       "국내1위 케미광학렌즈 공식가맹점",
       "코패드무료교체",
       "선글라스렌즈교체"
-    ]
+    ],
+    "brandBannerText": "네이버 플레이스에서 위치 확인"
   },
   {
     "id": "kl1854",
     "name": "지니스안경 심곡고가사거리점",
     "blogId": "kl1854",
-    "rssUrl": "https://rss.blog.naver.com/kl1854.xml"
+    "rssUrl": "https://rss.blog.naver.com/kl1854.xml",
+    "address": "경기 부천시 소사구 경인로 183 1층",
+    "naverPlaceUrl": "https://map.naver.com/p/entry/place/1416247480",
+    "brandBannerText": "네이버 플레이스에서 위치 확인",
+    "parkingInfo": "건물 뒤편 전용 주차장 이용",
+    "businessHours": "10:00 - 21:00"
   },
   {
     "id": "peace9486",
     "name": "지니스안경 진해하나로마트점",
     "blogId": "peace9486",
-    "rssUrl": "https://rss.blog.naver.com/peace9486.xml"
+    "rssUrl": "https://rss.blog.naver.com/peace9486.xml",
+    "address": "경남 창원시 진해구 진해대로776번길 28 하나로마트 1층",
+    "naverPlaceUrl": "https://map.naver.com/p/entry/place/1384622270",
+    "brandBannerText": "네이버 플레이스에서 위치 확인",
+    "parkingInfo": "하나로마트 지상,지하 주차장 이용",
+    "businessHours": "09:00 - 20:30"
   }
 ]

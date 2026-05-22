@@ -30,6 +30,11 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
+# server logs & temp outputs (local run artifacts)
+*.log
+tmp-*
+/scripts/*.out
+
 # env files (API keys - never commit)
 .env*
 
@@ -44,6 +49,7 @@ yarn-error.log*
 
 # omc state (session-scoped, not shareable)
 .omc/state/
+.omc/sessions/
 .omc/project-memory.json
 .codex-push/
 
