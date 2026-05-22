@@ -176,6 +176,7 @@ export function buildPromoPrompt(params: {
   eventPeriod?: string;
   benefitContent?: string;
   externalReference?: string;
+  glossaryHint?: string;
   brief?: ArticleBrief;
 }): string {
   const {
@@ -194,6 +195,7 @@ export function buildPromoPrompt(params: {
     eventPeriod,
     benefitContent,
     externalReference,
+    glossaryHint,
     brief,
   } = params;
 
@@ -218,6 +220,14 @@ ${benefitContent ? `혜택 내용: ${benefitContent}` : "혜택 내용: [확인 
 ${externalReference}
 ※ 위 자료의 내용을 참고하되 그대로 복사하지 말고 안경원 홍보 관점에서 재해석하여 활용하세요.
 ※ 자료에 없는 가격/할인율/기간/사은품 등 사실 정보는 임의로 추가하지 마세요.
+`
+    : "";
+
+  const glossarySection = glossaryHint
+    ? `
+[키워드 정확한 의미 — 반드시 준수]
+${glossaryHint}
+※ 위 정의를 벗어나 일반 웹 통념으로 해석하지 마세요.
 `
     : "";
 
@@ -263,7 +273,7 @@ ${competitorBlock}`
 메인 키워드: ${mainKeyword}
 서브 키워드1: ${subKeyword1}
 서브 키워드2: ${subKeyword2}
-${eventInfoBlock}
+${glossarySection}${eventInfoBlock}
 [조사 자료]
 ${researchData}
 ${externalRefSection}

@@ -10,13 +10,17 @@ import { buildArticleBrief } from "@/lib/briefs/articleBrief";
 import { analyzeCompetitorMorphology } from "@/lib/analysis/competitorMorphology";
 import { CATEGORIES } from "@/lib/constants";
 import { getShopById } from "@/lib/data/shops";
+import { lookupGlossary, buildGlossaryHint } from "@/lib/domain/opticalGlossary";
 import type { KeywordOption, ArticleContent } from "@/types";
 
-export const maxDuration = 300;
+export const maxDuration = 360;
 
 const MAX_REVISION_ATTEMPTS = 1;
-const RESEARCH_TIMEOUT_MS = 12_000;
-const COMPETITOR_ANALYSIS_TIMEOUT_MS = 12_000;
+// Multi-round research (1 main search + re-search of all follow-up questions) needs
+// a larger budget than the old 12s, which silently dropped research and forced
+// Claude to write from generic knowledge (the keyword-misinterpretation regression).
+const RESEARCH_TIMEOUT_MS = 40_000;
+const COMPETITOR_ANALYSIS_TIMEOUT_MS = 25_000;
 
 function withTimeout<T>(
   promise: Promise<T>,
@@ -124,48 +128,59 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Research keyword via Perplexity. If external research is slow, continue
-    // with a lean brief so article generation does not feel hung.
-    const researchResponse = await withTimeout(
-      researchKeyword(keyword.mainKeyword),
-      RESEARCH_TIMEOUT_MS,
-      {
-        text: "",
-        result: {
-          summary: "",
-          questions: [],
-          citations: [],
-        },
-      }
-    );
-    const researchData = researchResponse.text;
+    // Disambiguate ambiguous shop-floor terms (e.g. 멀티포컬 = contact lens) before
+    // research and writing so both stages interpret the keyword correctly.
+    const glossaryEntries = await lookupGlossary([
+      keyword.mainKeyword,
+      keyword.subKeyword1,
+      keyword.subKeyword2,
+      keyword.title,
+    ]);
+    const glossaryHint = buildGlossaryHint(glossaryEntries);
 
-    let sameStoreHistory: string[] = [];
-    let crossBlogTitles: string[] = [];
-    try {
-      const rssResult = await fetchBlogTitles(shopId);
-      sameStoreHistory = rssResult.forbiddenList.slice(0, 10);
-      crossBlogTitles = rssResult.referenceList.slice(0, 20);
-    } catch {
-      // RSS failure should not block article generation.
-    }
+    type CompetitorMorphology = {
+      status: "available" | "unavailable";
+      sampleSize: number;
+      bodySampleSize?: number;
+      commonNouns: string[];
+      titleNouns: string[];
+      bodyNouns?: string[];
+      bodyHighlights?: string[];
+      titleAngles?: string[];
+      contentBlocks?: string[];
+      cautionPoints?: string[];
+    };
 
-    let competitorMorphology:
-        | {
-          status: "available" | "unavailable";
-          sampleSize: number;
-          bodySampleSize?: number;
-          commonNouns: string[];
-          titleNouns: string[];
-          bodyNouns?: string[];
-          bodyHighlights?: string[];
-          titleAngles?: string[];
-          contentBlocks?: string[];
-          cautionPoints?: string[];
+    // Research, RSS history, and competitor morphology are independent inputs to the
+    // brief, so run them concurrently. Serial execution previously stacked their
+    // timeouts (research + competitor alone could exceed the route budget).
+    const [researchResponse, rssOutcome, competitorMorphology] = await Promise.all([
+      // Research keyword via Perplexity using main + both sub keywords + category +
+      // glossary context together, then re-search all follow-up questions.
+      withTimeout(
+        researchKeyword({
+          mainKeyword: keyword.mainKeyword,
+          subKeyword1: keyword.subKeyword1,
+          subKeyword2: keyword.subKeyword2,
+          categoryName: category.name,
+          glossaryHint,
+        }),
+        RESEARCH_TIMEOUT_MS,
+        {
+          text: "",
+          result: { summary: "", questions: [], citations: [], followUps: [] },
+          status: "empty" as const,
         }
-      | undefined;
-    try {
-      const result = await withTimeout(
+      ),
+      // RSS failure should not block article generation.
+      fetchBlogTitles(shopId)
+        .then((rssResult) => ({
+          sameStoreHistory: rssResult.forbiddenList.slice(0, 10),
+          crossBlogTitles: rssResult.referenceList.slice(0, 20),
+        }))
+        .catch(() => ({ sameStoreHistory: [] as string[], crossBlogTitles: [] as string[] })),
+      // Competitor morphology analysis failure should not block article generation.
+      withTimeout(
         analyzeCompetitorMorphology(keyword.mainKeyword),
         COMPETITOR_ANALYSIS_TIMEOUT_MS,
         {
@@ -181,22 +196,27 @@ export async function POST(request: NextRequest) {
           contentBlocks: [],
           cautionPoints: [],
         }
-      );
-      competitorMorphology = {
-        status: result.status,
-        sampleSize: result.sampleSize,
-        bodySampleSize: result.bodySampleSize,
-        commonNouns: result.commonNouns.map((entry) => entry.noun),
-        titleNouns: result.titleNouns.map((entry) => entry.noun),
-        bodyNouns: result.bodyNouns.map((entry) => entry.noun),
-        bodyHighlights: result.bodyHighlights,
-        titleAngles: result.titleAngles,
-        contentBlocks: result.contentBlocks,
-        cautionPoints: result.cautionPoints,
-      };
-    } catch {
-      // Competitor morphology analysis failure should not block article generation.
-    }
+      )
+        .then(
+          (result): CompetitorMorphology => ({
+            status: result.status,
+            sampleSize: result.sampleSize,
+            bodySampleSize: result.bodySampleSize,
+            commonNouns: result.commonNouns.map((entry) => entry.noun),
+            titleNouns: result.titleNouns.map((entry) => entry.noun),
+            bodyNouns: result.bodyNouns.map((entry) => entry.noun),
+            bodyHighlights: result.bodyHighlights,
+            titleAngles: result.titleAngles,
+            contentBlocks: result.contentBlocks,
+            cautionPoints: result.cautionPoints,
+          })
+        )
+        .catch((): CompetitorMorphology | undefined => undefined),
+    ]);
+
+    const researchData = researchResponse.text;
+    const researchStatus = researchResponse.status;
+    const { sameStoreHistory, crossBlogTitles } = rssOutcome;
 
     const brief = buildArticleBrief({
       keyword,
@@ -228,6 +248,7 @@ export async function POST(request: NextRequest) {
             charCount,
             tone: tone as "business" | "friendly" | "expert" | undefined,
             externalReference,
+            glossaryHint,
             contentSubtype,
             eventName,
             eventPeriod,
@@ -246,6 +267,7 @@ export async function POST(request: NextRequest) {
             charCount,
             tone: tone as "standard" | "friendly" | "casual" | undefined,
             externalReference,
+            glossaryHint,
             brief,
           });
 
@@ -324,6 +346,7 @@ export async function POST(request: NextRequest) {
       shopName: shop.name,
       category: category.name,
       validation,
+      researchStatus,
       brief,
       washingTone: tone,
       generationNote: revisionError

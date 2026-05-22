@@ -19,10 +19,31 @@ export interface ResearchCitation {
   url?: string;
 }
 
+export interface ResearchFollowUp {
+  question: string;
+  answer: string;
+}
+
 export interface ResearchResult {
   summary: string;
   questions: string[];
   citations: ResearchCitation[];
+  followUps: ResearchFollowUp[];
+}
+
+export interface ResearchParams {
+  mainKeyword: string;
+  subKeyword1?: string;
+  subKeyword2?: string;
+  categoryName?: string;
+  /** Disambiguation hint from the optical glossary (buildGlossaryHint output). */
+  glossaryHint?: string;
+}
+
+export interface ResearchResponse {
+  text: string;
+  result: ResearchResult;
+  status: "ok" | "empty";
 }
 
 function extractJsonBlock(text: string): string | null {
@@ -58,7 +79,12 @@ function buildResearchString(result: ResearchResult): string {
   if (result.summary.trim()) {
     sections.push(`[자료 요약]\n${result.summary.trim()}`);
   }
-  if (result.questions.length > 0) {
+  if (result.followUps.length > 0) {
+    const blocks = result.followUps.map(
+      (item, idx) => `${idx + 1}. ${item.question}\n   → ${item.answer}`
+    );
+    sections.push(`[후속 질문 심화 자료]\n${blocks.join("\n")}`);
+  } else if (result.questions.length > 0) {
     const numbered = result.questions.map((q, idx) => `${idx + 1}. ${q}`).join("\n");
     sections.push(`[후속 검색 질문]\n${numbered}`);
   }
@@ -72,16 +98,66 @@ function buildResearchString(result: ResearchResult): string {
   return sections.join("\n\n");
 }
 
-export async function researchKeyword(keyword: string): Promise<{
-  text: string;
-  result: ResearchResult;
-}> {
-  const prompt = `다음 키워드에 대해 한국 블로그 글 작성에 필요한 자료를 조사해 주세요: "${keyword}"
+/** Builds the combined search subject from main + sub keywords + category context. */
+function buildSearchSubject(params: ResearchParams): string {
+  const parts = [params.mainKeyword, params.subKeyword1, params.subKeyword2]
+    .map((value) => value?.trim())
+    .filter((value): value is string => Boolean(value));
+  const keywordLine = parts.join(" / ");
+  const categoryLine = params.categoryName
+    ? `\n분야/카테고리: 안경원 "${params.categoryName}" 카테고리`
+    : "";
+  const glossaryLine = params.glossaryHint
+    ? `\n[용어 정확한 의미 — 반드시 이 의미로 해석하고 조사]\n${params.glossaryHint}`
+    : "";
+  return `검색 키워드(메인/서브 동시 고려): ${keywordLine}${categoryLine}${glossaryLine}`;
+}
+
+async function callPerplexity(prompt: string): Promise<string> {
+  const response = await getClient().chat.completions.create({
+    model: "sonar",
+    messages: [{ role: "user", content: prompt }],
+  });
+  return response.choices[0]?.message?.content ?? "";
+}
+
+/** Re-searches a single follow-up question and returns a concise factual answer. */
+async function researchFollowUpQuestion(
+  question: string,
+  subject: string
+): Promise<ResearchFollowUp | null> {
+  const prompt = `아래 맥락의 키워드에 대한 후속 질문을 조사해 핵심만 2~3문장으로 한국어로 답하세요.
+마크다운이나 머리말 없이 답변 문장만 출력합니다. 추측하지 말고 확인된 사실만 답하세요.
+
+${subject}
+
+후속 질문: ${question}`;
+  try {
+    const answer = (await callPerplexity(prompt)).trim();
+    if (!answer) return null;
+    return { question, answer };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Researches a keyword for blog writing.
+ * 1) First search uses main + both sub keywords + category + glossary context together.
+ * 2) Re-searches all returned follow-up questions in parallel to build richer material.
+ */
+export async function researchKeyword(params: ResearchParams): Promise<ResearchResponse> {
+  const subject = buildSearchSubject(params);
+
+  const prompt = `다음 키워드에 대해 한국 블로그 글 작성에 필요한 자료를 조사해 주세요.
+메인 키워드와 서브 키워드를 모두 함께 고려해 하나의 주제로 조사하세요.
+
+${subject}
 
 다음 항목을 JSON으로만 반환하세요. 마크다운이나 설명문 없이 JSON만 출력합니다.
 
 {
-  "summary": "키워드 관련 핵심 정보를 300자 내외로 요약",
+  "summary": "키워드 관련 핵심 정보를 300자 내외로 요약 (위 용어 의미를 반드시 반영)",
   "questions": ["블로그 독자가 궁금해할 질문 5개"],
   "citations": [
     {
@@ -122,12 +198,13 @@ citations 작성 규칙:
 - 사실을 지어내지 말 것. 실제 검색해서 확인된 자료만
 - 정말로 아무것도 찾을 수 없으면 빈 배열로 반환`;
 
-  const response = await getClient().chat.completions.create({
-    model: "sonar",
-    messages: [{ role: "user", content: prompt }],
-  });
+  let content = "";
+  try {
+    content = await callPerplexity(prompt);
+  } catch {
+    content = "";
+  }
 
-  const content = response.choices[0]?.message?.content ?? "";
   const jsonText = extractJsonBlock(content);
 
   let summary = "";
@@ -155,9 +232,24 @@ citations 작성 규칙:
     summary = content.trim();
   }
 
-  const result: ResearchResult = { summary, questions, citations };
+  // Re-search every follow-up question in parallel to build richer material.
+  const followUps: ResearchFollowUp[] = [];
+  if (questions.length > 0) {
+    const settled = await Promise.all(
+      questions.map((question) => researchFollowUpQuestion(question, subject))
+    );
+    for (const item of settled) {
+      if (item) followUps.push(item);
+    }
+  }
+
+  const result: ResearchResult = { summary, questions, citations, followUps };
+  const status: "ok" | "empty" =
+    summary.length > 0 || citations.length > 0 || followUps.length > 0 ? "ok" : "empty";
+
   return {
     text: buildResearchString(result),
     result,
+    status,
   };
 }

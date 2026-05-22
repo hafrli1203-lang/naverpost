@@ -1790,49 +1790,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    let forbiddenList: string[] = [];
-    let referenceList: string[] = [];
-    try {
-      const rssResult = await fetchBlogTitles(shopId);
-      forbiddenList = rssResult.forbiddenList;
-      referenceList = rssResult.referenceList;
-    } catch {
-      // RSS 이력은 보조 신호이므로 실패해도 키워드 분석은 계속 진행한다.
-    }
-
-    // 임시저장만 수행하는 워크플로우 특성상 RSS 에는 시스템 생성물이 반영되지 않는다.
-    // 세션 저장소에 쌓인 최근 생성 이력을 타깃=forbidden / 나머지=reference 로 합쳐
-    // 스펙의 6개 매장 중복 방지 지침이 실데이터 기반으로 동작하도록 보정한다.
-    try {
-      const sessions = await listSessions();
-      const forbiddenSet = new Set(forbiddenList);
-      const referenceSet = new Set(referenceList);
-      for (const session of sessions.slice(0, 30)) {
-        const title = (session.title ?? "").trim();
-        if (!title) continue;
-        if (session.shopName === shop.name) {
-          forbiddenSet.add(title);
-        } else {
-          referenceSet.add(title);
-        }
-      }
-      forbiddenList = Array.from(forbiddenSet);
-      referenceList = Array.from(referenceSet);
-    } catch {
-      // 세션 저장소 장애는 키워드 생성을 막지 않는다.
-    }
-
     const competitorSeeds = [
       category.name,
       ...category.subcategories.slice(0, 3),
     ].filter(Boolean);
-
-    let competitorList: string[] = [];
-    try {
-      competitorList = await fetchCompetitorTitles(competitorSeeds);
-    } catch {
-      // 네이버 검색 실패 시 경쟁 제목 없이 진행
-    }
 
     const discoverySeeds = buildKeywordDiscoverySeeds({
       shop,
@@ -1840,12 +1801,52 @@ export async function POST(request: NextRequest) {
       topic,
     });
 
-    let demandSignals: SearchVolumeSignal[] = [];
-    try {
-      demandSignals = await fetchKeywordDemandSignals(discoverySeeds);
-    } catch {
+    // RSS 이력, 경쟁 제목, 검색량 신호는 서로 독립적이므로 동시에 수집한다.
+    // (이전에는 직렬로 호출해 네트워크 지연이 합산되며 응답이 느려졌다.)
+    const [historyOutcome, competitorOutcome, demandOutcome] = await Promise.all([
+      // RSS 이력 + 세션 저장소 이력 병합.
+      // 임시저장만 수행하는 워크플로우 특성상 RSS 에는 시스템 생성물이 반영되지 않으므로
+      // 세션 저장소의 최근 생성 이력을 타깃=forbidden / 나머지=reference 로 합쳐
+      // 6개 매장 중복 방지 지침이 실데이터 기반으로 동작하도록 보정한다.
+      (async () => {
+        let forbiddenList: string[] = [];
+        let referenceList: string[] = [];
+        try {
+          const rssResult = await fetchBlogTitles(shopId);
+          forbiddenList = rssResult.forbiddenList;
+          referenceList = rssResult.referenceList;
+        } catch {
+          // RSS 이력은 보조 신호이므로 실패해도 키워드 분석은 계속 진행한다.
+        }
+        try {
+          const sessions = await listSessions();
+          const forbiddenSet = new Set(forbiddenList);
+          const referenceSet = new Set(referenceList);
+          for (const session of sessions.slice(0, 30)) {
+            const title = (session.title ?? "").trim();
+            if (!title) continue;
+            if (session.shopName === shop.name) {
+              forbiddenSet.add(title);
+            } else {
+              referenceSet.add(title);
+            }
+          }
+          forbiddenList = Array.from(forbiddenSet);
+          referenceList = Array.from(referenceSet);
+        } catch {
+          // 세션 저장소 장애는 키워드 생성을 막지 않는다.
+        }
+        return { forbiddenList, referenceList };
+      })(),
+      // 네이버 검색 실패 시 경쟁 제목 없이 진행
+      fetchCompetitorTitles(competitorSeeds).catch(() => [] as string[]),
       // 검색광고 월간 검색량 조회 실패 시에도 기존 네이버 검색/트렌드 기반 생성은 계속한다.
-    }
+      fetchKeywordDemandSignals(discoverySeeds).catch(() => [] as SearchVolumeSignal[]),
+    ]);
+
+    const { forbiddenList, referenceList } = historyOutcome;
+    let competitorList: string[] = competitorOutcome;
+    const demandSignals: SearchVolumeSignal[] = demandOutcome;
 
     const strategyGuide = buildKeywordStrategyGuide({
       shop,
@@ -2070,22 +2071,29 @@ export async function POST(request: NextRequest) {
     );
     const topForExternalSignals = diverseRankedResults.slice(0, EXTERNAL_SIGNAL_TOP_K);
 
+    // 후보별 외부 검색 신호 조회를 병렬로 수행한다. (이전에는 직렬 for 루프라
+    // 후보 수에 비례해 네트워크 지연이 합산됐다.)
     const externalSignalEntries: Array<
       readonly [string, KeywordOptionAnalysis["externalSignals"] | undefined]
-    > = [];
-    for (const item of topForExternalSignals) {
-      try {
-        const externalSignals = await getExternalSearchSignals({
-          title: item.title,
-          mainKeyword: item.mainKeyword,
-          subKeyword1: item.subKeyword1,
-          subKeyword2: item.subKeyword2,
-        });
-        externalSignalEntries.push([item.title, externalSignals] as const);
-      } catch {
-        externalSignalEntries.push([item.title, undefined] as const);
-      }
-    }
+    > = await Promise.all(
+      topForExternalSignals.map(
+        async (
+          item
+        ): Promise<readonly [string, KeywordOptionAnalysis["externalSignals"] | undefined]> => {
+          try {
+            const externalSignals = await getExternalSearchSignals({
+              title: item.title,
+              mainKeyword: item.mainKeyword,
+              subKeyword1: item.subKeyword1,
+              subKeyword2: item.subKeyword2,
+            });
+            return [item.title, externalSignals] as const;
+          } catch {
+            return [item.title, undefined] as const;
+          }
+        }
+      )
+    );
 
     const externalSignalMap = new Map(externalSignalEntries);
 

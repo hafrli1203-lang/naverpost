@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { ArticleChat } from "@/components/ArticleChat";
 import { ArticleContent } from "@/types";
 import {
   CheckCircle,
@@ -26,10 +27,12 @@ interface ArticlePreviewProps {
   onApprove: () => void;
   onRewrite: () => void;
   onManualEdit: (content: string) => void | Promise<void>;
+  onChat?: (instruction: string) => void | Promise<void>;
   onWash?: () => void | Promise<void>;
   onRevertWash?: () => void;
   onSave?: () => void;
   isLoading: boolean;
+  isChatting?: boolean;
   isWashing?: boolean;
   targetCharCount?: number;
 }
@@ -171,10 +174,12 @@ export function ArticlePreview({
   onApprove,
   onRewrite,
   onManualEdit,
+  onChat,
   onWash,
   onRevertWash,
   onSave,
   isLoading,
+  isChatting = false,
   isWashing = false,
   targetCharCount = 2000,
 }: ArticlePreviewProps) {
@@ -230,6 +235,15 @@ export function ArticlePreview({
         <h2 className="text-xl font-semibold">본문 미리보기</h2>
         <p className="text-sm text-muted-foreground">작성된 블로그 본문을 검토하세요</p>
       </div>
+
+      {article.researchStatus === "empty" && (
+        <Alert className="border-orange-300 bg-orange-50 py-2">
+          <AlertTriangle className="w-4 h-4 text-orange-600" />
+          <AlertDescription className="text-xs text-orange-800">
+            외부 조사 자료를 가져오지 못해 일반 지식으로 작성되었어요. 키워드 의미가 어긋났는지 확인하고 필요하면 채팅으로 수정 지시를 주세요.
+          </AlertDescription>
+        </Alert>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Article content */}
@@ -498,6 +512,14 @@ export function ArticlePreview({
               )}
             </CardContent>
           </Card>
+
+          {onChat && (
+            <ArticleChat
+              messages={article.revisionChat ?? []}
+              onSend={onChat}
+              isLoading={isChatting || isLoading}
+            />
+          )}
         </div>
       </div>
 

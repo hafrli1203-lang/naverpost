@@ -68,6 +68,7 @@ export default function Home() {
 
   const [maxStageReached, setMaxStageReached] = useState<number>(state.currentStage);
   const [isLoading, setIsLoading] = useState(false);
+  const [isChatting, setIsChatting] = useState(false);
   const [isWashing, setIsWashing] = useState(false);
   const [isGeneratingImages, setIsGeneratingImages] = useState(false);
   const [imageProgress, setImageProgress] = useState({ current: 0, total: 0 });
@@ -223,6 +224,48 @@ export default function Home() {
     if (!state.selectedKeyword) return;
     await handleKeywordSelect(state.selectedKeyword);
   }, [state.selectedKeyword, handleKeywordSelect]);
+
+  const handleArticleChat = useCallback(
+    async (instruction: string) => {
+      if (!state.article) return;
+      const trimmed = instruction.trim();
+      if (!trimmed) return;
+
+      const baseChat = state.article.revisionChat ?? [];
+      const messages = [...baseChat, { role: "user" as const, content: trimmed }];
+
+      // Optimistically show the user's instruction in the thread.
+      setState((prev) =>
+        prev.article
+          ? { ...prev, article: { ...prev.article, revisionChat: messages } }
+          : prev
+      );
+      setIsChatting(true);
+      try {
+        const res = await fetch("/api/article/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            article: { ...state.article, revisionChat: undefined },
+            messages,
+            charCount: articleOptions?.charCount ?? state.article.content.length,
+          }),
+        });
+        const json = await safeJson(res);
+        if (!res.ok || !json.success) {
+          throw new Error(json.error ?? "재수정에 실패했습니다.");
+        }
+        const updated = json.data as ArticleContent;
+        setState((prev) => ({ ...prev, article: updated }));
+        toast.success("지시를 반영해 본문을 다시 작성했습니다.");
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "재수정 중 오류가 발생했습니다.");
+      } finally {
+        setIsChatting(false);
+      }
+    },
+    [articleOptions, setState, state.article]
+  );
 
   const handleArticleWash = useCallback(async () => {
     if (!state.article) return;
@@ -698,10 +741,12 @@ export default function Home() {
             onApprove={handleArticleApprove}
             onRewrite={handleArticleRewrite}
             onManualEdit={handleManualEdit}
+            onChat={handleArticleChat}
             onWash={handleArticleWash}
             onRevertWash={handleRevertWash}
             onSave={handleSaveSession}
             isLoading={isLoading || isGeneratingImages}
+            isChatting={isChatting}
             isWashing={isWashing}
             targetCharCount={articleOptions?.charCount ?? 2000}
           />

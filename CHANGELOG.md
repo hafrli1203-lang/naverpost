@@ -5,6 +5,51 @@
 
 ---
 
+## v1.6 (2026-05-22)
+
+### 키워드 맥락 조사 강화 + 채팅 기반 재수정
+
+**버그:** 생성 본문이 키워드의 실제 업계 의미와 어긋남 (예: "기능성렌즈"를 코팅 기능으로, "멀티포컬"을 다초점 안경렌즈로 서술).
+
+**근본 원인:**
+- `cb4cb18`(5/7)에서 `RESEARCH_TIMEOUT_MS` 45s → 12s로 축소 → Perplexity sonar가 12초 초과 시 조사 자료가 빈 값으로 폴백 → Claude가 일반 지식만으로 작성하며 일반 통념(멀티포컬=다초점안경 등)을 반영 (회귀)
+- `researchKeyword(keyword.mainKeyword)` — 메인 키워드 문자열만 검색. 서브 키워드 2개·카테고리 맥락 미전달
+- 후속 질문 5개를 응답으로 받기만 하고 재검색하지 않음 (얕은 단발 검색)
+- 의미 정합성 검증·사후 채팅 교정 수단 부재
+
+**변경사항:**
+- `lib/ai/perplexity.ts`: `researchKeyword` 시그니처 변경 (`ResearchParams` 객체). 메인+서브2+카테고리+용어집 힌트를 1차 동시 검색 → 후속 질문 5개 전부 병렬 재검색해 자료 보강. `{ text, result, status }` 반환 (status="empty"는 조사 실패)
+- `data/opticalGlossary.json` + `lib/domain/opticalGlossary.ts` 신규: 안경원 모호 용어 사전(멀티포컬=콘택트렌즈, 기능성렌즈=눈피로감소 안경렌즈). 사용자가 항목 추가 가능. zod 검증, 공백무시 부분일치
+- `lib/prompts/articlePrompt.ts`·`promoPrompt.ts`: `[키워드 정확한 의미]` 블록 주입 (`glossaryHint`)
+- `app/api/article/route.ts`: 조사 타임아웃 12s→40s, 경쟁분석 12s→25s. 용어집 조회 후 조사·프롬프트에 주입. `researchStatus` 본문에 전달
+- `lib/prompts/chatRevisionPrompt.ts` + `app/api/article/chat/route.ts` 신규: 멀티턴 채팅 지시 기반 재수정 (키워드 원형·매장 안내·쉼표금지 보존)
+- `components/ArticleChat.tsx` 신규 + `ArticlePreview.tsx` 통합: 본문 미리보기에 채팅 패널, 조사 실패 시 경고 배지
+- `app/page.tsx`: `handleArticleChat` + `isChatting` 상태
+- `types/index.ts`: `ChatMessage`, `ArticleContent.researchStatus`·`revisionChat` 추가
+
+**검증:** `tsc --noEmit` 0 에러, `eslint` 통과, `pnpm build` 성공(`/api/article/chat` 컴파일 확인), 용어집 매칭 로직 단위 확인(멀티포컬·기능성렌즈 정상 매칭, 무관 키워드 빈 배열).
+
+**설계 문서:** `docs/designs/v1.6-research-context-and-chat-revision.md`
+
+### 성능: 키워드/본문 생성 시간 초과 완화 (병렬화)
+
+**버그:** 키워드/제목 추출·본문 생성이 너무 오래 걸리고 가끔 시간 초과.
+
+**원인:** 독립적인 외부 호출들이 직렬로 실행되며 지연이 합산됨.
+- 본문(`api/article`): 조사→RSS→경쟁분석이 직렬. v1.6에서 조사 타임아웃을 40s로 올려 최악 ~340s로 maxDuration 300s 초과 위험 증가
+- 키워드(`api/keywords`): 상단 데이터 수집 4건(RSS·세션·경쟁제목·검색량) 직렬 + 후보별 외부신호 조회가 직렬 for 루프
+
+**변경사항 (결과물 동일, 속도만 개선):**
+- `api/article/route.ts`: 조사+RSS+경쟁분석을 `Promise.all` 동시 실행. maxDuration 300→360
+- `api/keywords/route.ts`: RSS+세션(순차 유지)·경쟁제목·검색량을 `Promise.all` 동시 실행. 후보별 외부신호 조회 for 루프를 `Promise.all`로 병렬화
+- 각 작업의 try/catch 폴백은 그대로 보존 (한 신호가 실패해도 나머지로 계속 진행)
+
+**보류:** 키워드 생성의 AI CLI 호출 횟수 축소(Codex+Claude 최대 4회 직렬)는 품질 영향이 있어 별도 논의 예정.
+
+**검증:** `tsc --noEmit` 0 에러, `eslint` 통과, `pnpm build` 성공.
+
+---
+
 ## v1.5 (2026-04-25)
 
 ### 외부 API → 로컬 CLI 마이그레이션 (구독제 활용)

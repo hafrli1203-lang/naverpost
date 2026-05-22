@@ -82,6 +82,7 @@ export function buildArticlePrompt(params: {
   charCount?: CharCountType;
   tone?: ToneType;
   externalReference?: string;
+  glossaryHint?: string;
   brief?: ArticleBrief;
 }): string {
   const {
@@ -96,6 +97,7 @@ export function buildArticlePrompt(params: {
     charCount = 2000,
     tone = "standard",
     externalReference,
+    glossaryHint,
     brief,
   } = params;
 
@@ -105,6 +107,10 @@ export function buildArticlePrompt(params: {
 
   const externalRefSection = externalReference
     ? `\n[외부 참고 자료]\n${externalReference}\n※ 위 자료의 내용을 참고하되 그대로 복사하지 말고 안경원 관점에서 재해석하여 활용하세요.\n`
+    : "";
+
+  const glossarySection = glossaryHint
+    ? `\n[키워드 정확한 의미 — 반드시 준수]\n${glossaryHint}\n※ 위 정의를 벗어나 일반 웹 통념으로 해석하지 마세요. 정의와 어긋난 설명은 불합격입니다.\n`
     : "";
 
   const competitorSection =
@@ -139,7 +145,7 @@ export function buildArticlePrompt(params: {
 메인 키워드: ${mainKeyword}
 서브 키워드1: ${subKeyword1}
 서브 키워드2: ${subKeyword2}
-
+${glossarySection}
 [조사 자료]
 ${researchData}
 ${externalRefSection}

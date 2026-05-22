@@ -304,6 +304,11 @@ export interface ResearchCitationEntry {
   url?: string;
 }
 
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
 export interface ArticleContent {
   title: string;
   content: string;
@@ -313,6 +318,10 @@ export interface ArticleContent {
   shopName: string;
   category: string;
   validation: ValidationResult;
+  /** "empty" when Perplexity research failed/timed out and the body was written without external sources. */
+  researchStatus?: "ok" | "empty";
+  /** Multi-turn revision chat history shown in the article preview. */
+  revisionChat?: ChatMessage[];
   brief?: ArticleBrief;
   washingApplied?: boolean;
   washingTone?: string;
