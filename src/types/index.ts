@@ -143,6 +143,11 @@ export interface SearchVolumeSignal {
   monthlyPcSearches?: number | null;
   monthlyMobileSearches?: number | null;
   monthlyTotalSearches?: number | null;
+  blogDocumentCount?: number | null;
+  competitionRatio?: number | null;
+  opportunityScore?: number | null;
+  seasonalFit?: "high" | "medium" | "low" | "unknown";
+  seasonalReason?: string;
   monthlyPcSearchesLabel?: string;
   monthlyMobileSearchesLabel?: string;
   competitionLabel?: string;

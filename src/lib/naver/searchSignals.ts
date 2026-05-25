@@ -5,7 +5,11 @@ import type {
   SearchVolumeSignal,
 } from "@/types";
 import { generateRelatedKeywords } from "@/lib/nlp/nounExtractor";
+import { enrichOpportunitySignal } from "@/lib/keywords/opportunityScoring";
 import { createHmac } from "crypto";
+
+const NAVER_FETCH_TIMEOUT_MS = 8_000;
+const NAVER_SEARCHAD_TIMEOUT_MS = 18_000;
 
 export class NaverSearchDependencyError extends Error {
   constructor(message: string) {
@@ -82,6 +86,23 @@ function stripHtml(text: string): string {
   return text.replace(/<[^>]+>/g, "").trim();
 }
 
+async function fetchWithTimeout(
+  input: RequestInfo | URL,
+  init: RequestInit = {},
+  timeoutMs = NAVER_FETCH_TIMEOUT_MS
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, {
+      ...init,
+      signal: init.signal ?? controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export async function fetchCompetitorTitles(
   seeds: string[],
   maxSeeds = 4
@@ -121,7 +142,7 @@ async function fetchBlogSearch(keyword: string): Promise<{
   url.searchParams.set("start", "1");
   url.searchParams.set("sort", "sim");
 
-  const response = await fetch(url, {
+  const response = await fetchWithTimeout(url, {
     method: "GET",
     headers: {
       "X-Naver-Client-Id": normalizeNaverCredential(process.env.NAVER_CLIENT_ID),
@@ -183,7 +204,7 @@ async function fetchSearchTrend(keywords: string[]): Promise<SearchVolumeSignal[
     })),
   };
 
-  const response = await fetch("https://openapi.naver.com/v1/datalab/search", {
+  const response = await fetchWithTimeout("https://openapi.naver.com/v1/datalab/search", {
     method: "POST",
     headers: getHeaders(),
     body: JSON.stringify(body),
@@ -255,10 +276,14 @@ async function fetchSearchAdKeywordStats(
   url.searchParams.set("hintKeywords", uniqueKeywords.join(","));
   url.searchParams.set("showDetail", "1");
 
-  const response = await fetch(url, {
-    method: "GET",
-    headers: getSearchAdHeaders("GET", path),
-  });
+  const response = await fetchWithTimeout(
+    url,
+    {
+      method: "GET",
+      headers: getSearchAdHeaders("GET", path),
+    },
+    NAVER_SEARCHAD_TIMEOUT_MS
+  );
 
   if (!response.ok) {
     throw new NaverSearchDependencyError(
@@ -277,14 +302,9 @@ async function fetchSearchAdKeywordStats(
     }>;
   };
 
-  const requested = new Map(
-    uniqueKeywords.map((keyword) => [normalizeKeywordKey(keyword), keyword])
-  );
-
   for (const item of json.keywordList ?? []) {
     const relKeyword = item.relKeyword ?? "";
-    const matchedKeyword = requested.get(normalizeKeywordKey(relKeyword));
-    if (!matchedKeyword) continue;
+    if (!relKeyword.trim()) continue;
 
     const pc = parseSearchAdCount(item.monthlyPcQcCnt);
     const mobile = parseSearchAdCount(item.monthlyMobileQcCnt);
@@ -293,8 +313,8 @@ async function fetchSearchAdKeywordStats(
         ? (pc.value ?? 0) + (mobile.value ?? 0)
         : null;
 
-    resultMap.set(normalizeKeywordKey(matchedKeyword), {
-      keyword: matchedKeyword,
+    resultMap.set(normalizeKeywordKey(relKeyword), {
+      keyword: relKeyword.trim(),
       monthlyPcSearches: pc.value,
       monthlyMobileSearches: mobile.value,
       monthlyTotalSearches: monthlyTotal,
@@ -332,9 +352,40 @@ export async function fetchKeywordDemandSignals(
     }
   }
 
-  return uniqueKeywords
-    .map((keyword) => merged.get(normalizeKeywordKey(keyword)))
-    .filter((signal): signal is SearchVolumeSignal => Boolean(signal));
+  return Array.from(merged.values())
+    .sort((a, b) => (b.monthlyTotalSearches ?? 0) - (a.monthlyTotalSearches ?? 0))
+    .slice(0, 120);
+}
+
+export async function fetchKeywordOpportunitySignals(
+  keywords: string[]
+): Promise<SearchVolumeSignal[]> {
+  const uniqueKeywords = Array.from(
+    new Set(keywords.map((keyword) => keyword.trim()).filter(Boolean))
+  );
+  if (uniqueKeywords.length === 0) return [];
+
+  const [demandSignals, blogCounts] = await Promise.all([
+    fetchKeywordDemandSignals(uniqueKeywords),
+    Promise.all(
+      uniqueKeywords.map(async (keyword): Promise<[string, number | null]> => {
+        try {
+          const blogSearch = await fetchBlogSearch(keyword);
+          return [normalizeKeywordKey(keyword), blogSearch.total];
+        } catch {
+          return [normalizeKeywordKey(keyword), null];
+        }
+      })
+    ),
+  ]);
+  const blogCountMap = new Map(blogCounts);
+
+  return demandSignals.map((signal) =>
+    enrichOpportunitySignal({
+      ...signal,
+      blogDocumentCount: blogCountMap.get(normalizeKeywordKey(signal.keyword)) ?? null,
+    })
+  );
 }
 
 function mergeSearchTrendAndAdStats(
@@ -359,9 +410,16 @@ function mergeSearchTrendAndAdStats(
     });
   }
 
-  return keywords
+  const selected = keywords
     .map((keyword) => byKeyword.get(normalizeKeywordKey(keyword)))
     .filter((signal): signal is SearchVolumeSignal => Boolean(signal));
+  const selectedKeys = new Set(selected.map((signal) => normalizeKeywordKey(signal.keyword)));
+  const relatedAdSignals = Array.from(adStats.values())
+    .filter((signal) => !selectedKeys.has(normalizeKeywordKey(signal.keyword)))
+    .sort((a, b) => (b.monthlyTotalSearches ?? 0) - (a.monthlyTotalSearches ?? 0))
+    .slice(0, 8);
+
+  return [...selected, ...relatedAdSignals];
 }
 
 function buildExposureFromBlogSearch(total: number): ExposureSignal[] {
@@ -390,7 +448,7 @@ async function fetchAutocomplete(keyword: string): Promise<string[]> {
   url.searchParams.set("q_enc", "UTF-8");
   url.searchParams.set("st", "100");
 
-  const response = await fetch(url, {
+  const response = await fetchWithTimeout(url, {
     method: "GET",
     headers: {
       "User-Agent":
@@ -484,12 +542,24 @@ export async function getExternalSearchSignals(params: {
     )
   );
 
-  const [blogSearch, trendSignals, searchAdStats, autocompleteRelated] = await Promise.all([
-    fetchBlogSearch(mainKeyword),
-    fetchSearchTrend(tokens),
-    fetchSearchAdKeywordStats(autocompleteSeeds),
-    buildRelatedFromAutocomplete(autocompleteSeeds),
-  ]);
+  const [blogSearchResult, trendResult, searchAdResult, autocompleteResult] =
+    await Promise.allSettled([
+      fetchBlogSearch(mainKeyword),
+      fetchSearchTrend(tokens),
+      fetchSearchAdKeywordStats(autocompleteSeeds),
+      buildRelatedFromAutocomplete(autocompleteSeeds),
+    ]);
+  const blogSearch =
+    blogSearchResult.status === "fulfilled"
+      ? blogSearchResult.value
+      : { total: 0, items: [] };
+  const trendSignals = trendResult.status === "fulfilled" ? trendResult.value : [];
+  const searchAdStats =
+    searchAdResult.status === "fulfilled"
+      ? searchAdResult.value
+      : new Map<string, SearchVolumeSignal>();
+  const autocompleteRelated =
+    autocompleteResult.status === "fulfilled" ? autocompleteResult.value : [];
   const searchVolume = mergeSearchTrendAndAdStats(
     trendSignals,
     searchAdStats,
@@ -497,21 +567,38 @@ export async function getExternalSearchSignals(params: {
   );
   const exposures = buildExposureFromBlogSearch(blogSearch.total);
 
-  if (searchVolume.length === 0) {
-    throw new NaverSearchDependencyError(
-      "네이버 검색량/트렌드 데이터를 확보하지 못해 키워드 분석을 진행할 수 없습니다."
-    );
-  }
+  const searchVolumeWithOpportunity = searchVolume.map((signal) =>
+    enrichOpportunitySignal({
+      ...signal,
+      blogDocumentCount:
+        normalizeKeywordKey(signal.keyword) === normalizeKeywordKey(mainKeyword)
+          ? blogSearch.total
+          : signal.blogDocumentCount,
+    })
+  );
 
   let relatedKeywords: RelatedKeywordSignal[] = autocompleteRelated;
-  const notes: string[] = [
+  const notes: string[] = [];
+
+  if (blogSearchResult.status === "rejected") notes.push("네이버 블로그 검색 신호 수집에 실패했습니다.");
+  if (trendResult.status === "rejected") notes.push("데이터랩 트렌드 신호 수집에 실패했습니다.");
+  if (searchAdResult.status === "rejected") {
+    const reason =
+      searchAdResult.reason instanceof Error
+        ? searchAdResult.reason.message
+        : "알 수 없는 오류";
+    notes.push(`검색광고 월간 검색량 수집에 실패했습니다: ${reason}`);
+  }
+  if (autocompleteResult.status === "rejected") notes.push("자동완성 연관어 수집에 실패했습니다.");
+
+  notes.push(
     searchAdStats.size > 0
-      ? "네이버 블로그 검색 API, 데이터랩 검색어 트렌드 API, 검색광고 키워드 도구 API로 수집한 실데이터입니다."
-      : "네이버 블로그 검색 API와 데이터랩 검색어 트렌드 API로 수집한 실데이터입니다.",
-  ];
+      ? "검색광고 키워드 도구의 월간 검색량과 네이버 블로그 문서수 신호를 후보 점수에 반영했습니다."
+      : "검색광고 월간 검색량은 비어 있어 블로그/트렌드 보조 신호만 반영했습니다."
+  );
 
   if (hasWorkingSearchAdCredentials() && searchAdStats.size === 0) {
-    notes.push("검색광고 키워드 도구에서 입력 키워드와 정확히 일치하는 월간 검색량을 찾지 못했습니다.");
+    notes.push("검색광고 키워드 도구에서 월간 검색량을 찾지 못했습니다.");
   }
 
   if (relatedKeywords.length === 0) {
@@ -532,19 +619,13 @@ export async function getExternalSearchSignals(params: {
     notes.push("자동완성 엔드포인트로 연관 검색 신호를 수집했습니다.");
   }
 
-  if (exposures.length === 0) {
-    throw new NaverSearchDependencyError(
-      "네이버 노출 경쟁 신호를 확보하지 못해 키워드 분석을 진행할 수 없습니다."
-    );
-  }
-
   return {
-    status: "available",
-    provider: searchVolume.some((signal) => signal.monthlyTotalSearches !== undefined)
-      ? "naver-openapi+searchad"
+    status: searchVolumeWithOpportunity.length > 0 || exposures.length > 0 ? "available" : "unavailable",
+    provider: searchVolumeWithOpportunity.some((signal) => signal.monthlyTotalSearches !== undefined)
+      ? "naver-openapi+searchad+opportunity"
       : "naver-openapi",
     checkedAt: new Date().toISOString(),
-    searchVolume,
+    searchVolume: searchVolumeWithOpportunity,
     relatedKeywords,
     exposures,
     notes,

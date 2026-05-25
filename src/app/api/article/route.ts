@@ -21,6 +21,9 @@ const MAX_REVISION_ATTEMPTS = 1;
 // Claude to write from generic knowledge (the keyword-misinterpretation regression).
 const RESEARCH_TIMEOUT_MS = 40_000;
 const COMPETITOR_ANALYSIS_TIMEOUT_MS = 25_000;
+const ARTICLE_WRITE_TIMEOUT_MS = 150_000;
+const ARTICLE_RETRY_TIMEOUT_MS = 75_000;
+const ARTICLE_REVISION_TIMEOUT_MS = 60_000;
 
 function withTimeout<T>(
   promise: Promise<T>,
@@ -273,13 +276,13 @@ export async function POST(request: NextRequest) {
 
     let rawContent: string;
     try {
-      rawContent = await writeArticle(prompt, 180_000);
+      rawContent = await writeArticle(prompt, ARTICLE_WRITE_TIMEOUT_MS);
     } catch (error) {
       const message = error instanceof Error ? error.message : "";
       if (!/timed out|timeout/i.test(message)) throw error;
       rawContent = await writeArticle(
-        `${prompt}\n\n[재시도 지시]\n이전 시도가 시간 초과되었습니다. 위 조건은 유지하되 더 간결하게 작성하세요. 본문만 출력하세요.`,
-        180_000
+        `${prompt}\n\n[재시도 지시]\n이전 시도가 시간 초과되었습니다. 위 조건은 유지하되 문단을 더 압축하고 표는 1개만 사용하세요. 본문만 출력하세요.`,
+        ARTICLE_RETRY_TIMEOUT_MS
       );
     }
 
@@ -316,7 +319,7 @@ export async function POST(request: NextRequest) {
       });
       try {
         content = stripLeadingTitleLine(
-          sanitizeArticleContent(await reviseArticle(revisionPrompt, 90_000)),
+          sanitizeArticleContent(await reviseArticle(revisionPrompt, ARTICLE_REVISION_TIMEOUT_MS)),
           keyword.title
         );
         validation = await validateContent(content, keywordsForValidation, {

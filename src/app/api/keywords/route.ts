@@ -7,6 +7,7 @@ import { fetchBlogTitles } from "@/lib/naver/rssParser";
 import {
   fetchCompetitorTitles,
   fetchKeywordDemandSignals,
+  fetchKeywordOpportunitySignals,
   getExternalSearchSignals,
   NaverSearchDependencyError,
 } from "@/lib/naver/searchSignals";
@@ -33,6 +34,9 @@ import type { KeywordOption, KeywordOptionAnalysis, SearchVolumeSignal } from "@
 export const maxDuration = 360;
 const TARGET_RESULT_COUNT = 10;
 const EXTERNAL_SIGNAL_TOP_K = TARGET_RESULT_COUNT;
+const KEYWORD_FIRST_EDIT_TIMEOUT_MS = 70_000;
+const KEYWORD_REPAIR_TIMEOUT_MS = 90_000;
+const KEYWORD_RETRY_TIMEOUT_MS = 90_000;
 
 function normalizeTitleForComparison(title: string): string {
   return title.replace(/\s+/g, " ").trim().toLowerCase();
@@ -145,6 +149,58 @@ function inferSpecificMaterialGroup(option: KeywordOption): string {
   return inferMaterialGroup(option);
 }
 
+function inferContentThemeFromText(source: string): string {
+  if (/렌즈건조|건조감|건조|장시간렌즈/.test(source)) return "contact-lens-dryness";
+  if (/렌즈충혈|눈충혈|충혈|이물감/.test(source)) return "contact-lens-irritation";
+  if (/렌즈검사|콘택트렌즈 검사|난시렌즈 검사|시력|도수|검사/.test(source)) {
+    return "contact-lens-exam";
+  }
+  if (/난시렌즈|난시/.test(source)) return "contact-lens-astigmatism";
+  if (/멀티포컬렌즈|멀티포컬|다초점/.test(source)) return "contact-lens-multifocal";
+  if (/컬러렌즈|컬러/.test(source)) return "contact-lens-color";
+  if (/원데이렌즈|원데이|교체 주기|렌즈교체/.test(source)) return "contact-lens-replacement";
+  if (/렌즈세척|렌즈보관|렌즈관리|렌즈케이스|하드렌즈 관리|하드렌즈 보관|하드렌즈 세척|위생|세척|보관|케이스/.test(source)) {
+    return "contact-lens-care";
+  }
+  if (/소프트렌즈|하드렌즈|착용시간|렌즈착용|착용/.test(source)) return "contact-lens-wearing";
+  if (/렌즈/.test(source)) return "contact-lens-general";
+
+  if (/안경김서림|김서림/.test(source)) return "glasses-fogging";
+  if (/안경세척|안경관리|안경보관|안경닦이|스크래치|흠집|얼룩/.test(source)) {
+    return "glasses-care";
+  }
+  if (/안경피팅|흘러내림|코패드|코받침|귀통증|착용감/.test(source)) {
+    return "glasses-fitting";
+  }
+  if (/티타늄|울템|뿔테|메탈|하금테|무테|반무테|소재|얼굴형/.test(source)) {
+    return "frame-selection";
+  }
+  if (/누진|다초점|노안|돋보기/.test(source)) return "progressive-lens";
+  if (/블루라이트|변색|자외선|압축|고굴절|코팅/.test(source)) return "lens-selection";
+  if (/눈피로|안구건조|눈초점|시력저하|야간시력/.test(source)) return "eye-symptom";
+
+  return inferMaterialGroup({
+    title: source,
+    mainKeyword: source,
+    subKeyword1: "",
+    subKeyword2: "",
+  });
+}
+
+function inferContentTheme(option: KeywordOption): string {
+  const primaryTheme = inferContentThemeFromText(`${option.title} ${option.mainKeyword}`);
+  if (!/general$/.test(primaryTheme)) return primaryTheme;
+  return inferContentThemeFromText(
+    `${option.title} ${option.mainKeyword} ${option.subKeyword1} ${option.subKeyword2}`
+  );
+}
+
+function countHistoryThemeOverlap(option: KeywordOption, history: string[]): number {
+  const theme = inferContentTheme(option);
+  if (!theme) return 0;
+  return history.filter((title) => inferContentThemeFromText(title) === theme).length;
+}
+
 function inferIntentBucket(option: KeywordOption): IntentBucket {
   const source = `${option.title} ${option.mainKeyword} ${option.subKeyword1} ${option.subKeyword2}`;
 
@@ -187,15 +243,19 @@ function inferMainKeywordAxis(option: KeywordOption): string {
   if (!main) return option.mainKeyword.trim();
 
   const [head, core] = main;
-  if (/장림|공주|장유|김해|충남대|심곡|진해|서면|둔산|유성|부산|대전|서울|인천|대구|광주|울산|수원|창원/.test(head)) {
+  if (isRegionWord(head)) {
     return core;
   }
   return head;
 }
 
-function startsWithRegion(keyword: string): boolean {
-  const first = keyword.trim().split(/\s+/)[0] ?? "";
-  return /^(장림|공주|장유|김해|충남대|심곡|진해|서면|둔산|유성|부산|대전|서울|인천|대구|광주|울산|수원|창원)$/.test(first);
+function isRegionWord(word: string): boolean {
+  return /^(장림|장림시장|공주|신관|장유|김해|충남대|궁동|심곡|진해|서면|둔산|유성|부산|대전|서울|인천|대구|광주|울산|수원|창원)/.test(word);
+}
+
+function startsWithRegionWord(text: string): boolean {
+  const first = text.trim().split(/\s+/)[0] ?? "";
+  return isRegionWord(first);
 }
 
 function isTooSimilarTitle(a: KeywordOption, b: KeywordOption): boolean {
@@ -303,14 +363,28 @@ function getMonthlyDemandScore(total?: number | null): number {
   if (total <= 10) return 2;
   if (total <= 100) return 18;
   if (total <= 1000) return 25;
-  if (total <= 3000) return 4;
-  return -25;
+  if (total <= 3000) return 22;
+  if (total <= 10000) return 10;
+  return -8;
 }
 
 function getDemandSignalScore(signal: SearchVolumeSignal): number {
+  const opportunityScore =
+    typeof signal.opportunityScore === "number"
+      ? Math.round(signal.opportunityScore / 2)
+      : 0;
+  const seasonalScore =
+    signal.seasonalFit === "high" ? 10 : signal.seasonalFit === "medium" ? 4 : 0;
+  const blogCompetitionPenalty =
+    typeof signal.competitionRatio === "number" && signal.competitionRatio > 30
+      ? -18
+      : 0;
   return (
     getMonthlyDemandScore(signal.monthlyTotalSearches) +
-    getCompetitionScore(signal.competitionLabel)
+    getCompetitionScore(signal.competitionLabel) +
+    opportunityScore +
+    seasonalScore +
+    blogCompetitionPenalty
   );
 }
 
@@ -375,6 +449,7 @@ function normalizeKeywordCore(core: string): string {
 
 function isUsableKeywordCore(core: string): boolean {
   if (COMMON_TITLE_WORDS.has(core)) return false;
+  if (/산소투$|자외$|시력검$/.test(core)) return false;
   return !/(할|하려|하려고|줄이려|줄이는|남을|남는|심할|심한|되는|될)$/.test(core);
 }
 
@@ -659,7 +734,9 @@ function isAwkwardGeneratedTitle(title: string): boolean {
     /이 있을 때|가 있을 때|소재와 선택 기준|가입도|주방|수치|재방문/.test(title) ||
     /다른 점|보는 것|파악하기|확인하는 방법|확인하는 법|진행 확인/.test(title) ||
     /보기$|정리$|볼 것$|살펴볼 것$|잡아야 할 때$/.test(title) ||
-    /부터 볼 부분$|때문에 불편할 때$|망치는 순서$|놓치기 쉬운 부분$|확인할 것$|살펴야 할 것$|점검 항목$/.test(title) ||
+    /부터 볼 부분$|때문에 불편할 때$|망치는 순서$|놓치기 쉬운 부분$|확인할 것$|살펴야 할 것$|챙겨야 할 것$|점검 항목$/.test(title) ||
+    /부터 .*까지$|전에 .+부터 볼 때$|보다 먼저 봐야 할 것$|먼저 봐야 할 것$/.test(title) ||
+    /종합|사야|시간 관계|관계에서|상태가 반복|습관이 흐|검사 가는|검사가 반복|건조 검사가|보관 상태가 반복|착용 보관/.test(title) ||
     /관리 흐름$|전 .+ 차이$|영향을 주는 이유$|까지 살펴봐야 할 때$/.test(title) ||
     /습관부터 보는 이유$|착용감이 달라졌을 때$|가 달라졌을 때$/.test(title) ||
     /살펴야 할 코팅$|확인할 관리 원인$|달라지는 판단$|달라지는 점$|달라지는 것들?$|먼저 할 것$|전 도수 차이$/.test(title) ||
@@ -768,6 +845,16 @@ const FALLBACK_KEYWORD_SETS: Record<
     { main: "원데이렌즈 위생", sub1: "원데이렌즈 교체", sub2: "원데이렌즈 착용", title: "원데이렌즈 위생 교체와 착용 기준" },
     { main: "콘택트렌즈 검사", sub1: "콘택트렌즈 시력", sub2: "콘택트렌즈 착용", title: "콘택트렌즈 검사 시력과 착용 기준" },
     { main: "렌즈건조 관리", sub1: "렌즈건조 착용", sub2: "렌즈건조 습관", title: "렌즈건조 관리 착용과 습관 기준" },
+    { main: "렌즈직경 차이", sub1: "렌즈직경 착용감", sub2: "렌즈직경 시야", title: "렌즈직경 차이 착용감이 낯설 때" },
+    { main: "베이스커브 선택", sub1: "베이스커브 착용감", sub2: "베이스커브 검사", title: "베이스커브 선택 렌즈가 자꾸 움직일 때" },
+    { main: "렌즈함수율 차이", sub1: "렌즈함수율 건조", sub2: "렌즈함수율 착용", title: "렌즈함수율 차이 건조감이 오래 갈 때" },
+    { main: "산소투과율 렌즈", sub1: "산소투과율 착용", sub2: "산소투과율 충혈", title: "산소투과율 렌즈 충혈이 반복될 때" },
+    { main: "렌즈돌아감 원인", sub1: "렌즈돌아감 난시", sub2: "렌즈돌아감 착용", title: "렌즈돌아감 원인 난시 교정이 흐릴 때" },
+    { main: "렌즈흐림 원인", sub1: "렌즈흐림 건조", sub2: "렌즈흐림 세척", title: "렌즈흐림 원인 착용 중 뿌옇게 보일 때" },
+    { main: "렌즈빠짐 원인", sub1: "렌즈빠짐 착용", sub2: "렌즈빠짐 검사", title: "렌즈빠짐 원인 눈 깜빡일 때 반복되면" },
+    { main: "토릭렌즈 검사", sub1: "토릭렌즈 난시", sub2: "토릭렌즈 착용", title: "토릭렌즈 검사 축이 맞지 않을 때" },
+    { main: "서클렌즈 직경", sub1: "서클렌즈 착용감", sub2: "서클렌즈 건조", title: "서클렌즈 직경 눈이 답답하게 느껴질 때" },
+    { main: "투명렌즈 착용", sub1: "투명렌즈 건조", sub2: "투명렌즈 검사", title: "투명렌즈 착용 하루 끝에 건조할 때" },
   ],
   "eye-info": [
     { main: "안구건조 원인", sub1: "안구건조 증상", sub2: "안구건조 관리", title: "안구건조 원인을 살펴봐야 할 때" },
@@ -839,6 +926,250 @@ const FALLBACK_KEYWORD_SETS: Record<
   ],
 };
 
+const BROAD_KEYWORD_HEADS: Record<string, string[]> = {
+  progressive: [
+    "누진렌즈",
+    "다초점렌즈",
+    "누진다초점",
+    "노안안경",
+    "노안렌즈",
+    "돋보기안경",
+    "사무용렌즈",
+    "실내용누진",
+    "중근용렌즈",
+    "운전렌즈",
+    "실내렌즈",
+  ],
+  lenses: [
+    "안경렌즈",
+    "렌즈교체",
+    "안경알",
+    "블루라이트렌즈",
+    "변색렌즈",
+    "자외선렌즈",
+    "고굴절렌즈",
+    "압축렌즈",
+    "렌즈압축",
+    "코팅렌즈",
+    "편광렌즈",
+    "운전렌즈",
+    "사무용렌즈",
+    "어린이렌즈",
+    "근시완화렌즈",
+    "근시억제렌즈",
+    "마이오스마트",
+  ],
+  frames: [
+    "안경테",
+    "안경피팅",
+    "안경흘러내림",
+    "가벼운안경",
+    "티타늄안경",
+    "베타티타늄안경",
+    "울템안경",
+    "뿔테안경",
+    "메탈안경",
+    "하금테안경",
+    "무테안경",
+    "반무테안경",
+    "큰안경",
+    "둥근안경",
+    "사각안경",
+    "안경코받침",
+    "코패드",
+  ],
+  contacts: [
+    "콘택트렌즈",
+    "원데이렌즈",
+    "소프트렌즈",
+    "하드렌즈",
+    "난시렌즈",
+    "컬러렌즈",
+    "멀티포컬렌즈",
+    "토릭렌즈",
+    "투명렌즈",
+    "서클렌즈",
+    "아큐브렌즈",
+    "알콘렌즈",
+    "바슈롬렌즈",
+    "쿠퍼비전",
+    "바이오피니티",
+    "데일리스렌즈",
+    "토탈원렌즈",
+    "렌즈직경",
+    "베이스커브",
+    "렌즈함수율",
+    "산소투과율",
+    "실리콘하이드로겔",
+    "렌즈건조",
+    "렌즈충혈",
+    "렌즈이물감",
+    "렌즈흐림",
+    "렌즈돌아감",
+    "렌즈찢어짐",
+    "렌즈빠짐",
+    "렌즈세척",
+    "렌즈보관",
+    "렌즈검사",
+    "렌즈착용",
+    "렌즈착용감",
+    "렌즈착용시간",
+    "렌즈교체",
+    "장시간렌즈",
+  ],
+  "eye-info": [
+    "시력검사",
+    "눈피로",
+    "안구건조",
+    "눈초점",
+    "시력저하",
+    "야간시력",
+    "눈충혈",
+    "눈부심",
+    "근시",
+    "난시",
+    "원시",
+    "노안",
+    "어린이시력",
+    "어린이근시",
+    "청소년시력",
+    "스마트폰눈",
+    "운전시야",
+  ],
+  "glasses-story": [
+    "안경수리",
+    "안경세척",
+    "안경김서림",
+    "안경관리",
+    "안경보관",
+    "안경조정",
+    "안경착용감",
+    "안경흘러내림",
+    "코패드교체",
+    "안경스크래치",
+    "안경렌즈",
+    "안경나사",
+    "안경힌지",
+    "안경닦이",
+    "안경케이스",
+  ],
+};
+
+const BROAD_KEYWORD_TAILS: Record<string, string[]> = {
+  progressive: ["적응", "울렁임", "시야", "운전", "도수", "검사", "돋보기", "업무", "독서", "실내", "부모님", "처음"],
+  lenses: ["선택", "교체", "두께", "압축", "코팅", "도수", "눈피로", "자외선", "눈부심", "야간", "운전", "어린이", "근시", "실내"],
+  frames: ["선택", "착용감", "피팅", "얼굴형", "무게", "소재", "코패드", "귀통증", "흘러내림", "사이즈", "피부톤", "관리"],
+  contacts: [
+    "건조",
+    "충혈",
+    "이물감",
+    "흐림",
+    "검사",
+    "착용감",
+    "착용시간",
+    "세척",
+    "보관",
+    "위생",
+    "난시",
+    "시야",
+    "교체",
+    "직경",
+    "베이스커브",
+    "함수율",
+    "산소투과율",
+    "돌아감",
+    "빠짐",
+    "찢어짐",
+  ],
+  "eye-info": ["원인", "증상", "검사", "관리", "습관", "피로", "흐림", "운전", "독서", "스마트폰", "어린이", "근시", "야간"],
+  "glasses-story": ["원인", "방법", "관리", "교체", "세척", "보관", "피팅", "수리", "흠집", "얼룩", "코팅", "착용감", "습관"],
+};
+
+const TITLE_ANGLE_PHRASES = [
+  "불편이 반복될 때",
+  "사용감이 달라질 때",
+  "먼저 확인할 신호",
+  "생활에서 자주 생기는 이유",
+  "방문 전 살펴볼 기준",
+  "착용 후 달라지는 부분",
+  "선택 전에 구분할 점",
+  "관리 습관이 흔들릴 때",
+];
+
+function getSeasonalTailsForBroadCombinations(categoryId: string, month: number): string[] {
+  if (categoryId === "contacts") {
+    if (month >= 6 && month <= 8) return ["건조", "위생", "착용", "교체"];
+    if (month >= 9 && month <= 11) return ["건조", "착용", "검사", "충혈"];
+    if (month >= 12 || month <= 2) return ["건조", "착용", "보관", "이물감"];
+    return ["건조", "검사", "착용", "충혈"];
+  }
+  if (categoryId === "progressive") return ["부모님", "운전", "독서", "업무"];
+  if (categoryId === "lenses") return ["자외선", "눈피로", "운전", "어린이"];
+  if (categoryId === "frames") return ["착용감", "얼굴형", "무게", "피팅"];
+  if (categoryId === "eye-info") return ["눈피로", "시력검사", "스마트폰", "운전"];
+  if (categoryId === "glasses-story") return ["김서림", "세척", "보관", "착용감"];
+  return [];
+}
+
+function buildBroadCombinationOptions(params: {
+  region: string;
+  categoryId: string;
+  month: number;
+}): KeywordOption[] {
+  void params.region;
+  const heads = BROAD_KEYWORD_HEADS[params.categoryId] ?? [];
+  const tails = BROAD_KEYWORD_TAILS[params.categoryId] ?? [];
+  const seasonalTails = getSeasonalTailsForBroadCombinations(params.categoryId, params.month);
+  const expandedTails = Array.from(new Set([...tails, ...seasonalTails]));
+  const options: KeywordOption[] = [];
+  const seen = new Set<string>();
+
+  for (const head of heads) {
+    for (const tail of expandedTails) {
+      if (head.includes(tail)) continue;
+      const mainKeyword = `${head} ${tail}`;
+      if (seen.has(mainKeyword)) continue;
+      seen.add(mainKeyword);
+      const angle = TITLE_ANGLE_PHRASES[options.length % TITLE_ANGLE_PHRASES.length];
+      options.push({
+        title: `${mainKeyword} ${angle}`,
+        mainKeyword,
+        subKeyword1: `${head} ${expandedTails[(options.length + 3) % expandedTails.length]}`,
+        subKeyword2: `${head} ${expandedTails[(options.length + 7) % expandedTails.length]}`,
+      });
+      if (options.length >= 140) break;
+    }
+    if (options.length >= 140) break;
+  }
+
+  return options;
+}
+
+function isCategoryAppropriateCandidate(categoryId: string, option: KeywordOption): boolean {
+  const source = `${option.title} ${option.mainKeyword} ${option.subKeyword1} ${option.subKeyword2}`;
+  if (
+    startsWithRegionWord(option.mainKeyword) ||
+    startsWithRegionWord(option.subKeyword1) ||
+    startsWithRegionWord(option.subKeyword2) ||
+    startsWithRegionWord(option.title)
+  ) {
+    return false;
+  }
+  if (/종합|사야|시간 관계|관계에서|상태가 반복|습관이 흐|검사 가는|검사가 반복|건조 검사가|보관 상태가 반복|착용 보관/.test(source)) {
+    return false;
+  }
+  if (categoryId === "contacts") {
+    if (/부모님|가정의달|새학기|자외선|휴가|야외|연말/.test(source)) return false;
+  }
+  if (categoryId === "frames") {
+    if (/렌즈건조|렌즈충혈|원데이렌즈|콘택트렌즈|하드렌즈|소프트렌즈/.test(source)) return false;
+  }
+  if (categoryId === "progressive") {
+    if (/렌즈세척|렌즈보관|컬러렌즈|원데이렌즈|코패드|안경수리/.test(source)) return false;
+  }
+  return !/산소투($|\s)/.test(source);
+}
+
 function buildFallbackKeywordOptions(params: {
   region: string;
   categoryId: string;
@@ -850,15 +1181,28 @@ function buildFallbackKeywordOptions(params: {
   const demandOptions = params.demandSignals
     .filter((signal) => {
       const total = signal.monthlyTotalSearches ?? 0;
-      return total > 0 && total <= 1000 && signal.keyword.trim().split(/\s+/).length <= 2;
+      const ratio = signal.competitionRatio ?? 0;
+      return (
+        total > 0 &&
+        total <= 3000 &&
+        (ratio === 0 || ratio <= 30) &&
+        signal.keyword.trim().split(/\s+/).length <= 2
+      );
     })
     .sort((a, b) => getDemandSignalScore(b) - getDemandSignalScore(a))
     .slice(0, 6)
     .map((signal) => {
       const parts = signal.keyword.trim().split(/\s+/);
-      const head = parts[0] ?? signal.keyword.trim();
+      const rawKeyword = signal.keyword.trim();
+      const inferredHead =
+        parts[0] ??
+        BROAD_KEYWORD_HEADS[params.categoryId]?.find((head) =>
+          rawKeyword.replace(/\s+/g, "").includes(head.replace(/\s+/g, ""))
+        ) ??
+        rawKeyword;
+      const head = inferredHead;
       const main =
-        parts.length >= 2 ? `${parts[0]} ${parts[1]}` : `${signal.keyword.trim()} 기준`;
+        parts.length >= 2 ? `${parts[0]} ${parts[1]}` : `${rawKeyword} 기준`;
       return {
         title: `${main} 알아볼 때 확인할 부분`,
         mainKeyword: main,
@@ -880,18 +1224,31 @@ function buildFallbackKeywordOptions(params: {
     region,
     month,
   });
+  const broadOptions = buildBroadCombinationOptions({
+    categoryId: params.categoryId,
+    region,
+    month,
+  });
 
-  return [...seasonalOptions, ...demandOptions, ...categoryOptions].slice(0, 60);
+  return [
+    ...seasonalOptions,
+    ...demandOptions,
+    ...categoryOptions,
+    ...broadOptions,
+  ]
+    .filter((option) => isCategoryAppropriateCandidate(params.categoryId, option))
+    .slice(0, 220);
 }
 
 function alignTitleWithKeywords(option: KeywordOption, index: number): KeywordOption {
   const main = splitKeyword(option.mainKeyword);
   if (!main) return option;
 
-  const [head] = main;
+  const [head, mainCore] = main;
+  const keywordHead = isRegionWord(head) ? mainCore : head;
   const [core1, core2] = pickKeywordCores(option);
-  const subKeyword1 = `${head} ${core1}`;
-  const subKeyword2 = `${head} ${core2}`;
+  const subKeyword1 = `${keywordHead} ${core1}`;
+  const subKeyword2 = `${keywordHead} ${core2}`;
 
   if (
     option.title.includes(option.mainKeyword) &&
@@ -1052,13 +1409,6 @@ function normalizeGeneratedOptions(options: KeywordOption[]): KeywordOption[] {
       ),
     }))
     .filter((option) => {
-      if (
-        startsWithRegion(option.mainKeyword) ||
-        startsWithRegion(option.subKeyword1) ||
-        startsWithRegion(option.subKeyword2)
-      ) {
-        return false;
-      }
       if (!option.title.includes(option.mainKeyword)) return false;
       return true;
     })
@@ -1092,7 +1442,7 @@ function buildCandidateEditingPrompt(params: {
 
   return `당신은 네이버 블로그 제목/키워드 편집장입니다.
 아래 후보는 이미 네이버 검색량과 카테고리 적합성을 기준으로 코드가 압축한 후보입니다.
-새 키워드를 크게 발명하지 말고, 후보를 바탕으로 10개만 선별·정리하세요.
+후보를 바탕으로 하되, 키워드 풀이 좁으면 핵심어×문제어×상황어 조합을 추가해 10개를 선별·정리하세요.
 
 [대상]
 - 매장: ${params.targetStore}
@@ -1117,8 +1467,13 @@ ${NAVER_TITLE_SKILL_RULES}
 
 [중복/금지 규칙]
 - 메인/서브 키워드는 정확히 2단어 조합.
+- 기본 후보에 없는 키워드도 실제 검색어처럼 자연스러우면 허용.
+- 지역명 + 핵심키워드는 등록 블로그 간 중복을 나누는 용도로 허용.
 - 예: title="누진렌즈 울렁임 적응이 어려운 이유" / main="누진렌즈 울렁임" / sub1="누진렌즈 원인" / sub2="누진렌즈 적응"
 - 같은 소재 반복 금지.
+- 같은 관리형 글을 단어만 바꿔 반복 금지. 예: 렌즈세척/렌즈보관/렌즈관리/하드렌즈 관리/렌즈 케이스는 모두 같은 관리형 축으로 본다.
+- 10개 결과 안에서 같은 축은 최대 1개만 둔다. 부득이하면 2개까지 허용하되 제목 각도와 본문 전개가 완전히 달라야 한다.
+- 콘택트렌즈 카테고리는 관리형만 채우지 말고 건조, 충혈/이물감, 난시검사, 컬러렌즈, 멀티포컬, 착용시간, 원데이 교체처럼 서로 다른 문제를 섞는다.
 - 같은 매장 기존 글에 같은 메인 키워드 또는 같은 소재가 있으면 금지.
 - 다른 등록 매장은 제목 동일, 관점 동일, 메인+서브 조합 동일만 금지. 메인 키워드만 같고 관점이 다르면 허용.
 - 네이버 상위 노출 경쟁 제목과 비슷하면 탈락보다 제목 각도·상황어·어미를 바꿔 구분.
@@ -1177,6 +1532,8 @@ ${competitors}
 
 [편집 원칙]
 - 후보를 단순 탈락시키지 말고 먼저 자연스러운 제목으로 고치세요.
+- 후보 풀이 좁으면 같은 카테고리 안의 다른 핵심어와 문제어를 조합해 새 후보를 추가하세요.
+- 지역명 + 핵심키워드는 등록 블로그 간 중복을 줄이는 용도로 허용합니다.
 - title에는 main_keyword를 원형 그대로 포함하세요.
 - main_keyword는 2단어 조합을 유지하세요.
 - sub_keyword_1, sub_keyword_2도 2단어 조합을 유지하되, 어색하면 자연스러운 본문 소재 키워드로 바꾸세요.
@@ -1186,6 +1543,8 @@ ${competitors}
 - "차이"는 제품 비교가 명확할 때만 쓰고, "A와 B 차이"처럼 키워드를 붙인 제목은 피하세요.
 - "맞는 이유", "때문에 달라지는 점"은 기계적으로 보이므로 결과가 드러나는 문장으로 바꾸세요.
 - 같은 후보 묶음 안에서 제목 구조가 반복되면 안 됩니다.
+- 같은 관리형 축을 단어만 바꿔 반복하지 마세요. 렌즈세척/렌즈보관/렌즈관리/하드렌즈 관리/렌즈 케이스는 모두 같은 축입니다.
+- 콘택트렌즈 후보는 관리형만 만들지 말고 건조, 충혈/이물감, 난시검사, 컬러렌즈, 멀티포컬, 착용시간, 원데이 교체처럼 문제 축을 분산하세요.
 - 네이버 상위 제목과 비슷하면 메인 키워드는 유지하되 증상, 사용 장면, 비교 관점, 관리 순서를 바꿔 다른 각도로 만드세요.
 - 기계적인 제목은 반드시 고쳐서 반환하세요.
 - 후보는 최소 20개 이상 반환하세요. 원 후보가 부족하면 같은 메인 키워드의 각도를 바꿔 추가 후보를 만드세요.
@@ -1280,6 +1639,8 @@ function canAddIntentBalancedCandidate<T extends KeywordOption>(
   selected: T[],
   options: { maxPerBucket?: number; allowSimilar?: boolean; maxRegional?: number } = {}
 ): boolean {
+  if (isAwkwardGeneratedTitle(candidate.title)) return false;
+
   const hasExactDuplicate = selected.some(
     (picked) =>
       normalizeTitleForComparison(picked.title) === normalizeTitleForComparison(candidate.title) ||
@@ -1296,6 +1657,14 @@ function canAddIntentBalancedCandidate<T extends KeywordOption>(
     (picked) => inferSpecificMaterialGroup(picked) === material
   ).length;
   if (sameMaterialCount >= (options.allowSimilar ? 2 : 1)) {
+    return false;
+  }
+
+  const contentTheme = inferContentTheme(candidate);
+  const sameThemeCount = selected.filter(
+    (picked) => inferContentTheme(picked) === contentTheme
+  ).length;
+  if (sameThemeCount >= 1) {
     return false;
   }
 
@@ -1430,12 +1799,18 @@ function appendFinalBackfill<T extends KeywordOption & { _priorityScore: number 
 
   for (const candidate of rankedPool) {
     if (filled.length >= TARGET_RESULT_COUNT) break;
+    if (isAwkwardGeneratedTitle(candidate.title)) continue;
     if (inferIntentBucket(candidate) === "regional") continue;
     const material = inferSpecificMaterialGroup(candidate);
     const sameMaterialCount = filled.filter(
       (picked) => inferSpecificMaterialGroup(picked) === material
     ).length;
     if (sameMaterialCount >= 2) continue;
+    const contentTheme = inferContentTheme(candidate);
+    const sameThemeCount = filled.filter(
+      (picked) => inferContentTheme(picked) === contentTheme
+    ).length;
+    if (sameThemeCount >= 1) continue;
     const mainAxis = inferMainKeywordAxis(candidate);
     const sameMainAxisCount = filled.filter(
       (picked) => inferMainKeywordAxis(picked) === mainAxis
@@ -1453,11 +1828,17 @@ function appendFinalBackfill<T extends KeywordOption & { _priorityScore: number 
 
   for (const candidate of rankedPool) {
     if (filled.length >= TARGET_RESULT_COUNT) break;
+    if (isAwkwardGeneratedTitle(candidate.title)) continue;
     const material = inferSpecificMaterialGroup(candidate);
     const sameMaterialCount = filled.filter(
       (picked) => inferSpecificMaterialGroup(picked) === material
     ).length;
     if (sameMaterialCount >= 2) continue;
+    const contentTheme = inferContentTheme(candidate);
+    const sameThemeCount = filled.filter(
+      (picked) => inferContentTheme(picked) === contentTheme
+    ).length;
+    if (sameThemeCount >= 2) continue;
     const mainAxis = inferMainKeywordAxis(candidate);
     const sameMainAxisCount = filled.filter(
       (picked) => inferMainKeywordAxis(picked) === mainAxis
@@ -1506,6 +1887,7 @@ function appendCategoryBackfill<T extends AnalyzedKeyword>(
 
   for (const candidate of fallbackCandidates) {
     if (filled.length >= TARGET_RESULT_COUNT) break;
+    if (isAwkwardGeneratedTitle(candidate.title)) continue;
     const mainAxis = inferMainKeywordAxis(candidate);
     const sameMainAxisCount = filled.filter(
       (picked) => inferMainKeywordAxis(picked) === mainAxis
@@ -1516,6 +1898,11 @@ function appendCategoryBackfill<T extends AnalyzedKeyword>(
       (picked) => inferSpecificMaterialGroup(picked) === material
     ).length;
     if (sameMaterialCount >= 1) continue;
+    const contentTheme = inferContentTheme(candidate);
+    const sameThemeCount = filled.filter(
+      (picked) => inferContentTheme(picked) === contentTheme
+    ).length;
+    if (sameThemeCount >= 1) continue;
     const hasExactDuplicate = filled.some(
       (picked) =>
         normalizeTitleForComparison(picked.title) === normalizeTitleForComparison(candidate.title) ||
@@ -1528,6 +1915,12 @@ function appendCategoryBackfill<T extends AnalyzedKeyword>(
 
   for (const candidate of fallbackCandidates) {
     if (filled.length >= TARGET_RESULT_COUNT) break;
+    if (isAwkwardGeneratedTitle(candidate.title)) continue;
+    const contentTheme = inferContentTheme(candidate);
+    const sameThemeCount = filled.filter(
+      (picked) => inferContentTheme(picked) === contentTheme
+    ).length;
+    if (sameThemeCount >= 2) continue;
     const hasExactDuplicate = filled.some(
       (picked) =>
         normalizeTitleForComparison(picked.title) === normalizeTitleForComparison(candidate.title) ||
@@ -1536,6 +1929,42 @@ function appendCategoryBackfill<T extends AnalyzedKeyword>(
     if (!hasExactDuplicate) {
       filled.push(candidate);
     }
+  }
+
+  return interleaveIntentBuckets(filled).slice(0, TARGET_RESULT_COUNT);
+}
+
+function appendEmergencyDiverseBackfill<T extends AnalyzedKeyword>(
+  selected: T[],
+  candidates: T[]
+): T[] {
+  const filled = [...selected];
+
+  for (const maxSameTheme of [1, 2]) {
+    for (const candidate of candidates) {
+      if (filled.length >= TARGET_RESULT_COUNT) break;
+      if (!candidate.title.includes(candidate.mainKeyword)) continue;
+      if (isAwkwardGeneratedTitle(candidate.title)) continue;
+      const hasExactDuplicate = filled.some(
+        (picked) =>
+          normalizeTitleForComparison(picked.title) === normalizeTitleForComparison(candidate.title) ||
+          hasSameKeywordCombination(picked, candidate)
+      );
+      if (hasExactDuplicate) continue;
+
+      const sameThemeCount = filled.filter(
+        (picked) => inferContentTheme(picked) === inferContentTheme(candidate)
+      ).length;
+      if (sameThemeCount >= maxSameTheme) continue;
+
+      const sameMainAxisCount = filled.filter(
+        (picked) => inferMainKeywordAxis(picked) === inferMainKeywordAxis(candidate)
+      ).length;
+      if (sameMainAxisCount >= 2) continue;
+
+      filled.push(candidate);
+    }
+    if (filled.length >= TARGET_RESULT_COUNT) break;
   }
 
   return interleaveIntentBuckets(filled).slice(0, TARGET_RESULT_COUNT);
@@ -1642,9 +2071,41 @@ function findDemandSignalForKeyword(
   demandSignals: SearchVolumeSignal[]
 ): SearchVolumeSignal | undefined {
   const normalized = keyword.replace(/\s+/g, "").toLowerCase();
-  return demandSignals.find(
+  const exact = demandSignals.find(
     (signal) => signal.keyword.replace(/\s+/g, "").toLowerCase() === normalized
   );
+  if (exact) return exact;
+
+  return demandSignals.find((signal) => {
+    const signalKey = signal.keyword.replace(/\s+/g, "").toLowerCase();
+    return normalized.includes(signalKey) || signalKey.includes(normalized);
+  });
+}
+
+function mergeDemandSignals(...groups: SearchVolumeSignal[][]): SearchVolumeSignal[] {
+  const merged = new Map<string, SearchVolumeSignal>();
+  for (const group of groups) {
+    for (const signal of group) {
+      const key = signal.keyword.replace(/\s+/g, "").toLowerCase();
+      const existing = merged.get(key);
+      if (!existing) {
+        merged.set(key, signal);
+        continue;
+      }
+      merged.set(key, {
+        ...existing,
+        ...signal,
+        monthlyTotalSearches:
+          signal.monthlyTotalSearches ?? existing.monthlyTotalSearches,
+        blogDocumentCount: signal.blogDocumentCount ?? existing.blogDocumentCount,
+        opportunityScore: signal.opportunityScore ?? existing.opportunityScore,
+        competitionRatio: signal.competitionRatio ?? existing.competitionRatio,
+        seasonalFit: signal.seasonalFit ?? existing.seasonalFit,
+        seasonalReason: signal.seasonalReason ?? existing.seasonalReason,
+      });
+    }
+  }
+  return Array.from(merged.values());
 }
 
 type AnalyzedKeyword = KeywordOption & {
@@ -1664,7 +2125,7 @@ function collectCandidateSearchSeeds(options: KeywordOption[]): string[] {
       if (!seed || seen.has(key)) continue;
       seen.add(key);
       seeds.push(seed);
-      if (seeds.length >= 12) return seeds;
+      if (seeds.length >= 15) return seeds;
     }
   }
 
@@ -1684,8 +2145,31 @@ function getExternalDemandScore(
     0,
     ...volumes.map((signal) => getCompetitionScore(signal.competitionLabel))
   );
+  const bestOpportunity = Math.max(
+    0,
+    ...volumes.map((signal) =>
+      typeof signal.opportunityScore === "number" ? Math.round(signal.opportunityScore / 2) : 0
+    )
+  );
+  const bestSeasonal = volumes.some((signal) => signal.seasonalFit === "high")
+    ? 10
+    : volumes.some((signal) => signal.seasonalFit === "medium")
+      ? 4
+      : 0;
+  const measuredDemandBonus = volumes.some(
+    (signal) => typeof signal.monthlyTotalSearches === "number" && signal.monthlyTotalSearches > 0
+  )
+    ? 35
+    : -30;
 
-  return getMonthlyDemandScore(bestTotal) + bestTrend + bestCompetition;
+  return (
+    getMonthlyDemandScore(bestTotal) +
+    bestTrend +
+    bestCompetition +
+    bestOpportunity +
+    bestSeasonal +
+    measuredDemandBonus
+  );
 }
 
 function isCleanCandidate(option: AnalyzedKeyword): boolean {
@@ -1715,10 +2199,7 @@ function isDuplicateSignalFree(option: AnalyzedKeyword): boolean {
 function isBroadlyUsableCandidate(option: AnalyzedKeyword): boolean {
   return (
     option.title.includes(option.mainKeyword) &&
-    !isAwkwardGeneratedTitle(option.title) &&
-    !startsWithRegion(option.mainKeyword) &&
-    !startsWithRegion(option.subKeyword1) &&
-    !startsWithRegion(option.subKeyword2)
+    !isAwkwardGeneratedTitle(option.title)
   );
 }
 
@@ -1752,13 +2233,36 @@ async function analyzeOptions(params: {
         competitorList,
       });
       const demandSignal = findDemandSignalForKeyword(option.mainKeyword, demandSignals);
+      const sameStoreThemeOverlap = countHistoryThemeOverlap(option, forbiddenList);
+      const crossBlogThemeOverlap = countHistoryThemeOverlap(option, referenceList);
+      const hasMeasuredDemand =
+        typeof demandSignal?.monthlyTotalSearches === "number" &&
+        demandSignal.monthlyTotalSearches > 0;
       return {
         ...option,
-        analysis,
+        analysis: demandSignal
+          ? {
+              ...analysis,
+              externalSignals: {
+                status: "available",
+                provider: "naver-searchad-precheck",
+                checkedAt: new Date().toISOString(),
+                searchVolume: [demandSignal],
+                relatedKeywords: [],
+                exposures: [],
+                notes: [
+                  "후보 선별 전에 검색광고 키워드 도구에서 확인한 월간 검색량 신호입니다.",
+                ],
+              },
+            }
+          : analysis,
         validation,
         _priorityScore:
           getKeywordPriorityScore({ validation, analysis }) +
-          (demandSignal ? getDemandSignalScore(demandSignal) : 0),
+          (demandSignal ? getDemandSignalScore(demandSignal) : 0) -
+          (hasMeasuredDemand ? 0 : 18) -
+          Math.min(45, sameStoreThemeOverlap * 15) -
+          Math.min(30, crossBlogThemeOverlap * 4),
       };
     })
   );
@@ -1840,13 +2344,15 @@ export async function POST(request: NextRequest) {
       })(),
       // 네이버 검색 실패 시 경쟁 제목 없이 진행
       fetchCompetitorTitles(competitorSeeds).catch(() => [] as string[]),
-      // 검색광고 월간 검색량 조회 실패 시에도 기존 네이버 검색/트렌드 기반 생성은 계속한다.
-      fetchKeywordDemandSignals(discoverySeeds).catch(() => [] as SearchVolumeSignal[]),
+      // 검색량 + 블로그 문서수 조회 실패 시에도 기존 네이버 검색/트렌드 기반 생성은 계속한다.
+      fetchKeywordOpportunitySignals(discoverySeeds)
+        .catch(() => fetchKeywordDemandSignals(discoverySeeds))
+        .catch(() => [] as SearchVolumeSignal[]),
     ]);
 
     const { forbiddenList, referenceList } = historyOutcome;
     let competitorList: string[] = competitorOutcome;
-    const demandSignals: SearchVolumeSignal[] = demandOutcome;
+    let demandSignals: SearchVolumeSignal[] = demandOutcome;
 
     const strategyGuide = buildKeywordStrategyGuide({
       shop,
@@ -1874,12 +2380,14 @@ export async function POST(request: NextRequest) {
       });
       if (gptCandidates && gptCandidates.length > 0) {
         const seen = new Set<string>();
-        baseCandidates = normalizeGeneratedOptions([...gptCandidates, ...fallbackBatch]).filter((candidate) => {
-          const key = `${candidate.title}|${candidate.mainKeyword}`.trim();
-          if (seen.has(key)) return false;
-          seen.add(key);
-          return true;
-        });
+        baseCandidates = normalizeGeneratedOptions([...gptCandidates, ...fallbackBatch])
+          .filter((candidate) => isCategoryAppropriateCandidate(category.id, candidate))
+          .filter((candidate) => {
+            const key = `${candidate.title}|${candidate.mainKeyword}`.trim();
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          });
       }
     } catch {
       // GPT 후보 확장 실패 시 로컬 후보만 사용한다.
@@ -1898,19 +2406,26 @@ export async function POST(request: NextRequest) {
     let firstBatch: KeywordOption[] = [];
     let usedFallbackBatch = false;
     try {
-      firstBatch = normalizeGeneratedOptions(await generateKeywords(firstPrompt, 90_000));
+      firstBatch = normalizeGeneratedOptions(
+        await generateKeywords(firstPrompt, KEYWORD_FIRST_EDIT_TIMEOUT_MS)
+      ).filter((candidate) => isCategoryAppropriateCandidate(category.id, candidate));
     } catch {
-      firstBatch = normalizeGeneratedOptions(baseCandidates);
+      firstBatch = normalizeGeneratedOptions(baseCandidates).filter((candidate) =>
+        isCategoryAppropriateCandidate(category.id, candidate)
+      );
       usedFallbackBatch = true;
     }
 
     const firstBatchSeen = new Set<string>();
-    firstBatch = [...firstBatch, ...normalizeGeneratedOptions(baseCandidates)].filter((candidate) => {
-      const key = `${candidate.title}|${candidate.mainKeyword}`;
-      if (firstBatchSeen.has(key)) return false;
-      firstBatchSeen.add(key);
-      return true;
-    }).slice(0, TARGET_RESULT_COUNT * 8);
+    firstBatch = [...firstBatch, ...normalizeGeneratedOptions(baseCandidates)]
+      .filter((candidate) => isCategoryAppropriateCandidate(category.id, candidate))
+      .filter((candidate) => {
+        const key = `${candidate.title}|${candidate.mainKeyword}`;
+        if (firstBatchSeen.has(key)) return false;
+        firstBatchSeen.add(key);
+        return true;
+      })
+      .slice(0, TARGET_RESULT_COUNT * 8);
 
     if (!Array.isArray(firstBatch) || firstBatch.length === 0) {
       return NextResponse.json(
@@ -1920,13 +2435,15 @@ export async function POST(request: NextRequest) {
     }
 
     try {
-      const candidateCompetitorList = await fetchCompetitorTitles(
-        collectCandidateSearchSeeds(firstBatch),
-        10
-      );
+      const candidateSeeds = collectCandidateSearchSeeds(firstBatch);
+      const [candidateCompetitorList, candidateDemandSignals] = await Promise.all([
+        fetchCompetitorTitles(candidateSeeds, 10),
+        fetchKeywordOpportunitySignals(candidateSeeds).catch(() => [] as SearchVolumeSignal[]),
+      ]);
       competitorList = Array.from(new Set([...competitorList, ...candidateCompetitorList]));
+      demandSignals = mergeDemandSignals(demandSignals, candidateDemandSignals);
     } catch {
-      // 후보 키워드별 상위 제목 조회 실패 시 기존 카테고리 기반 경쟁 제목만 사용한다.
+      // 후보 키워드별 상위 제목/검색량 조회 실패 시 기존 카테고리 기반 신호만 사용한다.
     }
 
     try {
@@ -1938,8 +2455,8 @@ export async function POST(request: NextRequest) {
         competitorList,
       });
       const repairedBatch = normalizeGeneratedOptions(
-        await generateKeywords(repairPrompt, 150_000)
-      );
+        await generateKeywords(repairPrompt, KEYWORD_REPAIR_TIMEOUT_MS)
+      ).filter((candidate) => isCategoryAppropriateCandidate(category.id, candidate));
       if (repairedBatch.length >= Math.min(TARGET_RESULT_COUNT, firstBatch.length)) {
         const repairedSeen = new Set<string>();
         firstBatch = [...repairedBatch, ...firstBatch]
@@ -1989,7 +2506,7 @@ export async function POST(request: NextRequest) {
           competitorList: strengthenedCompetitorList,
           strategyGuide,
         });
-        const retryBatch = await generateKeywords(retryPrompt, 180_000);
+        const retryBatch = await generateKeywords(retryPrompt, KEYWORD_RETRY_TIMEOUT_MS);
         if (Array.isArray(retryBatch) && retryBatch.length > 0) {
           const retryAnalyzed = await analyzeOptions({
             rawOptions: retryBatch,
@@ -2053,7 +2570,9 @@ export async function POST(request: NextRequest) {
     }
 
     const analyzedFallback = await analyzeOptions({
-      rawOptions: normalizeGeneratedOptions(fallbackBatch),
+      rawOptions: normalizeGeneratedOptions(fallbackBatch).filter((candidate) =>
+        isCategoryAppropriateCandidate(category.id, candidate)
+      ),
       forbiddenList,
       referenceList,
       competitorList,
@@ -2064,10 +2583,15 @@ export async function POST(request: NextRequest) {
       .filter(isBroadlyUsableCandidate)
       .sort((a, b) => b._priorityScore - a._priorityScore);
 
-    const diverseRankedResults = appendCategoryBackfill(
+    const diverseRankedResults = appendEmergencyDiverseBackfill(
+      appendCategoryBackfill(
       pickIntentBalancedKeywordResults(rankedPool),
       rankedPool,
       safeFallback
+      ),
+      [...safeFallback, ...analyzedFallback, ...noStoreOverlapCandidates, ...analyzed].sort(
+        (a, b) => b._priorityScore - a._priorityScore
+      )
     );
     const topForExternalSignals = diverseRankedResults.slice(0, EXTERNAL_SIGNAL_TOP_K);
 
@@ -2087,6 +2611,12 @@ export async function POST(request: NextRequest) {
               subKeyword1: item.subKeyword1,
               subKeyword2: item.subKeyword2,
             });
+            if (
+              externalSignals.provider === "naver-openapi" &&
+              item.analysis.externalSignals?.searchVolume?.length
+            ) {
+              return [item.title, item.analysis.externalSignals] as const;
+            }
             return [item.title, externalSignals] as const;
           } catch {
             return [item.title, undefined] as const;
@@ -2110,7 +2640,7 @@ export async function POST(request: NextRequest) {
         ...rest,
         analysis: {
           ...analysis,
-          externalSignals: externalSignalMap.get(item.title),
+          externalSignals: externalSignalMap.get(item.title) ?? analysis.externalSignals,
         },
       };
     });

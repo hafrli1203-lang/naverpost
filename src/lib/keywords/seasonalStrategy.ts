@@ -1,4 +1,5 @@
 import type { Category, SearchVolumeSignal, Shop } from "@/types";
+import { combineKeywordGroups } from "@/lib/keywords/opportunityScoring";
 
 type MonthSeason = {
   label: string;
@@ -375,16 +376,46 @@ export function buildKeywordDiscoverySeeds(params: {
         .map((seed) => seed.trim())
         .filter(Boolean)
     : [];
+  const month = new Date().getMonth() + 1;
+  const seasonalWordsByMonth: Record<number, string[]> = {
+    1: ["건조", "김서림", "실내"],
+    2: ["새학기", "시력검사", "어린이"],
+    3: ["새학기", "시력검사", "어린이"],
+    4: ["자외선", "눈피로", "렌즈교체"],
+    5: ["부모님", "노안", "가정의달"],
+    6: ["자외선", "선글라스", "렌즈건조"],
+    7: ["자외선", "렌즈위생", "휴가"],
+    8: ["개학", "시력검사", "자외선"],
+    9: ["환절기", "눈건조", "독서"],
+    10: ["환절기", "눈피로", "운전"],
+    11: ["건조", "김서림", "실내"],
+    12: ["김서림", "건조", "부모님"],
+  };
+  const keywordSoundStyleCombinations = combineKeywordGroups(
+    [
+      [keywordRegion, ...(CATEGORY_CORE_KEYWORDS[category.id] ?? [category.name]).slice(0, 10)],
+      [
+        "원인",
+        "관리",
+        "기준",
+        "검사",
+        "선택",
+        ...(seasonalWordsByMonth[month] ?? []),
+      ],
+    ],
+    30
+  );
 
   return Array.from(
     new Set([
       ...getRegionalKeywordExamples(region, category),
       ...commonLocal,
       ...(CATEGORY_CORE_KEYWORDS[category.id] ?? []),
+      ...keywordSoundStyleCombinations,
       ...(byCategory[category.id] ?? []),
       ...topicSeeds,
     ])
-  ).slice(0, 30);
+  ).slice(0, 25);
 }
 
 function formatDemandSignal(signal: SearchVolumeSignal): string {
@@ -392,8 +423,16 @@ function formatDemandSignal(signal: SearchVolumeSignal): string {
     typeof signal.monthlyTotalSearches === "number"
       ? `${signal.monthlyTotalSearches.toLocaleString("ko-KR")}회`
       : "확인됨";
+  const blogCount =
+    typeof signal.blogDocumentCount === "number"
+      ? ` / 블로그 ${signal.blogDocumentCount.toLocaleString("ko-KR")}건`
+      : "";
+  const opportunity =
+    typeof signal.opportunityScore === "number"
+      ? ` / 기회점수 ${signal.opportunityScore}`
+      : "";
   const competition = signal.competitionLabel ? ` / 경쟁 ${signal.competitionLabel}` : "";
-  return `- ${signal.keyword}: 월간 ${total}${competition}`;
+  return `- ${signal.keyword}: 월간 ${total}${blogCount}${competition}${opportunity}`;
 }
 
 function buildDemandGuide(signals: SearchVolumeSignal[]): string {
@@ -404,13 +443,21 @@ function buildDemandGuide(signals: SearchVolumeSignal[]): string {
   const targetSignals = [...signals]
     .filter((signal) => {
       const total = signal.monthlyTotalSearches ?? 0;
-      return total > 0 && total <= 1000;
+      return total > 0 && total <= 3000;
     })
-    .sort((a, b) => (b.monthlyTotalSearches ?? 0) - (a.monthlyTotalSearches ?? 0))
+    .sort(
+      (a, b) =>
+        (b.opportunityScore ?? 0) - (a.opportunityScore ?? 0) ||
+        (b.monthlyTotalSearches ?? 0) - (a.monthlyTotalSearches ?? 0)
+    )
     .slice(0, 10);
 
   const fallbackSignals = [...signals]
-    .sort((a, b) => (b.monthlyTotalSearches ?? 0) - (a.monthlyTotalSearches ?? 0))
+    .sort(
+      (a, b) =>
+        (b.opportunityScore ?? 0) - (a.opportunityScore ?? 0) ||
+        (b.monthlyTotalSearches ?? 0) - (a.monthlyTotalSearches ?? 0)
+    )
     .slice(0, 10);
 
   const selected = targetSignals.length > 0 ? targetSignals : fallbackSignals;
@@ -456,8 +503,9 @@ ${topicLine}
 - 지역형 롱테일은 실제 이용 의도가 강하므로 최소 4개 이상 포함한다.
 - 전국형 키워드는 검색량은 크지만 경쟁이 높으므로 정보성 소재로만 2~3개 섞는다.
 - 모든 후보는 "소재"와 "검색 의도"가 서로 달라야 한다.
-- 현재 블로그 지수가 낮으므로 월간 검색량 10~1,000 구간을 우선한다.
-- 월간 검색량이 1,000을 넘는 키워드는 단독 정면 승부보다 지역·증상·상황어와 결합한다.
+- 검색량만 보지 말고 검색량 대비 블로그 문서수가 낮은 키워드를 우선한다.
+- 현재 블로그 지수가 낮으므로 월간 검색량 30~3,000 중 블로그 문서수 경쟁비가 낮은 구간을 우선한다.
+- 월간 검색량이 크더라도 블로그 발행수가 과도하면 단독 정면 승부보다 지역·증상·상황어와 결합한다.
 - 카테고리 핵심 키워드는 아래 풀에서 넓게 고르되 같은 단어만 반복하지 않는다.
 - 핵심 키워드 풀: ${coreKeywords.join(" / ")}
 

@@ -94,6 +94,30 @@ function buildSearchVolumeLine(option: KeywordOption): string | null {
   return null;
 }
 
+function buildOpportunityLine(option: KeywordOption): string | null {
+  const signals = option.analysis?.externalSignals?.searchVolume ?? [];
+  const signal = [...signals].sort(
+    (a, b) => (b.opportunityScore ?? 0) - (a.opportunityScore ?? 0)
+  )[0];
+  if (!signal) return null;
+
+  const pieces: string[] = [];
+  if (typeof signal.opportunityScore === "number") {
+    pieces.push(`기회점수 ${signal.opportunityScore}`);
+  }
+  if (typeof signal.blogDocumentCount === "number") {
+    pieces.push(`블로그 발행수 ${signal.blogDocumentCount.toLocaleString("ko-KR")}건`);
+  }
+  if (typeof signal.competitionRatio === "number") {
+    pieces.push(`검색량 대비 문서비 ${signal.competitionRatio.toFixed(1)}`);
+  }
+  if (signal.seasonalReason) {
+    pieces.push(signal.seasonalReason);
+  }
+
+  return pieces.length > 0 ? `${signal.keyword}: ${pieces.join(" / ")}` : null;
+}
+
 function getBestVolumeSignal(option: KeywordOption) {
   const signals = option.analysis?.externalSignals?.searchVolume ?? [];
   return [...signals].sort(
@@ -119,7 +143,9 @@ function buildDemandPhrase(option: KeywordOption): string {
   const trend = trendLabel(signal.trend);
 
   if (total) {
-    return `${signal.keyword} 월간 ${total}${competition}, 추세 ${trend}`;
+    const opportunity =
+      typeof signal.opportunityScore === "number" ? `, 기회점수 ${signal.opportunityScore}` : "";
+    return `${signal.keyword} 월간 ${total}${competition}, 추세 ${trend}${opportunity}`;
   }
 
   return `${signal.keyword} 검색 신호 확인, 추세 ${trend}`;
@@ -294,7 +320,14 @@ function buildAnalysisLines(option: KeywordOption): string[] {
   lines.push(buildMaterialPhrase(option));
 
   if (analysis.externalSignals) {
-    lines.push("네이버 검색량·추세·연관 신호를 후보 점수에 반영했습니다.");
+    lines.push("네이버 검색량·블로그 발행수·월별 추세를 후보 점수에 반영했습니다.");
+  } else {
+    lines.push("검색량 실측 신호가 없어 조회수 목적 후보로는 신중하게 봐야 합니다.");
+  }
+
+  const opportunityLine = buildOpportunityLine(option);
+  if (opportunityLine) {
+    lines.push(`검색 기회: ${opportunityLine}`);
   }
 
   if (analysis.competitorTitleSimilarity) {
@@ -757,7 +790,7 @@ export function KeywordOptions({
                                 variant="secondary"
                                 className="bg-violet-100 text-violet-700 hover:bg-violet-100"
                               >
-                                네이버 실시간 확인
+                                검색기회 확인
                               </Badge>
                             )}
                             {isRecalculating && (
@@ -826,6 +859,9 @@ export function KeywordOptions({
                             <div className="space-y-1 text-xs leading-5 text-muted-foreground">
                               {buildSearchVolumeLine(displayOption) && (
                                 <p>네이버 월간 검색량: {buildSearchVolumeLine(displayOption)}</p>
+                              )}
+                              {buildOpportunityLine(displayOption) && (
+                                <p>검색량 대비 발행수: {buildOpportunityLine(displayOption)}</p>
                               )}
                               <p>
                                 네이버 검색 추세:{" "}
