@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { writeArticle, reviseArticle } from "@/lib/ai/claude";
+import { writeArticle, writeArticleWithCodex, reviseArticle } from "@/lib/ai/claude";
 import { researchKeyword } from "@/lib/ai/perplexity";
 import { buildArticlePrompt } from "@/lib/prompts/articlePrompt";
 import { buildPromoPrompt } from "@/lib/prompts/promoPrompt";
@@ -11,7 +11,7 @@ import { analyzeCompetitorMorphology } from "@/lib/analysis/competitorMorphology
 import { CATEGORIES } from "@/lib/constants";
 import { getShopById } from "@/lib/data/shops";
 import { lookupGlossary, buildGlossaryHint } from "@/lib/domain/opticalGlossary";
-import type { KeywordOption, ArticleContent } from "@/types";
+import type { KeywordOption, ArticleBrief, ArticleContent } from "@/types";
 
 export const maxDuration = 360;
 
@@ -23,6 +23,7 @@ const RESEARCH_TIMEOUT_MS = 40_000;
 const COMPETITOR_ANALYSIS_TIMEOUT_MS = 25_000;
 const ARTICLE_WRITE_TIMEOUT_MS = 150_000;
 const ARTICLE_RETRY_TIMEOUT_MS = 75_000;
+const ARTICLE_CODEX_FALLBACK_TIMEOUT_MS = 180_000;
 const ARTICLE_REVISION_TIMEOUT_MS = 60_000;
 
 function withTimeout<T>(
@@ -68,6 +69,72 @@ function stripLeadingTitleLine(content: string, title: string): string {
   return content.trim();
 }
 
+function summarizeGenerationError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  if (/no stderr|quota|limit|usage|rate|credit|billing|exceeded/i.test(message)) {
+    return "Claude CLI 사용량/인증 문제";
+  }
+  if (/timed out|timeout/i.test(message)) {
+    return "Claude CLI 시간 초과";
+  }
+  if (/not found|ENOENT/i.test(message)) {
+    return "Claude CLI 실행 파일 없음";
+  }
+  return message || "Claude CLI 실패";
+}
+
+function buildCodexFallbackArticlePrompt(params: {
+  keyword: KeywordOption;
+  brief: ArticleBrief;
+  glossaryHint?: string;
+}): string {
+  const { keyword, brief, glossaryHint } = params;
+  const commonNouns = brief.competitorMorphology?.commonNouns?.slice(0, 12) ?? [];
+  const bodyNouns = brief.competitorMorphology?.bodyNouns?.slice(0, 10) ?? [];
+  const highlights = brief.competitorMorphology?.bodyHighlights?.slice(0, 4) ?? [];
+  const shopStrengths = brief.shop.serviceStrengths?.slice(0, 4) ?? [];
+  const visitChecklist = brief.shop.visitChecklist?.slice(0, 4) ?? [];
+  const avoidClaims = brief.shop.avoidClaims?.slice(0, 6) ?? [];
+
+  return `
+네이버 블로그 본문만 작성하세요. 제목, JSON, 코드블록, 해설은 출력하지 마세요.
+
+[글 정보]
+- 제목: ${keyword.title}
+- 메인 키워드: ${keyword.mainKeyword}
+- 서브 키워드: ${keyword.subKeyword1}, ${keyword.subKeyword2}
+- 전체 주제/논지: ${brief.topic}
+- 카테고리: ${brief.category.name}
+- 매장: ${brief.shop.name}
+- 목표 분량: ${brief.charCount}자 내외
+- 말투: ${brief.tone === "friendly" ? "친근하지만 과장 없는 설명체" : brief.tone}
+
+[검색 의도]
+- 검색자는 불편한 이유, 선택 기준, 방문 전 확인할 점을 알고 싶어 합니다.
+- 첫 문단은 실제 상황으로 시작하고, 바로 해결 기준을 제시하세요.
+- 글 전체가 "${brief.topic}" 논지에서 벗어나지 않게 쓰세요.
+
+[본문에 자연스럽게 분산할 보조 형태소]
+- 공통 명사: ${commonNouns.join(", ") || "없음"}
+- 본문 핵심어: ${bodyNouns.join(", ") || "없음"}
+- 반복 논점: ${highlights.join(" / ") || "없음"}
+
+[매장 정보]
+- 강점: ${shopStrengths.join(", ") || "과장 없이 검사와 상담 중심으로 표현"}
+- 방문 체크: ${visitChecklist.join(", ") || "현재 불편 원인을 확인"}
+- 피할 표현: ${avoidClaims.join(", ") || "최고, 완벽, 치료, 보장, 즉시 해결"}
+${glossaryHint ? `\n[용어 구분]\n${glossaryHint}` : ""}
+
+[작성 규칙]
+- 메인 키워드는 2회 이상, 서브 키워드는 각각 1회 이상 자연스럽게 포함하세요.
+- 같은 키워드를 몰아서 반복하지 말고 문단마다 의미를 바꿔 사용하세요.
+- 비교나 체크 기준이 필요한 경우에만 간단한 Markdown 표 1개를 쓰세요.
+- 쉼표는 남용하지 말고 문장은 짧게 끊으세요.
+- 과장 광고, 병원식 치료 표현, "문의해 주세요" 표현은 쓰지 마세요.
+- 마지막은 매장 방문을 강요하지 말고 "확인해 보면 좋다" 수준으로 마무리하세요.
+`.trim();
+}
+
 function needsHardRevision(
   validation: Awaited<ReturnType<typeof validateContent>>,
   charOutOfRange: boolean
@@ -76,7 +143,6 @@ function needsHardRevision(
     validation.prohibitedWords.length > 0 ||
     validation.cautionPhrases.length > 0 ||
     validation.overusedWords.length > 0 ||
-    !validation.hasTable ||
     validation.missingKeywords.length > 0 ||
     (validation.structure?.missingTitleKeywordCoverage.length ?? 0) > 0 ||
     charOutOfRange
@@ -274,16 +340,48 @@ export async function POST(request: NextRequest) {
             brief,
           });
 
-    let rawContent: string;
+    let rawContent: string | undefined;
+    let generationFallbackNote: string | undefined;
     try {
       rawContent = await writeArticle(prompt, ARTICLE_WRITE_TIMEOUT_MS);
     } catch (error) {
       const message = error instanceof Error ? error.message : "";
-      if (!/timed out|timeout/i.test(message)) throw error;
-      rawContent = await writeArticle(
-        `${prompt}\n\n[재시도 지시]\n이전 시도가 시간 초과되었습니다. 위 조건은 유지하되 문단을 더 압축하고 표는 1개만 사용하세요. 본문만 출력하세요.`,
-        ARTICLE_RETRY_TIMEOUT_MS
-      );
+      let retryError: unknown = error;
+      if (/timed out|timeout/i.test(message)) {
+        try {
+          rawContent = await writeArticle(
+            `${prompt}\n\n[재시도 지시]\n이전 시도가 시간 초과되었습니다. 위 조건은 유지하되 문단을 더 압축하고 표는 1개만 사용하세요. 본문만 출력하세요.`,
+            ARTICLE_RETRY_TIMEOUT_MS
+          );
+          retryError = undefined;
+        } catch (secondError) {
+          retryError = secondError;
+        }
+      }
+
+      if (!rawContent) {
+        try {
+          rawContent = await writeArticleWithCodex(
+            buildCodexFallbackArticlePrompt({
+              keyword,
+              brief,
+              glossaryHint,
+            }),
+            ARTICLE_CODEX_FALLBACK_TIMEOUT_MS
+          );
+          generationFallbackNote = `Claude 작성 실패 후 Codex로 대체 생성했습니다: ${summarizeGenerationError(retryError ?? error)}`;
+        } catch (fallbackError) {
+          throw new Error(
+            `본문 생성 모델이 모두 실패했습니다. Claude: ${summarizeGenerationError(
+              retryError ?? error
+            )} / Codex: ${summarizeGenerationError(fallbackError)}`
+          );
+        }
+      }
+    }
+
+    if (!rawContent) {
+      throw new Error("본문 생성 결과가 비어 있습니다.");
     }
 
     let content = stripLeadingTitleLine(
@@ -353,8 +451,11 @@ export async function POST(request: NextRequest) {
       brief,
       washingTone: tone,
       generationNote: revisionError
-        ? `자동 재수정은 건너뛰었습니다: ${revisionError}`
-        : undefined,
+        ? [
+            generationFallbackNote,
+            `자동 재수정은 건너뛰었습니다: ${revisionError}`,
+          ].filter(Boolean).join(" / ")
+        : generationFallbackNote,
     };
 
     return NextResponse.json({ success: true, data: article });

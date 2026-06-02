@@ -28,6 +28,12 @@ export interface KeywordOption {
   mainKeyword: string;
   subKeyword1: string;
   subKeyword2: string;
+  volumeTier?: KeywordVolumeTier;
+  monthlyTotalSearches?: number | null;
+  blogDocumentCount?: number | null;
+  competitionRatio?: number | null;
+  opportunityScore?: number | null;
+  suggestedTitleKeyword?: string;
   analysis?: KeywordOptionAnalysis;
 }
 
@@ -113,6 +119,24 @@ export interface DuplicatePatternAnalysis {
   issues: AnalysisIssue[];
 }
 
+export type KeywordVolumeTier = "pass" | "weak" | "unknown";
+
+export interface SmartBlockAnalysisSignal {
+  status: "available" | "unavailable";
+  reason?: string;
+  mainKeyword: string;
+  documentVolume: number | null;
+  blockTypeHint: "high-volume" | "mid-volume" | "long-tail" | "unknown";
+  subKeywordCandidates: Array<{
+    keyword: string;
+    titleHits: number;
+    fromAutocomplete: boolean;
+    score: number;
+  }>;
+  recommendedTitleKeyword: string;
+  notes: string[];
+}
+
 export interface KeywordOptionAnalysis {
   morphology?: MorphologyAnalysis;
   languageRisk?: LanguageRiskAnalysis;
@@ -128,6 +152,7 @@ export interface KeywordOptionAnalysis {
     reason?: string;
   };
   externalSignals?: ExternalSearchSignals;
+  smartBlock?: SmartBlockAnalysisSignal;
   searchIntentAxis?: string;
   bodyExpansionFit?: {
     isLikelyExpandable: boolean;

@@ -1,9 +1,11 @@
 import type { KeywordOption } from "@/types";
 import { runClaude } from "./cli/claudeCli";
+import { runCodex } from "./cli/codexCli";
 
 const ARTICLE_MODEL = "claude-sonnet-4-6";
 const EDIT_MODEL = "claude-sonnet-4-6";
 const PROMPT_MODEL = "claude-sonnet-4-6";
+const CODEX_ARTICLE_MODEL = "gpt-5.5";
 
 export async function generateKeywords(
   prompt: string,
@@ -30,6 +32,22 @@ export async function generateKeywords(
 
 export async function writeArticle(prompt: string, timeoutMs = 220_000): Promise<string> {
   return runClaude({ prompt, model: ARTICLE_MODEL, timeoutMs });
+}
+
+export async function writeArticleWithCodex(
+  prompt: string,
+  timeoutMs = 180_000
+): Promise<string> {
+  return runCodex({
+    prompt: `${prompt}
+
+[출력 지시]
+- 위 조건을 모두 지켜 네이버 블로그 본문만 작성하세요.
+- 제목, JSON, 해설, 코드블록 없이 본문 텍스트만 출력하세요.
+- 모델 실패 복구용 작성이므로 문단을 압축하되 검색자가 끝까지 읽을 수 있게 흐름을 유지하세요.`,
+    model: CODEX_ARTICLE_MODEL,
+    timeoutMs,
+  });
 }
 
 export async function reviseArticle(prompt: string, timeoutMs = 160_000): Promise<string> {

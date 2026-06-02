@@ -11,6 +11,7 @@ export default defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    "scripts/**/*.cjs",
     "data/sessions/**",
     "data/images/**",
   ]),

@@ -27,6 +27,17 @@ function findProhibitedTitleTerms(option: KeywordOption): string[] {
   return Array.from(new Set(terms.filter((term) => source.includes(term))));
 }
 
+function selectKeywordAnchor(mainWords: string[]): string {
+  const [first, second] = mainWords;
+  if (!second) return first ?? "";
+  if (
+    /^(10대|20대|30대|40대|50대|60대|여자|남자|학생|청소년|직장인|중년|부모님|어머니|아버지|어린이|운전자|초보|처음|출근|운동|장시간|야간운전|고도수|블루라이트차단|가벼운|튼튼한|편한|편안한|어지러운|큰사이즈|빅사이즈|오버사이즈|운전용|업무용|독서용|실내용)$/.test(first)
+  ) {
+    return second;
+  }
+  return first;
+}
+
 /**
  * Validates a keyword option against the 7 rules from the spec.
  *
@@ -74,19 +85,21 @@ export function validateKeywordOption(
     });
   }
 
-  // Rule 2: Main keyword's first word must appear in both sub keywords
+  // Rule 2: Main keyword's anchor must appear in both sub keywords. In
+  // target/product forms such as "부모님 노안안경", the product word is the
+  // anchor, not the target word.
   if (mainWords.length >= 1) {
-    const mainFirstWord = mainWords[0];
-    if (!subKeyword1.includes(mainFirstWord)) {
+    const mainAnchor = selectKeywordAnchor(mainWords);
+    if (!subKeyword1.includes(mainAnchor)) {
       failures.push({
         rule: "rule2",
-        reason: `서브 키워드1 "${subKeyword1}"에 메인 키워드의 첫 단어 "${mainFirstWord}"가 포함되어야 합니다`,
+        reason: `서브 키워드1 "${subKeyword1}"에 메인 키워드의 기준어 "${mainAnchor}"가 포함되어야 합니다`,
       });
     }
-    if (!subKeyword2.includes(mainFirstWord)) {
+    if (!subKeyword2.includes(mainAnchor)) {
       failures.push({
         rule: "rule2",
-        reason: `서브 키워드2 "${subKeyword2}"에 메인 키워드의 첫 단어 "${mainFirstWord}"가 포함되어야 합니다`,
+        reason: `서브 키워드2 "${subKeyword2}"에 메인 키워드의 기준어 "${mainAnchor}"가 포함되어야 합니다`,
       });
     }
   }

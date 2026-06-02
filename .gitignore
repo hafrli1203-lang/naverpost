@@ -59,6 +59,8 @@ tmp-*
 # session data (user-generated, persists locally)
 /data/sessions/
 /data/images/
+/data/keyword-signal-cache.json
+/data/keyword-result-cache.json
 
 # typescript
 *.tsbuildinfo

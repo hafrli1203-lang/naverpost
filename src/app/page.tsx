@@ -133,15 +133,19 @@ export default function Home() {
           throw new Error(json.error ?? "키워드 생성에 실패했습니다.");
         }
 
-        const raw = (json.data as { results?: unknown } | undefined)?.results;
+        const data = json.data as { results?: unknown; topic?: unknown } | undefined;
+        const raw = data?.results;
         const options: KeywordOption[] = Array.isArray(raw) ? raw : [];
+        const resolvedTopic = typeof data?.topic === "string" && data.topic.trim()
+          ? data.topic.trim()
+          : topic;
         setKeywordOptions(options);
         setState({
           ...state,
           sessionId: crypto.randomUUID(),
           shop,
           category,
-          topic,
+          topic: resolvedTopic,
           currentStage: 1,
           selectedKeyword: null,
           article: null,
@@ -173,14 +177,18 @@ export default function Home() {
       if (!res.ok || !json.success) {
         throw new Error(json.error ?? "키워드 재생성에 실패했습니다.");
       }
-      const rawResults = (json.data as { results?: unknown } | undefined)?.results;
+      const data = json.data as { results?: unknown; topic?: unknown } | undefined;
+      const rawResults = data?.results;
       setKeywordOptions(Array.isArray(rawResults) ? (rawResults as KeywordOption[]) : []);
+      if (typeof data?.topic === "string" && data.topic.trim()) {
+        setState((prev) => ({ ...prev, topic: data.topic as string }));
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "키워드 재생성 중 오류가 발생했습니다.");
     } finally {
       setIsLoading(false);
     }
-  }, [state]);
+  }, [state, setState]);
 
   const handleKeywordSelect = useCallback(
     async (option: KeywordOption) => {

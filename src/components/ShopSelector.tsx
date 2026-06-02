@@ -78,15 +78,13 @@ export function ShopSelector({ shops, onStart, isLoading }: ShopSelectorProps) {
   const showEventFields = articleType === "promo" && promoSubtype === "event";
   const showPromoSubtype = articleType === "promo";
 
-  // 매장 + 카테고리 선택 시 자동 주제 추천
+  // 매장 + 카테고리 선택 시 자동 주제 추천. 사용자가 직접 입력한 값은 덮어쓰지 않는다.
   useEffect(() => {
     if (!shopId || !categoryId) {
-      setSuggestedTopics([]);
       return;
     }
 
-    setIsSuggesting(true);
-    setSuggestedTopics([]);
+    let ignore = false;
 
     fetch("/api/topics/suggest", {
       method: "POST",
@@ -95,12 +93,21 @@ export function ShopSelector({ shops, onStart, isLoading }: ShopSelectorProps) {
     })
       .then((r) => r.json())
       .then((json) => {
+        if (ignore) return;
         if (json.success && json.data) {
-          setSuggestedTopics(json.data);
+          const topics = Array.isArray(json.data) ? json.data : [];
+          setSuggestedTopics(topics);
+          setTopic((current) => current.trim() || topics[0] || "");
         }
       })
       .catch(() => {})
-      .finally(() => setIsSuggesting(false));
+      .finally(() => {
+        if (!ignore) setIsSuggesting(false);
+      });
+
+    return () => {
+      ignore = true;
+    };
   }, [shopId, categoryId]);
 
   function handleSubmit(e: React.FormEvent) {
@@ -127,7 +134,7 @@ export function ShopSelector({ shops, onStart, isLoading }: ShopSelectorProps) {
           </div>
           <CardTitle className="text-2xl">블로그 자동 작성</CardTitle>
           <CardDescription className="text-base mt-1">
-            안경원과 카테고리를 선택하고 주제를 입력하세요
+            안경원과 카테고리를 선택하면 주제와 키워드를 자동으로 잡습니다
           </CardDescription>
         </CardHeader>
         <CardContent className="pt-4">
@@ -144,7 +151,17 @@ export function ShopSelector({ shops, onStart, isLoading }: ShopSelectorProps) {
                   관리
                 </a>
               </div>
-              <Select value={shopId} onValueChange={(v) => v && setShopId(v)} disabled={isLoading}>
+              <Select
+                value={shopId}
+                onValueChange={(v) => {
+                  if (!v) return;
+                  setShopId(v);
+                  setTopic("");
+                  setSuggestedTopics([]);
+                  if (categoryId) setIsSuggesting(true);
+                }}
+                disabled={isLoading}
+              >
                 <SelectTrigger id="shop-select" className="w-full">
                   <SelectValue placeholder="안경원을 선택하세요" />
                 </SelectTrigger>
@@ -166,7 +183,17 @@ export function ShopSelector({ shops, onStart, isLoading }: ShopSelectorProps) {
             {/* 카테고리 선택 */}
             <div className="space-y-2">
               <Label htmlFor="category-select">카테고리 선택</Label>
-              <Select value={categoryId} onValueChange={(v) => v && setCategoryId(v)} disabled={isLoading}>
+              <Select
+                value={categoryId}
+                onValueChange={(v) => {
+                  if (!v) return;
+                  setCategoryId(v);
+                  setTopic("");
+                  setSuggestedTopics([]);
+                  if (shopId) setIsSuggesting(true);
+                }}
+                disabled={isLoading}
+              >
                 <SelectTrigger id="category-select" className="w-full">
                   <SelectValue placeholder="카테고리를 선택하세요" />
                 </SelectTrigger>
@@ -185,7 +212,7 @@ export function ShopSelector({ shops, onStart, isLoading }: ShopSelectorProps) {
               <Label htmlFor="topic-input">주제 / 소재</Label>
               <Input
                 id="topic-input"
-                placeholder="직접 입력하거나 아래 추천 주제를 클릭하세요"
+                placeholder="비워두면 카테고리에 맞는 주제를 자동으로 선택합니다"
                 value={topic}
                 onChange={(e) => setTopic(e.target.value)}
                 disabled={isLoading}
@@ -204,7 +231,7 @@ export function ShopSelector({ shops, onStart, isLoading }: ShopSelectorProps) {
                 <div className="space-y-1.5">
                   <p className="text-xs text-muted-foreground flex items-center gap-1">
                     <Sparkles className="w-3 h-3" />
-                    AI 추천 주제 (클릭하여 선택)
+                    자동 주제 후보
                   </p>
                   <div className="flex flex-wrap gap-1.5">
                     {suggestedTopics.map((t, i) => (

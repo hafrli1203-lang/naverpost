@@ -1,5 +1,6 @@
 import type { Category, SearchVolumeSignal, Shop } from "@/types";
 import { combineKeywordGroups } from "@/lib/keywords/opportunityScoring";
+import { getShopProductHeads } from "@/lib/keywords/productKeywordCatalog";
 
 type MonthSeason = {
   label: string;
@@ -376,6 +377,7 @@ export function buildKeywordDiscoverySeeds(params: {
         .map((seed) => seed.trim())
         .filter(Boolean)
     : [];
+  const productHeads = getShopProductHeads({ shop, category });
   const month = new Date().getMonth() + 1;
   const seasonalWordsByMonth: Record<number, string[]> = {
     1: ["건조", "김서림", "실내"],
@@ -393,7 +395,11 @@ export function buildKeywordDiscoverySeeds(params: {
   };
   const keywordSoundStyleCombinations = combineKeywordGroups(
     [
-      [keywordRegion, ...(CATEGORY_CORE_KEYWORDS[category.id] ?? [category.name]).slice(0, 10)],
+      [
+        keywordRegion,
+        ...productHeads.slice(0, 8),
+        ...(CATEGORY_CORE_KEYWORDS[category.id] ?? [category.name]).slice(0, 10),
+      ],
       [
         "원인",
         "관리",
@@ -410,6 +416,7 @@ export function buildKeywordDiscoverySeeds(params: {
     new Set([
       ...getRegionalKeywordExamples(region, category),
       ...commonLocal,
+      ...productHeads,
       ...(CATEGORY_CORE_KEYWORDS[category.id] ?? []),
       ...keywordSoundStyleCombinations,
       ...(byCategory[category.id] ?? []),
@@ -487,7 +494,13 @@ export function buildKeywordStrategyGuide(params: {
     ? `- 사용자가 입력한 희망 주제: ${topic.trim()}`
     : "- 사용자가 별도 희망 주제를 입력하지 않았으므로 검색 의도와 시즌성을 우선한다.";
   const regionalExamples = getRegionalKeywordExamples(region, category);
-  const coreKeywords = CATEGORY_CORE_KEYWORDS[category.id] ?? [category.name];
+  const productHeads = getShopProductHeads({ shop, category });
+  const coreKeywords = Array.from(
+    new Set([
+      ...productHeads,
+      ...(CATEGORY_CORE_KEYWORDS[category.id] ?? [category.name]),
+    ])
+  );
   const demandGuide = buildDemandGuide(params.demandSignals ?? []);
 
   return `────────────────────────────────────

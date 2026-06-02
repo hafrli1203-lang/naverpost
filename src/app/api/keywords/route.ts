@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import fs from "fs/promises";
+import path from "path";
 import { generateKeywords } from "@/lib/ai/claude";
 import { generateKeywordCandidatesWithGpt } from "@/lib/ai/openaiKeywords";
 import { CATEGORIES } from "@/lib/constants";
@@ -16,14 +18,27 @@ import {
   buildKeywordStrategyGuide,
   inferShopRegion,
 } from "@/lib/keywords/seasonalStrategy";
+import { inferSmartBlockSubKeywords } from "@/lib/analysis/smartBlock";
 import { analyzeTitleSimilarity } from "@/lib/analysis/titleSimilarity";
+import { combineKeywords } from "@/lib/keywords/keywordCombiner";
+import {
+  buildKeywordMeshOptions,
+  buildKeywordMeshSeeds,
+} from "@/lib/keywords/keywordMesh";
+import {
+  buildProductKeywordOptions,
+  getProductModifiers,
+  getProductModifiersByHead,
+  getShopProductHeads,
+} from "@/lib/keywords/productKeywordCatalog";
+import { applyVolumeGate, type VolumeGateFields } from "@/lib/keywords/volumeGate";
 import {
   MECHANICAL_TITLE_PATTERNS,
   NAVER_TITLE_SKILL_RULES,
-  reviseMechanicalNaverTitle,
 } from "@/lib/keywords/naverTitleSkill";
 import { buildTitleGenerationPrompt } from "@/lib/prompts/titlePrompt";
 import { listSessions } from "@/lib/storage/sessionStore";
+import { planBlogTopic } from "@/lib/topics/topicPlanner";
 import { analyzeLanguageRisk } from "@/lib/validation/contentSignalAnalyzer";
 import { analyzeMorphology } from "@/lib/validation/morphologyAnalyzer";
 import { analyzeNetworkDuplicateRisk } from "@/lib/validation/networkDuplicateAnalyzer";
@@ -33,10 +48,132 @@ import type { KeywordOption, KeywordOptionAnalysis, SearchVolumeSignal } from "@
 
 export const maxDuration = 360;
 const TARGET_RESULT_COUNT = 10;
-const EXTERNAL_SIGNAL_TOP_K = TARGET_RESULT_COUNT;
+const KEYWORD_FAST_MODE = process.env.KEYWORD_FAST_MODE !== "0";
+const KEYWORD_AI_EXPANSION_ENABLED =
+  process.env.KEYWORD_AI_EXPANSION === "1" || !KEYWORD_FAST_MODE;
+const EXTERNAL_SIGNAL_TOP_K = Math.max(
+  0,
+  Number(
+    process.env.KEYWORD_EXTERNAL_SIGNAL_TOP_K ??
+      (KEYWORD_FAST_MODE ? "3" : String(TARGET_RESULT_COUNT))
+  ) || (KEYWORD_FAST_MODE ? 3 : TARGET_RESULT_COUNT)
+);
+const SMART_BLOCK_TOP_K = Math.max(
+  0,
+  Number(
+    process.env.KEYWORD_SMART_BLOCK_TOP_K ??
+      (KEYWORD_FAST_MODE ? "3" : String(TARGET_RESULT_COUNT))
+  ) || (KEYWORD_FAST_MODE ? 3 : TARGET_RESULT_COUNT)
+);
 const KEYWORD_FIRST_EDIT_TIMEOUT_MS = 70_000;
 const KEYWORD_REPAIR_TIMEOUT_MS = 90_000;
 const KEYWORD_RETRY_TIMEOUT_MS = 90_000;
+const KEYWORD_RESULT_CACHE_ENABLED = process.env.KEYWORD_RESULT_CACHE !== "0";
+const KEYWORD_RESULT_CACHE_VERSION = 6;
+const KEYWORD_RESULT_CACHE_FILE = path.join(process.cwd(), "data", "keyword-result-cache.json");
+
+type KeywordResultResponseData = {
+  results: unknown[];
+  notes: string[];
+  topic: string;
+  topicLabel: string;
+  topicPlan: unknown;
+};
+
+type KeywordResultCacheEntry = {
+  checkedAt: string;
+  data: KeywordResultResponseData;
+};
+
+type KeywordResultCacheFile = {
+  version: number;
+  months: Record<string, Record<string, KeywordResultCacheEntry>>;
+};
+
+let keywordResultCache: KeywordResultCacheFile | null = null;
+
+function getKeywordResultCacheMonth(date = new Date()): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function emptyKeywordResultCache(): KeywordResultCacheFile {
+  return {
+    version: KEYWORD_RESULT_CACHE_VERSION,
+    months: {},
+  };
+}
+
+function normalizeKeywordResultCachePart(value: string | undefined): string {
+  return (value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .slice(0, 120);
+}
+
+function buildKeywordResultCacheKey(params: {
+  shopId: string;
+  categoryId: string;
+  topic?: string;
+}): string {
+  return [
+    `shop=${normalizeKeywordResultCachePart(params.shopId)}`,
+    `category=${normalizeKeywordResultCachePart(params.categoryId)}`,
+    `topic=${normalizeKeywordResultCachePart(params.topic)}`,
+    `fast=${KEYWORD_FAST_MODE ? "1" : "0"}`,
+    `external=${EXTERNAL_SIGNAL_TOP_K}`,
+    `smart=${SMART_BLOCK_TOP_K}`,
+  ].join("|");
+}
+
+async function readKeywordResultCache(): Promise<KeywordResultCacheFile> {
+  if (keywordResultCache) return keywordResultCache;
+
+  try {
+    const raw = await fs.readFile(KEYWORD_RESULT_CACHE_FILE, "utf-8");
+    const parsed = JSON.parse(raw) as KeywordResultCacheFile;
+    keywordResultCache =
+      parsed && parsed.version === KEYWORD_RESULT_CACHE_VERSION && parsed.months
+        ? parsed
+        : emptyKeywordResultCache();
+  } catch {
+    keywordResultCache = emptyKeywordResultCache();
+  }
+
+  return keywordResultCache;
+}
+
+async function getCachedKeywordResultData(
+  key: string,
+  month = getKeywordResultCacheMonth()
+): Promise<KeywordResultCacheEntry | null> {
+  if (!KEYWORD_RESULT_CACHE_ENABLED) return null;
+  const cache = await readKeywordResultCache();
+  return cache.months[month]?.[key] ?? null;
+}
+
+async function saveKeywordResultData(
+  key: string,
+  data: KeywordResultResponseData,
+  month = getKeywordResultCacheMonth()
+): Promise<void> {
+  if (!KEYWORD_RESULT_CACHE_ENABLED) return;
+  const cache = await readKeywordResultCache();
+  const monthCache = cache.months[month] ?? {};
+  monthCache[key] = {
+    checkedAt: new Date().toISOString(),
+    data,
+  };
+  cache.months[month] = monthCache;
+
+  try {
+    await fs.mkdir(path.dirname(KEYWORD_RESULT_CACHE_FILE), { recursive: true });
+    await fs.writeFile(KEYWORD_RESULT_CACHE_FILE, JSON.stringify(cache, null, 2), "utf-8");
+    keywordResultCache = cache;
+  } catch {
+    // Cache writes must never block keyword generation.
+  }
+}
 
 function normalizeTitleForComparison(title: string): string {
   return title.replace(/\s+/g, " ").trim().toLowerCase();
@@ -531,6 +668,12 @@ function composeRegionalTitle(mainKeyword: string, core1: string, core2: string)
   return null;
 }
 
+/**
+ * @deprecated 더 이상 호출되지 않는다. 과거에는 LLM 제목을 템플릿 문자열로 덮어쓰는
+ * 용도였으나, 이 기계적 조립이 부자연스러운 제목의 원인이었다. 이제 LLM 제목을
+ * 그대로 신뢰하고 normalizeGeneratedOptions에서 드롭만 한다. 안전하게 삭제 가능.
+ */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function composeAlignedTitle(params: {
   mainKeyword: string;
   core1: string;
@@ -595,15 +738,15 @@ function composeAlignedTitle(params: {
       ]
     : [];
   const fallbackTemplates = [
-    `${mainKeyword} ${joinCores(core1, core2)} 차이`,
+    `${mainKeyword} ${joinCores(core1, core2)}를 구분할 때`,
     `${mainKeyword} ${makeSubjectPhrase(core1)} 중요한 이유`,
     `${mainKeyword} ${core2} 때문에 불편할 때`,
-    `${mainKeyword} ${core1}부터 ${core2}까지`,
-    `${mainKeyword} ${core1}부터 볼 부분`,
-    `${mainKeyword} ${core2}까지 살펴봐야 할 때`,
-    `${mainKeyword} 불편이 반복될 때`,
+    `${mainKeyword} ${joinCores(core1, core2)}를 나눠 볼 때`,
+    `${mainKeyword} ${core1} 신호가 보일 때`,
+    `${mainKeyword} ${core2}를 확인해야 할 때`,
+    `${mainKeyword} 불편이 오래 남을 때`,
     `${mainKeyword} 관리에서 놓치기 쉬운 부분`,
-    `${mainKeyword} 달라지는 이유`,
+    `${mainKeyword} 생활에서 불편한 이유`,
     ...situationalTemplates,
   ];
   const rotatedFallbacks = fallbackTemplates
@@ -728,29 +871,23 @@ function getSeasonalFallbackOptions(params: {
   return options;
 }
 
+// 진짜 "기계적/스팸" 제목만 걸러낸다.
+// (과거에는 자연스러운 제목까지 광범위하게 막아서, LLM이 좋은 제목을 줘도
+//  후보 풀에서 탈락시키고 하드코딩 폴백으로 떨어지게 만들었다.)
+// 키워드 나열형("A와 B 확인/기준"), 같은 토큰 반복, 의미 없는 나열 어미만 차단한다.
 function isAwkwardGeneratedTitle(title: string): boolean {
   return (
     MECHANICAL_TITLE_PATTERNS.some((pattern) => pattern.test(title)) ||
-    /이 있을 때|가 있을 때|소재와 선택 기준|가입도|주방|수치|재방문/.test(title) ||
-    /다른 점|보는 것|파악하기|확인하는 방법|확인하는 법|진행 확인/.test(title) ||
-    /보기$|정리$|볼 것$|살펴볼 것$|잡아야 할 때$/.test(title) ||
-    /부터 볼 부분$|때문에 불편할 때$|망치는 순서$|놓치기 쉬운 부분$|확인할 것$|살펴야 할 것$|챙겨야 할 것$|점검 항목$/.test(title) ||
-    /부터 .*까지$|전에 .+부터 볼 때$|보다 먼저 봐야 할 것$|먼저 봐야 할 것$/.test(title) ||
-    /종합|사야|시간 관계|관계에서|상태가 반복|습관이 흐|검사 가는|검사가 반복|건조 검사가|보관 상태가 반복|착용 보관/.test(title) ||
-    /관리 흐름$|전 .+ 차이$|영향을 주는 이유$|까지 살펴봐야 할 때$/.test(title) ||
-    /습관부터 보는 이유$|착용감이 달라졌을 때$|가 달라졌을 때$/.test(title) ||
-    /살펴야 할 코팅$|확인할 관리 원인$|달라지는 판단$|달라지는 점$|달라지는 것들?$|먼저 할 것$|전 도수 차이$/.test(title) ||
-    /때 관리 습관$|스마트폰이 반복되는 이유$|검사 상태가 반복될 때$|검사 전에 볼 신호$|도수 후 검사 변화/.test(title) ||
-    /맞는지 보는 법$|원인 찾는 법$/.test(title) ||
-    /맞는 이유$|때문에 달라지는 점$|부터 봐야 하는 이유$/.test(title) ||
-    /탄성과 무게 차이$|착용감 코패드 때문에/.test(title) ||
-    /안경수리.*(코패드|피팅).*달라지는 이유/.test(title) ||
-    /안경수리 기준.*코패드/.test(title) ||
-    /방법 원인과|관리와 코팅|피팅과 코패드/.test(title) ||
-    /원인.*(피팅|코패드).*기준|피팅과 코패드 기준|코패드와 피팅 기준/.test(title) ||
-    /무게.*원인|착용감과 원인|원인 구분/.test(title) ||
-    /으로 잡는 방법|에서 .* 기준/.test(title) ||
-    /확인 확인|기준 기준|선택 선택/.test(title)
+    // 같은 단어가 두 번 들어간 스팸성 제목
+    /(확인 확인|기준 기준|선택 선택|관리 관리|검사 검사|차이 차이|원인 원인)/.test(title) ||
+    // "A와 B 확인/기준/점검" 식 키워드 나열
+    /\S+\s*(와|과)\s+\S+\s+(확인|기준|점검)$/.test(title) ||
+    // 정보 기대감 없는 나열형 어미
+    /살펴보기$|점검 항목$|확인할 것$|살펴야 할 것$|챙겨야 할 것$/.test(title) ||
+    // 반복 생성된 빈 템플릿 어미
+    /관리 습관이 흔들릴 때$|사용감이 달라질 때$|사용감이 달라지는 이유$|방문 전 살펴볼 기준$|착용 후 달라지는 부분$|달라지는 부분$/.test(title) ||
+    // 슬래시 나열
+    /\S\s*\/\s*\S/.test(title)
   );
 }
 
@@ -781,7 +918,7 @@ const FALLBACK_KEYWORD_SETS: Record<
   ],
   lenses: [
     { main: "렌즈교체 기준", sub1: "렌즈교체 시기", sub2: "렌즈교체 코팅", title: "렌즈교체 기준을 봐야 하는 경우" },
-    { main: "안경렌즈 압축", sub1: "안경렌즈 두께", sub2: "안경렌즈 무게", title: "안경렌즈 압축할 때 달라지는 부분" },
+    { main: "안경렌즈 압축", sub1: "안경렌즈 두께", sub2: "안경렌즈 무게", title: "안경렌즈 압축 도수가 높을 때 두께 기준" },
     { main: "블루라이트렌즈 선택", sub1: "블루라이트렌즈 눈피로", sub2: "블루라이트렌즈 코팅", title: "블루라이트렌즈 선택 전 눈피로가 걱정될 때" },
     { main: "근시억제렌즈 검사", sub1: "근시억제렌즈 어린이", sub2: "근시억제렌즈 도수", title: "근시억제렌즈 검사 어린이 근시가 걱정될 때" },
     { main: "근시완화렌즈 검사", sub1: "근시완화렌즈 어린이", sub2: "근시완화렌즈 도수", title: "근시완화렌즈 검사 전 알아둘 부분" },
@@ -827,8 +964,8 @@ const FALLBACK_KEYWORD_SETS: Record<
   contacts: [
     { main: "렌즈충혈 원인", sub1: "렌즈충혈 착용", sub2: "렌즈충혈 건조", title: "렌즈충혈 원인을 살펴봐야 할 때" },
     { main: "렌즈건조 원인", sub1: "렌즈건조 착용", sub2: "렌즈건조 관리", title: "렌즈건조 원인과 착용 습관" },
-    { main: "난시렌즈 선택", sub1: "난시렌즈 착용", sub2: "난시렌즈 검사", title: "난시렌즈 선택 전 확인할 부분" },
-    { main: "소프트렌즈 착용", sub1: "소프트렌즈 건조", sub2: "소프트렌즈 관리", title: "소프트렌즈 착용감이 달라질 때" },
+    { main: "난시렌즈 선택", sub1: "난시렌즈 착용", sub2: "난시렌즈 검사", title: "난시렌즈 선택 전 착용감이 흔들릴 때" },
+    { main: "소프트렌즈 착용", sub1: "소프트렌즈 건조", sub2: "소프트렌즈 관리", title: "소프트렌즈 착용 건조감이 오래 남을 때" },
     { main: "원데이렌즈 교체", sub1: "원데이렌즈 위생", sub2: "원데이렌즈 착용", title: "원데이렌즈 교체 주기와 위생 관리" },
     { main: "하드렌즈 관리", sub1: "하드렌즈 세척", sub2: "하드렌즈 보관", title: "하드렌즈 관리에서 놓치기 쉬운 부분" },
     { main: "컬러렌즈 착용", sub1: "컬러렌즈 건조", sub2: "컬러렌즈 검사", title: "컬러렌즈 착용 전 봐야 할 눈 상태" },
@@ -878,7 +1015,7 @@ const FALLBACK_KEYWORD_SETS: Record<
     { main: "근거리 흐림", sub1: "근거리 시력", sub2: "근거리 검사", title: "근거리 흐림 독서할 때 불편한 이유" },
     { main: "눈초점 피로", sub1: "눈초점 습관", sub2: "눈초점 검사", title: "눈초점 피로가 반복되는 이유" },
     { main: "눈건강 생활", sub1: "눈건강 습관", sub2: "눈건강 검사", title: "눈건강 생활 습관을 바꿔야 할 때" },
-    { main: "어린이눈 피로", sub1: "어린이눈 습관", sub2: "어린이눈 검사", title: "어린이눈 피로 습관부터 보는 이유" },
+    { main: "어린이 눈피로", sub1: "어린이 시력검사", sub2: "어린이 생활습관", title: "어린이 눈피로가 반복될 때" },
     { main: "청소년시력 관리", sub1: "청소년시력 검사", sub2: "청소년시력 습관", title: "청소년시력 관리 생활습관이 중요한 이유" },
     { main: "실내눈 피로", sub1: "실내눈 습관", sub2: "실내눈 조명", title: "실내눈 피로 조명에 따라 달라지는 이유" },
     { main: "운전시야 흐림", sub1: "운전시야 야간", sub2: "운전시야 검사", title: "운전시야 흐림 야간에 더 불편한 이유" },
@@ -1086,14 +1223,14 @@ const BROAD_KEYWORD_TAILS: Record<string, string[]> = {
 };
 
 const TITLE_ANGLE_PHRASES = [
-  "불편이 반복될 때",
-  "사용감이 달라질 때",
+  "불편이 오래 남을 때",
+  "생활에서 확인할 신호",
   "먼저 확인할 신호",
-  "생활에서 자주 생기는 이유",
-  "방문 전 살펴볼 기준",
-  "착용 후 달라지는 부분",
+  "내 상황과 비교할 기준",
+  "방문 전 확인할 항목",
+  "착용 후 어색한 이유",
   "선택 전에 구분할 점",
-  "관리 습관이 흔들릴 때",
+  "습관에서 놓치기 쉬운 점",
 ];
 
 function getSeasonalTailsForBroadCombinations(categoryId: string, month: number): string[] {
@@ -1111,6 +1248,7 @@ function getSeasonalTailsForBroadCombinations(categoryId: string, month: number)
   return [];
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function buildBroadCombinationOptions(params: {
   region: string;
   categoryId: string;
@@ -1148,6 +1286,20 @@ function buildBroadCombinationOptions(params: {
 function isCategoryAppropriateCandidate(categoryId: string, option: KeywordOption): boolean {
   const source = `${option.title} ${option.mainKeyword} ${option.subKeyword1} ${option.subKeyword2}`;
   if (
+    !isValidTwoWordKeyword(option.mainKeyword) ||
+    !isValidTwoWordKeyword(option.subKeyword1) ||
+    !isValidTwoWordKeyword(option.subKeyword2)
+  ) {
+    return false;
+  }
+  if (
+    hasMalformedCompoundAxis(option.mainKeyword) ||
+    hasMalformedCompoundAxis(option.subKeyword1) ||
+    hasMalformedCompoundAxis(option.subKeyword2)
+  ) {
+    return false;
+  }
+  if (
     startsWithRegionWord(option.mainKeyword) ||
     startsWithRegionWord(option.subKeyword1) ||
     startsWithRegionWord(option.subKeyword2) ||
@@ -1165,9 +1317,90 @@ function isCategoryAppropriateCandidate(categoryId: string, option: KeywordOptio
     if (/렌즈건조|렌즈충혈|원데이렌즈|콘택트렌즈|하드렌즈|소프트렌즈/.test(source)) return false;
   }
   if (categoryId === "progressive") {
-    if (/렌즈세척|렌즈보관|컬러렌즈|원데이렌즈|코패드|안경수리/.test(source)) return false;
+    if (/렌즈세척|렌즈보관|컬러렌즈|원데이렌즈|코패드|안경수리|김서림|여름|휴가|자외선/.test(source)) return false;
+    if (/실내용누진 운전|실내렌즈 운전|사무용렌즈 운전|중근용렌즈 운전|운전렌즈 업무|운전렌즈 독서|돋보기안경 적응|돋보기안경 울렁임|노안렌즈 운전|노안렌즈 업무/.test(source)) {
+      return false;
+    }
+    if (/노안렌즈.*(귀 뒤쪽|귀통증|코패드|흘러내림|피팅)/.test(source)) return false;
+  }
+  if (categoryId === "eye-info") {
+    if (/착용시간|원데이|콘택트|렌즈착용|렌즈관리/.test(source)) return false;
+    if (/시력검사.*(안경닦이|안경수리|코패드|김서림|흘러내림|피팅|귀통증)/.test(source)) return false;
+  }
+  if (categoryId === "glasses-story") {
+    if (/안경수리\s+(흘러내림|착용감)|안경세척\s+코팅.*렌즈와 비교/.test(source)) return false;
+    if (/안경닦이.*(원인|증상|시력|노안|근시|난시)/.test(source)) return false;
+    if (/안경케이스.*(원인|증상|시력|노안|근시|난시)/.test(source)) return false;
+    if (/안경렌즈\s+원인|안경스크래치\s+처음/.test(source)) return false;
   }
   return !/산소투($|\s)/.test(source);
+}
+
+function isDemandKeywordRelevantForCategory(categoryId: string, keyword: string): boolean {
+  const compact = keyword.replace(/\s+/g, "");
+  if (!compact || /디카|카메라|렌터카|보험|대출|부동산|게임|맛집|호텔|항공|주식|코인/.test(compact)) {
+    return false;
+  }
+
+  if (categoryId === "frames") {
+    return /안경테|안경|선글라스|뿔테|메탈|티타늄|울템|하금테|무테|로우로우|카린|나인어코드|레이벤|카페인|BYWP/.test(compact);
+  }
+  if (categoryId === "lenses") {
+    return /안경렌즈|안경알|기능렌즈|운전렌즈|어린이렌즈|블루라이트|자외선|변색렌즈|편광렌즈|고굴절|압축렌즈|코팅렌즈|근시완화|근시억제|마이오스마트|에실로|자이스|호야|니콘|케미|토카이/.test(compact);
+  }
+  if (categoryId === "contacts") {
+    return /콘택트렌즈|원데이렌즈|난시렌즈|컬러렌즈|하드렌즈|소프트렌즈|멀티포컬렌즈|렌즈건조|렌즈충혈|렌즈직경|베이스커브|아큐브|알콘|쿠퍼|바슈롬|토릭렌즈/.test(compact);
+  }
+  if (categoryId === "progressive") {
+    return /누진렌즈|다초점렌즈|누진다초점|노안안경|노안렌즈|사무용렌즈|실내용누진|중근용렌즈|돋보기|에실로|자이스|호야|니콘|바리락스/.test(compact);
+  }
+  if (categoryId === "eye-info") {
+    return /시력검사|눈피로|안구건조|눈초점|시력저하|야간시력|어린이시력|어린이근시|근시|난시|노안|눈부심/.test(compact);
+  }
+  if (categoryId === "glasses-story") {
+    return /안경수리|안경세척|안경관리|안경보관|안경피팅|안경흘러내림|안경김서림|코패드|안경나사|안경렌즈|안경테/.test(compact);
+  }
+  return true;
+}
+
+function splitCompactDemandKeyword(
+  categoryId: string,
+  keyword: string
+): [string, string] | null {
+  const compact = keyword.replace(/\s+/g, "");
+  const heads = [
+    ...(BROAD_KEYWORD_HEADS[categoryId] ?? []),
+    "누진다초점렌즈",
+    "근시완화렌즈",
+    "근시억제렌즈",
+    "블루라이트렌즈",
+    "자외선렌즈",
+    "야간운전렌즈",
+    "안경렌즈",
+    "기능렌즈",
+    "운전렌즈",
+    "사무용렌즈",
+    "어린이렌즈",
+    "다초점렌즈",
+    "누진렌즈",
+    "노안안경",
+    "노안렌즈",
+    "난시렌즈",
+    "원데이렌즈",
+    "콘택트렌즈",
+    "컬러렌즈",
+  ].sort((a, b) => b.length - a.length);
+
+  const head = heads.find(
+    (candidate) => compact.startsWith(candidate) && compact.length > candidate.length
+  );
+  if (!head) return null;
+
+  const core = compact.slice(head.length);
+  if (!core || core.length > 8 || /추천|가격|비용|후기|할인|무료|예약|상담|문의/.test(core)) {
+    return null;
+  }
+  return [head, core];
 }
 
 function buildFallbackKeywordOptions(params: {
@@ -1183,6 +1416,7 @@ function buildFallbackKeywordOptions(params: {
       const total = signal.monthlyTotalSearches ?? 0;
       const ratio = signal.competitionRatio ?? 0;
       return (
+        isDemandKeywordRelevantForCategory(params.categoryId, signal.keyword) &&
         total > 0 &&
         total <= 3000 &&
         (ratio === 0 || ratio <= 30) &&
@@ -1191,25 +1425,24 @@ function buildFallbackKeywordOptions(params: {
     })
     .sort((a, b) => getDemandSignalScore(b) - getDemandSignalScore(a))
     .slice(0, 6)
-    .map((signal) => {
+    .map((signal): KeywordOption | null => {
       const parts = signal.keyword.trim().split(/\s+/);
       const rawKeyword = signal.keyword.trim();
-      const inferredHead =
-        parts[0] ??
-        BROAD_KEYWORD_HEADS[params.categoryId]?.find((head) =>
-          rawKeyword.replace(/\s+/g, "").includes(head.replace(/\s+/g, ""))
-        ) ??
-        rawKeyword;
-      const head = inferredHead;
-      const main =
-        parts.length >= 2 ? `${parts[0]} ${parts[1]}` : `${rawKeyword} 기준`;
+      const inferred =
+        parts.length >= 2
+          ? ([parts[0], parts[1]] as [string, string])
+          : splitCompactDemandKeyword(params.categoryId, rawKeyword);
+      if (!inferred) return null;
+      const [head, core] = inferred;
+      const main = `${head} ${core}`;
       return {
-        title: `${main} 알아볼 때 확인할 부분`,
+        title: `${main} 생활에서 확인할 신호`,
         mainKeyword: main,
         subKeyword1: `${head} 기준`,
         subKeyword2: `${head} 관리`,
       };
-    });
+    })
+    .filter((option): option is KeywordOption => Boolean(option));
 
   const categoryOptions = (FALLBACK_KEYWORD_SETS[params.categoryId] ?? [])
     .map((item) => ({
@@ -1224,61 +1457,72 @@ function buildFallbackKeywordOptions(params: {
     region,
     month,
   });
-  const broadOptions = buildBroadCombinationOptions({
-    categoryId: params.categoryId,
-    region,
-    month,
-  });
-
   return [
     ...seasonalOptions,
     ...demandOptions,
     ...categoryOptions,
-    ...broadOptions,
   ]
     .filter((option) => isCategoryAppropriateCandidate(params.categoryId, option))
     .slice(0, 220);
 }
 
+function isValidTwoWordKeyword(keyword: string): boolean {
+  const parts = keyword.trim().split(/\s+/);
+  return parts.length === 2 && parts.every((part) => part.length >= 1);
+}
+
+function hasMalformedCompoundAxis(keyword: string): boolean {
+  return keyword
+    .trim()
+    .split(/\s+/)
+    .some((part) =>
+    /^(야간운전|고도수|건조한|출근|초보|부모님|어머니|아버지|운전자|처음|40대|50대|60대|직장인|청소년|학생|여자|남자)(안경렌즈|안경알|난시렌즈|콘택트렌즈|원데이렌즈|컬러렌즈|하드렌즈|소프트렌즈|누진렌즈|다초점렌즈|노안안경|노안렌즈|선글라스|안경테|안경)$/.test(part)
+      ||
+      /^(누진렌즈|다초점렌즈|노안안경|노안렌즈|안경렌즈|안경알|기능렌즈|운전렌즈|사무용렌즈|어린이렌즈|난시렌즈|콘택트렌즈|원데이렌즈|컬러렌즈)(적응|선택|검사|착용감|관리|도수|시야|울렁임|건조|착용시간|실패|코팅|두께|운전)$/.test(part)
+    );
+}
+
+function selectKeywordAnchorWord(keyword: string): string {
+  const parts = keyword.trim().split(/\s+/);
+  const [first, second] = parts;
+  if (!second) return first ?? "";
+  if (
+    /^(10대|20대|30대|40대|50대|60대|여자|남자|학생|청소년|직장인|중년|부모님|어머니|아버지|어린이|운전자|초보|처음|출근|운동|장시간|야간운전|고도수|블루라이트차단|가벼운|튼튼한|편한|편안한|어지러운|큰사이즈|빅사이즈|오버사이즈|운전용|업무용|독서용|실내용)$/.test(first)
+  ) {
+    return second;
+  }
+  return first ?? "";
+}
+
+// LLM이 만든 제목은 그대로 신뢰한다. 여기서는 제목을 절대 다시 쓰지 않고,
+// 서브키워드가 비어 있거나 2단어 형태가 아닐 때만 메인 키워드 머리어 기준으로 채운다.
 function alignTitleWithKeywords(option: KeywordOption, index: number): KeywordOption {
+  void index;
   const main = splitKeyword(option.mainKeyword);
   if (!main) return option;
 
   const [head, mainCore] = main;
-  const keywordHead = isRegionWord(head) ? mainCore : head;
+  const keywordHead = isRegionWord(head) ? mainCore : selectKeywordAnchorWord(option.mainKeyword);
   const [core1, core2] = pickKeywordCores(option);
-  const subKeyword1 = `${keywordHead} ${core1}`;
-  const subKeyword2 = `${keywordHead} ${core2}`;
-
-  if (
-    option.title.includes(option.mainKeyword) &&
-    (option.title.includes(core1) || option.title.includes(core2)) &&
-    option.title.length >= 15 &&
-    option.title.length <= 30 &&
-    !isAwkwardGeneratedTitle(option.title) &&
-    !/(기준.*기준|확인.*확인|검사.*검사|관리.*관리|차이.*차이)/.test(option.title)
-  ) {
-    return {
-      ...option,
-      subKeyword1,
-      subKeyword2,
-      title: polishGeneratedTitle(option.title),
-    };
-  }
+  const sub1 = splitKeyword(option.subKeyword1);
+  const sub2 = splitKeyword(option.subKeyword2);
+  const needsSub1 = !sub1 || !option.subKeyword1.includes(keywordHead);
+  const needsSub2 = !sub2 || !option.subKeyword2.includes(keywordHead);
+  if (!needsSub1 && !needsSub2) return option;
 
   return {
     ...option,
-    subKeyword1,
-    subKeyword2,
-    title: polishGeneratedTitle(composeAlignedTitle({
-      mainKeyword: option.mainKeyword,
-      core1,
-      core2,
-      index,
-    })),
+    subKeyword1: needsSub1 ? `${keywordHead} ${sub1?.[1] ?? core1}` : option.subKeyword1,
+    subKeyword2: needsSub2 ? `${keywordHead} ${sub2?.[1] ?? core2}` : option.subKeyword2,
   };
 }
 
+/**
+ * @deprecated 더 이상 호출되지 않는다. 100개가 넘는 정규식 .replace() 체인으로
+ * 템플릿이 만든 어색한 제목을 땜질하던 함수다. 템플릿 조립을 제거했으므로 불필요.
+ * 안전하게 삭제 가능.
+ */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function polishGeneratedTitle(title: string): string {
   return title
     .replace(/원인 (.+)(?:과|와) (.+) 기준/g, (_match, first: string, second: string) =>
@@ -1388,6 +1632,101 @@ function polishGeneratedTitle(title: string): string {
     .trim();
 }
 
+// 진짜로 망가진 제목만 떨어뜨린다(템플릿으로 다시 쓰지 않는다).
+// 후보는 LLM이 넉넉히 생성하고 재시도/폴백 경로가 있으므로, 의심스러운 건
+// 억지로 고치기보다 드롭하는 편이 결과 품질에 유리하다.
+function isUsableLlmTitle(option: KeywordOption): boolean {
+  const title = option.title.trim();
+  if (!title) return false;
+  // 메인 키워드는 제목에 원형 그대로 들어가야 한다(검색 노출의 전제).
+  if (!title.includes(option.mainKeyword.trim())) return false;
+  // 길이 안전장치(노출에서 잘리거나 너무 짧아 정보 기대감이 없는 제목 차단).
+  const len = title.length;
+  if (len < 12 || len > 40) return false;
+  // 기계적/스팸성 패턴은 고치지 말고 버린다.
+  if (isAwkwardGeneratedTitle(title)) return false;
+  return true;
+}
+
+function getKeywordCore(keyword: string): string {
+  return splitKeyword(keyword)?.[1] ?? "";
+}
+
+function hasVisibleSubKeywordCore(option: KeywordOption): boolean {
+  const title = option.title;
+  const subCores = [getKeywordCore(option.subKeyword1), getKeywordCore(option.subKeyword2)]
+    .filter(Boolean);
+  return subCores.some((core) => title.includes(core));
+}
+
+function buildTitleWithSupportCore(option: KeywordOption, supportCore: string): string {
+  const mainCore = getKeywordCore(option.mainKeyword);
+  const mainKeyword = option.mainKeyword;
+  const titleSupportCore = /처음/.test(supportCore) ? "사용감" : supportCore;
+
+  if (/원인/.test(mainCore)) {
+    return `${mainKeyword} ${titleSupportCore} 먼저 확인할 때`;
+  }
+  if (/울렁임|어지러움|불편|건조|충혈|흐림|통증|이물감|흘러내림/.test(mainCore)) {
+    if (/시야/.test(titleSupportCore)) return `${mainKeyword} ${titleSupportCore}가 흔들릴 때`;
+    if (/선택/.test(titleSupportCore)) return `${mainKeyword} 반복될 때`;
+    if (/어린이|부모님|학생|직장인|운전자|초보/.test(titleSupportCore)) return `${mainKeyword} ${titleSupportCore} 기준`;
+    return `${mainKeyword} ${titleSupportCore} 기준`;
+  }
+  if (/착용감/.test(mainCore)) {
+    return `${mainKeyword} ${titleSupportCore} 기준`;
+  }
+  if (/처음|적응/.test(mainCore)) {
+    return `${mainKeyword} ${titleSupportCore} 기준`;
+  }
+  if (/도수/.test(mainCore)) {
+    return `${mainKeyword} ${titleSupportCore} 기준`;
+  }
+  if (/선택|차이|소재|두께|압축|코팅|사이즈|얼굴형|무게/.test(mainCore)) {
+    if (/돋보기|안경테|소재/.test(titleSupportCore)) return `${mainKeyword} ${titleSupportCore}와 비교할 때`;
+    return `${mainKeyword} ${titleSupportCore} 기준`;
+  }
+  if (/검사|시기|근시|난시|노안/.test(mainCore)) {
+    return `${mainKeyword} ${titleSupportCore} 기준`;
+  }
+  if (/어린이|부모님|학생|직장인|운전자|초보/.test(titleSupportCore)) {
+    return `${mainKeyword} ${titleSupportCore} 기준`;
+  }
+  return `${mainKeyword} ${titleSupportCore} 기준`;
+}
+
+function chooseSupportCoreForTitle(option: KeywordOption): string {
+  const mainCore = getKeywordCore(option.mainKeyword);
+  const cores = [getKeywordCore(option.subKeyword1), getKeywordCore(option.subKeyword2)]
+    .filter((core) => core && core !== mainCore);
+  if (/착용감|불편|울렁임|어지러움|적응|도수/.test(mainCore)) {
+    return cores.find((core) => !/돋보기|선택|차이|디자인|렌즈교체|안경테|선글라스/.test(core)) ?? cores[0] ?? "";
+  }
+  return cores[0] ?? "";
+}
+
+function repairTitleForValidationShape(option: KeywordOption): KeywordOption {
+  if (!option.title.includes(option.mainKeyword)) return option;
+
+  const supportCore = chooseSupportCoreForTitle(option);
+
+  let title = option.title;
+  if (supportCore && !hasVisibleSubKeywordCore(option)) {
+    title = buildTitleWithSupportCore(option, supportCore);
+  }
+
+  if (title.length < 15 && supportCore) {
+    title = buildTitleWithSupportCore({ ...option, title }, supportCore);
+  }
+
+  if (title.length > 30 && supportCore) {
+    const compact = `${option.mainKeyword} ${supportCore} 확인할 때`;
+    title = compact.length <= 30 ? compact : title;
+  }
+
+  return { ...option, title };
+}
+
 function normalizeGeneratedOptions(options: KeywordOption[]): KeywordOption[] {
   return options
     .map((option) => ({
@@ -1396,22 +1735,12 @@ function normalizeGeneratedOptions(options: KeywordOption[]): KeywordOption[] {
       subKeyword1: option.subKeyword1.trim().replace(/\s+/g, " "),
       subKeyword2: option.subKeyword2.trim().replace(/\s+/g, " "),
     }))
+    // 제목은 LLM 출력을 그대로 유지하고, 서브키워드만 보정한다.
     .map((option, index) => alignTitleWithKeywords(option, index))
-    .map((option) => ({
-      ...option,
-      title: polishGeneratedTitle(
-        reviseMechanicalNaverTitle({
-          title: option.title,
-          mainKeyword: option.mainKeyword,
-          subKeyword1: option.subKeyword1,
-          subKeyword2: option.subKeyword2,
-        })
-      ),
-    }))
-    .filter((option) => {
-      if (!option.title.includes(option.mainKeyword)) return false;
-      return true;
-    })
+    // 명확한 검증 실패(서브핵심어 누락/길이 부족)만 최소 보정한다.
+    .map((option) => repairTitleForValidationShape(option))
+    // 망가진 제목은 템플릿으로 덮어쓰지 않고 드롭한다.
+    .filter((option) => isUsableLlmTitle(option))
     .filter(
       (option) =>
         option.title.trim().length > 0 &&
@@ -1565,7 +1894,7 @@ ${competitors}
 - 누진렌즈 운전 야간 시야가 답답할 때
 - 울템안경 특징 가벼운데 탄성이 다른 이유
 - 안경피팅 착용감 코패드 위치가 맞지 않을 때
-- 안경사이즈 선택 얼굴형마다 달라지는 부분
+- 안경사이즈 선택 얼굴형에 맞지 않을 때
 - 무테안경 관리 나사 풀림이 생겼을 때
 - 메탈안경 관리 변형되면 착용감이 달라지는 이유
 - 렌즈착용 시간 건조감이 오래 남을 때
@@ -1575,7 +1904,7 @@ ${competitors}
 - 안경수리 나사 맡기기 전 상태를 봐야 할 때
 - 어린이눈 피로 습관이 반복될 때
 - 렌즈두께 선택 도수가 높아졌을 때
-- 소프트렌즈 착용감 관리 습관이 흔들릴 때
+- 소프트렌즈 착용감 건조감이 오래 남을 때
 - 안경수리 나사 파손 상태를 먼저 봐야 할 때
 - 블루라이트렌즈 눈피로 화면을 오래 볼 때 남는 이유
 - 근시억제렌즈 검사 어린이 도수 변화가 빠를 때
@@ -1647,6 +1976,7 @@ function canAddIntentBalancedCandidate<T extends KeywordOption>(
       hasSameKeywordCombination(picked, candidate)
   );
   if (hasExactDuplicate) return false;
+  if (selected.some((picked) => picked.mainKeyword === candidate.mainKeyword)) return false;
 
   if (!options.allowSimilar && selected.some((picked) => isTooSimilarTitle(candidate, picked))) {
     return false;
@@ -1943,6 +2273,7 @@ function appendEmergencyDiverseBackfill<T extends AnalyzedKeyword>(
   for (const maxSameTheme of [1, 2]) {
     for (const candidate of candidates) {
       if (filled.length >= TARGET_RESULT_COUNT) break;
+      if (!candidate.validation.isValid) continue;
       if (!candidate.title.includes(candidate.mainKeyword)) continue;
       if (isAwkwardGeneratedTitle(candidate.title)) continue;
       const hasExactDuplicate = filled.some(
@@ -1967,7 +2298,163 @@ function appendEmergencyDiverseBackfill<T extends AnalyzedKeyword>(
     if (filled.length >= TARGET_RESULT_COUNT) break;
   }
 
+  for (const candidate of candidates) {
+    if (filled.length >= TARGET_RESULT_COUNT) break;
+    if (!candidate.validation.isValid) continue;
+    if (!candidate.title.includes(candidate.mainKeyword)) continue;
+    if (isAwkwardGeneratedTitle(candidate.title)) continue;
+    const hasExactDuplicate = filled.some(
+      (picked) =>
+        normalizeTitleForComparison(picked.title) === normalizeTitleForComparison(candidate.title) ||
+        hasSameKeywordCombination(picked, candidate)
+    );
+    if (!hasExactDuplicate) {
+      filled.push(candidate);
+    }
+  }
+
   return interleaveIntentBuckets(filled).slice(0, TARGET_RESULT_COUNT);
+}
+
+function matchesAnyProductHead(option: KeywordOption, productHeads: string[]): boolean {
+  if (productHeads.length === 0) return false;
+  const source = `${option.mainKeyword} ${option.subKeyword1} ${option.subKeyword2}`
+    .replace(/\s+/g, "")
+    .toLowerCase();
+  return productHeads.some((head) =>
+    source.includes(head.replace(/\s+/g, "").toLowerCase())
+  );
+}
+
+function getMatchedProductHeads(option: KeywordOption, productHeads: string[]): string[] {
+  if (productHeads.length === 0) return [];
+  const source = option.mainKeyword.replace(/\s+/g, "").toLowerCase();
+  return productHeads.filter((head) =>
+    source.includes(head.replace(/\s+/g, "").toLowerCase())
+  );
+}
+
+function getKeywordOptionKey(option: KeywordOption): string {
+  return option.mainKeyword.replace(/\s+/g, "").toLowerCase();
+}
+
+function matchesKeywordMesh(option: KeywordOption, meshKeywordKeys: Set<string>): boolean {
+  return meshKeywordKeys.has(getKeywordOptionKey(option));
+}
+
+function ensureProductRepresentation<T extends AnalyzedKeyword>(
+  selected: T[],
+  candidates: T[],
+  productHeads: string[],
+  minCount = 2
+): T[] {
+  if (productHeads.length === 0) return selected;
+
+  const filled = [...selected];
+  const productCount = () => filled.filter((item) => matchesAnyProductHead(item, productHeads)).length;
+  if (productCount() >= minCount) return filled.slice(0, TARGET_RESULT_COUNT);
+
+  const selectedKeys = new Set(filled.map((item) => `${item.title}|${item.mainKeyword}`));
+  const productCandidates = candidates
+    .filter((candidate) => candidate.validation.isValid)
+    .filter((candidate) => matchesAnyProductHead(candidate, productHeads))
+    .filter((candidate) => !selectedKeys.has(`${candidate.title}|${candidate.mainKeyword}`))
+    .filter((candidate) => !isAwkwardGeneratedTitle(candidate.title))
+    .sort((a, b) => b._priorityScore - a._priorityScore);
+
+  for (const candidate of productCandidates) {
+    if (productCount() >= minCount) break;
+    const replaceIndex = [...filled]
+      .map((item, index) => ({ item, index }))
+      .reverse()
+      .find(({ item }) => !matchesAnyProductHead(item, productHeads))?.index;
+    if (replaceIndex === undefined) break;
+    filled[replaceIndex] = candidate;
+    selectedKeys.add(`${candidate.title}|${candidate.mainKeyword}`);
+  }
+
+  return interleaveIntentBuckets(filled).slice(0, TARGET_RESULT_COUNT);
+}
+
+function ensureKeywordMeshRepresentation<T extends AnalyzedKeyword>(
+  selected: T[],
+  candidates: T[],
+  meshKeywordKeys: Set<string>,
+  productHeads: string[],
+  minCount = 3
+): T[] {
+  if (meshKeywordKeys.size === 0) return selected.slice(0, TARGET_RESULT_COUNT);
+
+  const filled = [...selected];
+  const meshCount = () => filled.filter((item) => matchesKeywordMesh(item, meshKeywordKeys)).length;
+  if (meshCount() >= minCount) return filled.slice(0, TARGET_RESULT_COUNT);
+
+  const selectedKeys = new Set(filled.map((item) => `${item.title}|${item.mainKeyword}`));
+  const meshCandidates = candidates
+    .filter((candidate) => candidate.validation.isValid)
+    .filter((candidate) => matchesKeywordMesh(candidate, meshKeywordKeys))
+    .filter((candidate) => !selectedKeys.has(`${candidate.title}|${candidate.mainKeyword}`))
+    .filter((candidate) => !isAwkwardGeneratedTitle(candidate.title))
+    .sort((a, b) => b._priorityScore - a._priorityScore);
+
+  for (const candidate of meshCandidates) {
+    if (meshCount() >= minCount) break;
+    const replaceIndex =
+      [...filled]
+        .map((item, index) => ({ item, index }))
+        .reverse()
+        .find(({ item }) =>
+          !matchesKeywordMesh(item, meshKeywordKeys) && !matchesAnyProductHead(item, productHeads)
+        )?.index ??
+      [...filled]
+        .map((item, index) => ({ item, index }))
+        .reverse()
+        .find(({ item }) => !matchesKeywordMesh(item, meshKeywordKeys))?.index;
+    if (replaceIndex === undefined) break;
+    filled[replaceIndex] = candidate;
+    selectedKeys.add(`${candidate.title}|${candidate.mainKeyword}`);
+  }
+
+  return interleaveIntentBuckets(filled).slice(0, TARGET_RESULT_COUNT);
+}
+
+function dedupeFinalKeywordResults<T extends AnalyzedKeyword>(
+  selected: T[],
+  candidates: T[],
+  productHeads: string[] = []
+): T[] {
+  const result: T[] = [];
+  const pushIfFresh = (candidate: T) => {
+    if (!candidate.validation.isValid) return;
+    if (!candidate.title.includes(candidate.mainKeyword)) return;
+    if (isAwkwardGeneratedTitle(candidate.title)) return;
+    const matchedProductHeads = getMatchedProductHeads(candidate, productHeads);
+    if (matchedProductHeads.length > 1) return;
+    if (
+      matchedProductHeads.length === 1 &&
+      result.filter((picked) => getMatchedProductHeads(picked, productHeads)[0] === matchedProductHeads[0]).length >= 2
+    ) {
+      return;
+    }
+    const duplicate = result.some(
+      (picked) =>
+        normalizeTitleForComparison(picked.mainKeyword) === normalizeTitleForComparison(candidate.mainKeyword) ||
+        normalizeTitleForComparison(picked.title) === normalizeTitleForComparison(candidate.title) ||
+        hasSameKeywordCombination(picked, candidate)
+    );
+    if (!duplicate) result.push(candidate);
+  };
+
+  for (const candidate of selected) {
+    if (result.length >= TARGET_RESULT_COUNT) break;
+    pushIfFresh(candidate);
+  }
+  for (const candidate of candidates) {
+    if (result.length >= TARGET_RESULT_COUNT) break;
+    pushIfFresh(candidate);
+  }
+
+  return interleaveIntentBuckets(result).slice(0, TARGET_RESULT_COUNT);
 }
 
 function inferSearchIntentAxis(option: KeywordOption): string {
@@ -2108,7 +2595,178 @@ function mergeDemandSignals(...groups: SearchVolumeSignal[][]): SearchVolumeSign
   return Array.from(merged.values());
 }
 
-type AnalyzedKeyword = KeywordOption & {
+function dedupeKeywordOptions<T extends KeywordOption>(options: T[]): T[] {
+  const seen = new Set<string>();
+  const deduped: T[] = [];
+  for (const option of options) {
+    const key = `${option.title}|${option.mainKeyword}|${option.subKeyword1}|${option.subKeyword2}`
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(option);
+  }
+  return deduped;
+}
+
+function getVolumeTierScore(tier: VolumeGateFields["_volumeTier"] | undefined): number {
+  if (tier === "pass") return 45;
+  if (tier === "weak") return -20;
+  return 0;
+}
+
+function getProductHeadScore(option: KeywordOption, productHeads: string[]): number {
+  if (productHeads.length === 0) return 0;
+  const source = `${option.mainKeyword} ${option.subKeyword1} ${option.subKeyword2}`
+    .replace(/\s+/g, "")
+    .toLowerCase();
+  const matched = productHeads.some((head) =>
+    source.includes(head.replace(/\s+/g, "").toLowerCase())
+  );
+  return matched ? 34 : 0;
+}
+
+function getKeywordMeshScore(option: KeywordOption, meshKeywordKeys: Set<string>): number {
+  return matchesKeywordMesh(option, meshKeywordKeys) ? 24 : 0;
+}
+
+function getSearcherConversionQualityScore(option: KeywordOption): number {
+  const source = `${option.title} ${option.mainKeyword} ${option.subKeyword1} ${option.subKeyword2}`;
+  const mainTail = splitKeyword(option.mainKeyword)?.[1] ?? "";
+  let score = 0;
+
+  if (/울렁임|어지러움|건조|충혈|흐림|통증|이물감|흘러내림|눈부심|불편|피로/.test(source)) {
+    score += 18;
+  }
+  if (/처음|착용|야간|운전|업무|독서|스마트폰|생활|부모님|어린이|장시간/.test(source)) {
+    score += 12;
+  }
+  if (/검사|도수|피팅|코패드|착용감|시야|얼굴형|거리|두께|압축|코팅/.test(source)) {
+    score += 12;
+  }
+  if (/확인할 점|비교할 기준|어색한 이유|불편할 때|생활거리|놓치기 쉬운 점/.test(option.title)) {
+    score += 10;
+  }
+
+  if (/선택|관리|방법|기준|업무|운전|생활/.test(mainTail) && !/불편|검사|도수|시야|착용감|눈부심|건조|울렁임|흘러내림/.test(source)) {
+    score -= 18;
+  }
+  if (/달라지는 부분|반복될 때|사용감이 달라질 때|사용감이 달라지는 이유|생활에서 자주 생기는 이유|방문 전 살펴볼 기준|관리 습관이 흔들릴 때|알아볼 때 확인할 부분/.test(option.title)) {
+    score -= 24;
+  }
+  if (/운전렌즈 업무|운전렌즈 독서|실내렌즈 운전|사무용렌즈 운전|중근용렌즈 운전/.test(source)) {
+    score -= 35;
+  }
+
+  return score;
+}
+
+function getTopicAlignmentScore(option: KeywordOption, topic?: string): number {
+  const topicText = topic?.trim() ?? "";
+  if (!topicText) return 0;
+
+  const topicTokens = Array.from(
+    new Set(topicText.match(/[가-힣A-Za-z0-9]{2,}/g) ?? [])
+  ).filter((token) => !COMMON_TITLE_WORDS.has(token));
+  if (topicTokens.length === 0) return 0;
+
+  const source = `${option.title} ${option.mainKeyword} ${option.subKeyword1} ${option.subKeyword2}`
+    .replace(/\s+/g, "")
+    .toLowerCase();
+  const mainKey = option.mainKeyword.replace(/\s+/g, "").toLowerCase();
+  const titleKey = option.title.replace(/\s+/g, "").toLowerCase();
+  const matched = topicTokens.filter((token) =>
+    source.includes(token.replace(/\s+/g, "").toLowerCase())
+  );
+  const primaryTopicToken = topicTokens[0]?.replace(/\s+/g, "").toLowerCase();
+  const secondaryTopicToken = topicTokens[1]?.replace(/\s+/g, "").toLowerCase();
+  const hasPrimary = primaryTopicToken ? source.includes(primaryTopicToken) : false;
+  const mainHasPrimary = primaryTopicToken ? mainKey.includes(primaryTopicToken) : false;
+  const mainHasSecondary = secondaryTopicToken ? mainKey.includes(secondaryTopicToken) : false;
+  const titleHasSecondary = secondaryTopicToken ? titleKey.includes(secondaryTopicToken) : false;
+
+  let score = matched.length * 16;
+  if (hasPrimary) score += 18;
+  if (mainHasPrimary) score += 28;
+  if (mainHasPrimary && mainHasSecondary) score += 70;
+  if (mainHasPrimary && titleHasSecondary) score += 24;
+  if (matched.length >= Math.min(2, topicTokens.length)) score += 14;
+  if (!hasPrimary) score -= 180;
+  if (secondaryTopicToken && !source.includes(secondaryTopicToken)) score -= 40;
+  return score;
+}
+
+function extractTopicFocusTokens(topic?: string): string[] {
+  return Array.from(new Set(topic?.match(/[가-힣A-Za-z0-9]{2,}/g) ?? []))
+    .map((token) => stripKoreanParticle(token))
+    .filter((token) => token.length >= 2 && !COMMON_TITLE_WORDS.has(token))
+    .slice(0, 3);
+}
+
+function prioritizeTopicFocusedResults<T extends AnalyzedKeyword>(results: T[], topic?: string): T[] {
+  const tokens = extractTopicFocusTokens(topic);
+  const primary = tokens[0]?.replace(/\s+/g, "").toLowerCase();
+  if (!primary) return results;
+  const secondary = tokens[1]?.replace(/\s+/g, "").toLowerCase();
+
+  const score = (item: T): number => {
+    const main = item.mainKeyword.replace(/\s+/g, "").toLowerCase();
+    const title = item.title.replace(/\s+/g, "").toLowerCase();
+    const source = `${item.title} ${item.mainKeyword} ${item.subKeyword1} ${item.subKeyword2}`
+      .replace(/\s+/g, "")
+      .toLowerCase();
+    let value = item._priorityScore;
+    value += main.includes(primary) ? 200 : title.includes(primary) ? 120 : source.includes(primary) ? 70 : -250;
+    if (secondary) {
+      value += main.includes(secondary) ? 100 : title.includes(secondary) ? 70 : source.includes(secondary) ? 40 : -30;
+    }
+    return value;
+  };
+
+  return [...results].sort((a, b) => score(b) - score(a));
+}
+
+function mergeExternalSignalsWithVolumeGate(params: {
+  externalSignals: KeywordOptionAnalysis["externalSignals"] | undefined;
+  volumeSignal?: SearchVolumeSignal;
+  volumeTier: VolumeGateFields["_volumeTier"] | undefined;
+  gateNotes: string[];
+}): KeywordOptionAnalysis["externalSignals"] | undefined {
+  const { externalSignals, volumeSignal, volumeTier, gateNotes } = params;
+  const notes = Array.from(
+    new Set([
+      ...(externalSignals?.notes ?? []),
+      ...gateNotes,
+      volumeTier ? `검색량 게이트 판정: ${volumeTier}` : "",
+    ].filter(Boolean))
+  );
+
+  if (!externalSignals && !volumeSignal && notes.length === 0) return undefined;
+
+  const searchVolume = volumeSignal
+    ? [
+        volumeSignal,
+        ...((externalSignals?.searchVolume ?? []).filter(
+          (signal) =>
+            signal.keyword.replace(/\s+/g, "").toLowerCase() !==
+            volumeSignal.keyword.replace(/\s+/g, "").toLowerCase()
+        )),
+      ]
+    : externalSignals?.searchVolume ?? [];
+
+  return {
+    status: externalSignals?.status ?? (volumeSignal ? "available" : "unavailable"),
+    provider: externalSignals?.provider ?? (volumeSignal ? "naver-searchad-volume-gate" : "volume-gate"),
+    checkedAt: externalSignals?.checkedAt ?? new Date().toISOString(),
+    searchVolume,
+    relatedKeywords: externalSignals?.relatedKeywords ?? [],
+    exposures: externalSignals?.exposures ?? [],
+    notes,
+  };
+}
+
+type AnalyzedKeyword = KeywordOption & Partial<VolumeGateFields> & {
   analysis: KeywordOptionAnalysis;
   validation: ReturnType<typeof validateKeywordOption>;
   _priorityScore: number;
@@ -2125,7 +2783,7 @@ function collectCandidateSearchSeeds(options: KeywordOption[]): string[] {
       if (!seed || seen.has(key)) continue;
       seen.add(key);
       seeds.push(seed);
-      if (seeds.length >= 15) return seeds;
+      if (seeds.length >= TARGET_RESULT_COUNT * 10) return seeds;
     }
   }
 
@@ -2198,6 +2856,7 @@ function isDuplicateSignalFree(option: AnalyzedKeyword): boolean {
 
 function isBroadlyUsableCandidate(option: AnalyzedKeyword): boolean {
   return (
+    option.validation.isValid &&
     option.title.includes(option.mainKeyword) &&
     !isAwkwardGeneratedTitle(option.title)
   );
@@ -2215,13 +2874,25 @@ function hasRegisteredStoreOverlap(option: AnalyzedKeyword): boolean {
 }
 
 async function analyzeOptions(params: {
-  rawOptions: KeywordOption[];
+  rawOptions: Array<KeywordOption & Partial<VolumeGateFields>>;
   forbiddenList: string[];
   referenceList: string[];
   competitorList: string[];
   demandSignals?: SearchVolumeSignal[];
+  topic?: string;
+  productHeads?: string[];
+  meshKeywordKeys?: Set<string>;
 }): Promise<AnalyzedKeyword[]> {
-  const { rawOptions, forbiddenList, referenceList, competitorList, demandSignals = [] } = params;
+  const {
+    rawOptions,
+    forbiddenList,
+    referenceList,
+    competitorList,
+    demandSignals = [],
+    topic,
+    productHeads = [],
+    meshKeywordKeys = new Set<string>(),
+  } = params;
 
   return Promise.all(
     rawOptions.map(async (option) => {
@@ -2232,7 +2903,7 @@ async function analyzeOptions(params: {
         referenceList,
         competitorList,
       });
-      const demandSignal = findDemandSignalForKeyword(option.mainKeyword, demandSignals);
+      const demandSignal = option._volumeSignal ?? findDemandSignalForKeyword(option.mainKeyword, demandSignals);
       const sameStoreThemeOverlap = countHistoryThemeOverlap(option, forbiddenList);
       const crossBlogThemeOverlap = countHistoryThemeOverlap(option, referenceList);
       const hasMeasuredDemand =
@@ -2259,6 +2930,11 @@ async function analyzeOptions(params: {
         validation,
         _priorityScore:
           getKeywordPriorityScore({ validation, analysis }) +
+          getSearcherConversionQualityScore(option) +
+          getTopicAlignmentScore(option, topic) +
+          getProductHeadScore(option, productHeads) +
+          getKeywordMeshScore(option, meshKeywordKeys) +
+          getVolumeTierScore(option._volumeTier) +
           (demandSignal ? getDemandSignalScore(demandSignal) : 0) -
           (hasMeasuredDemand ? 0 : 18) -
           Math.min(45, sameStoreThemeOverlap * 15) -
@@ -2271,10 +2947,11 @@ async function analyzeOptions(params: {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { shopId, categoryId, topic } = body as {
+    const { shopId, categoryId, topic, refresh } = body as {
       shopId: string;
       categoryId: string;
-      topic: string;
+      topic?: string;
+      refresh?: boolean;
     };
 
     if (!shopId || !categoryId) {
@@ -2294,16 +2971,60 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const resultCacheKey = buildKeywordResultCacheKey({ shopId, categoryId, topic });
+    const cachedResult = refresh ? null : await getCachedKeywordResultData(resultCacheKey);
+    if (cachedResult) {
+      return NextResponse.json({
+        success: true,
+        data: {
+          ...cachedResult.data,
+          cache: {
+            status: "hit",
+            checkedAt: cachedResult.checkedAt,
+            month: getKeywordResultCacheMonth(),
+          },
+        },
+      });
+    }
+
+    const requestedTopic = typeof topic === "string" ? topic.trim() : "";
+    const topicPlan = planBlogTopic({
+      shop,
+      category,
+      userTopic: requestedTopic,
+    });
+    const effectiveTopic = topicPlan.topic;
+    const articleTopic = requestedTopic || topicPlan.thesis;
+    const productHeads = getShopProductHeads({ shop, category });
+    const productModifiers = getProductModifiers({
+      categoryId: category.id,
+      heads: productHeads,
+    });
+    const productModifiersByHead = getProductModifiersByHead({
+      categoryId: category.id,
+      heads: productHeads,
+    });
+
     const competitorSeeds = [
       category.name,
       ...category.subcategories.slice(0, 3),
     ].filter(Boolean);
 
-    const discoverySeeds = buildKeywordDiscoverySeeds({
-      shop,
-      category,
-      topic,
-    });
+    const discoverySeeds = Array.from(
+      new Set([
+        ...buildKeywordDiscoverySeeds({
+          shop,
+          category,
+          topic: effectiveTopic,
+        }),
+        ...buildKeywordMeshSeeds({
+          shop,
+          category,
+          maxSeeds: 80,
+        }),
+        ...productHeads,
+      ])
+    );
 
     // RSS 이력, 경쟁 제목, 검색량 신호는 서로 독립적이므로 동시에 수집한다.
     // (이전에는 직렬로 호출해 네트워크 지연이 합산되며 응답이 느려졌다.)
@@ -2357,40 +3078,80 @@ export async function POST(request: NextRequest) {
     const strategyGuide = buildKeywordStrategyGuide({
       shop,
       category,
-      topic,
+      topic: effectiveTopic,
       demandSignals,
     });
 
-    const fallbackBatch = buildFallbackKeywordOptions({
-      region: inferShopRegion(shop),
+    const region = inferShopRegion(shop);
+    const combinedSeedBatch = combineKeywords({
       categoryId: category.id,
-      demandSignals,
+      region,
+      coreHeads: [...(BROAD_KEYWORD_HEADS[category.id] ?? []), ...productHeads],
+      modifiers: [
+        ...(BROAD_KEYWORD_TAILS[category.id] ?? []),
+        ...topicPlan.preferredModifiers,
+        ...productModifiers,
+      ],
+      coreModifiersByHead: {
+        ...DEFAULT_CORES_BY_HEAD,
+        ...productModifiersByHead,
+      },
+      maxModifiersPerHead: 6,
+      maxCandidates: 90,
     });
+    const productSeedBatch = buildProductKeywordOptions({
+      shop,
+      category,
+      maxPerHead: 3,
+    });
+    const meshSeedBatch = buildKeywordMeshOptions({
+      shop,
+      category,
+      maxCandidates: 120,
+    });
+    const meshKeywordKeys = new Set(meshSeedBatch.map(getKeywordOptionKey));
+    const nonProductMeshKeywordKeys = new Set(
+      meshSeedBatch
+        .filter((option) => !matchesAnyProductHead(option, productHeads))
+        .map(getKeywordOptionKey)
+    );
+    const fallbackBatch = dedupeKeywordOptions([
+      ...meshSeedBatch,
+      ...productSeedBatch,
+      ...combinedSeedBatch,
+      ...buildFallbackKeywordOptions({
+        region,
+        categoryId: category.id,
+        demandSignals,
+      }),
+    ]);
 
     let baseCandidates = fallbackBatch;
-    try {
-      const gptCandidates = await generateKeywordCandidatesWithGpt({
-        shopName: shop.name,
-        region: inferShopRegion(shop),
-        categoryName: category.name,
-        topic,
-        demandSignals,
-        strategyGuide,
-        fallbackCandidates: fallbackBatch,
-      });
-      if (gptCandidates && gptCandidates.length > 0) {
-        const seen = new Set<string>();
-        baseCandidates = normalizeGeneratedOptions([...gptCandidates, ...fallbackBatch])
-          .filter((candidate) => isCategoryAppropriateCandidate(category.id, candidate))
-          .filter((candidate) => {
-            const key = `${candidate.title}|${candidate.mainKeyword}`.trim();
-            if (seen.has(key)) return false;
-            seen.add(key);
-            return true;
-          });
+    if (KEYWORD_AI_EXPANSION_ENABLED) {
+      try {
+        const gptCandidates = await generateKeywordCandidatesWithGpt({
+          shopName: shop.name,
+          region,
+          categoryName: category.name,
+          topic: effectiveTopic,
+          demandSignals,
+          strategyGuide,
+          fallbackCandidates: fallbackBatch,
+        });
+        if (gptCandidates && gptCandidates.length > 0) {
+          const seen = new Set<string>();
+          baseCandidates = normalizeGeneratedOptions([...gptCandidates, ...fallbackBatch])
+            .filter((candidate) => isCategoryAppropriateCandidate(category.id, candidate))
+            .filter((candidate) => {
+              const key = `${candidate.title}|${candidate.mainKeyword}`.trim();
+              if (seen.has(key)) return false;
+              seen.add(key);
+              return true;
+            });
+        }
+      } catch {
+        // GPT 후보 확장 실패 시 로컬 후보만 사용한다.
       }
-    } catch {
-      // GPT 후보 확장 실패 시 로컬 후보만 사용한다.
     }
 
     const firstPrompt = buildCandidateEditingPrompt({
@@ -2405,11 +3166,18 @@ export async function POST(request: NextRequest) {
 
     let firstBatch: KeywordOption[] = [];
     let usedFallbackBatch = false;
-    try {
-      firstBatch = normalizeGeneratedOptions(
-        await generateKeywords(firstPrompt, KEYWORD_FIRST_EDIT_TIMEOUT_MS)
-      ).filter((candidate) => isCategoryAppropriateCandidate(category.id, candidate));
-    } catch {
+    if (KEYWORD_AI_EXPANSION_ENABLED) {
+      try {
+        firstBatch = normalizeGeneratedOptions(
+          await generateKeywords(firstPrompt, KEYWORD_FIRST_EDIT_TIMEOUT_MS)
+        ).filter((candidate) => isCategoryAppropriateCandidate(category.id, candidate));
+      } catch {
+        firstBatch = normalizeGeneratedOptions(baseCandidates).filter((candidate) =>
+          isCategoryAppropriateCandidate(category.id, candidate)
+        );
+        usedFallbackBatch = true;
+      }
+    } else {
       firstBatch = normalizeGeneratedOptions(baseCandidates).filter((candidate) =>
         isCategoryAppropriateCandidate(category.id, candidate)
       );
@@ -2435,42 +3203,56 @@ export async function POST(request: NextRequest) {
     }
 
     try {
-      const candidateSeeds = collectCandidateSearchSeeds(firstBatch);
-      const [candidateCompetitorList, candidateDemandSignals] = await Promise.all([
-        fetchCompetitorTitles(candidateSeeds, 10),
-        fetchKeywordOpportunitySignals(candidateSeeds).catch(() => [] as SearchVolumeSignal[]),
-      ]);
-      competitorList = Array.from(new Set([...competitorList, ...candidateCompetitorList]));
+      const candidateSeeds = collectCandidateSearchSeeds([...fallbackBatch, ...firstBatch]);
+      const candidateDemandSignals = await fetchKeywordOpportunitySignals(candidateSeeds).catch(
+        () => [] as SearchVolumeSignal[]
+      );
+      if (!KEYWORD_FAST_MODE) {
+        const candidateCompetitorList = await fetchCompetitorTitles(candidateSeeds, 10);
+        competitorList = Array.from(new Set([...competitorList, ...candidateCompetitorList]));
+      }
       demandSignals = mergeDemandSignals(demandSignals, candidateDemandSignals);
     } catch {
       // 후보 키워드별 상위 제목/검색량 조회 실패 시 기존 카테고리 기반 신호만 사용한다.
     }
 
-    try {
-      const repairPrompt = buildHumanTitleRepairPrompt({
-        category: category.name,
-        candidates: firstBatch.slice(0, TARGET_RESULT_COUNT * 4),
-        forbiddenList,
-        referenceList,
-        competitorList,
-      });
-      const repairedBatch = normalizeGeneratedOptions(
-        await generateKeywords(repairPrompt, KEYWORD_REPAIR_TIMEOUT_MS)
-      ).filter((candidate) => isCategoryAppropriateCandidate(category.id, candidate));
-      if (repairedBatch.length >= Math.min(TARGET_RESULT_COUNT, firstBatch.length)) {
-        const repairedSeen = new Set<string>();
-        firstBatch = [...repairedBatch, ...firstBatch]
-          .filter((candidate) => {
-            const key = `${candidate.title}|${candidate.mainKeyword}|${candidate.subKeyword1}|${candidate.subKeyword2}`;
-            if (repairedSeen.has(key)) return false;
-            repairedSeen.add(key);
-            return true;
-          })
-          .slice(0, TARGET_RESULT_COUNT * 8);
+    const needsTitleRepair =
+      KEYWORD_AI_EXPANSION_ENABLED &&
+      firstBatch.length < TARGET_RESULT_COUNT * 2 ||
+      (KEYWORD_AI_EXPANSION_ENABLED &&
+        firstBatch.some((candidate) => isAwkwardGeneratedTitle(candidate.title)));
+
+    if (needsTitleRepair) {
+      try {
+        const repairPrompt = buildHumanTitleRepairPrompt({
+          category: category.name,
+          candidates: firstBatch.slice(0, TARGET_RESULT_COUNT * 4),
+          forbiddenList,
+          referenceList,
+          competitorList,
+        });
+        const repairedBatch = normalizeGeneratedOptions(
+          await generateKeywords(repairPrompt, KEYWORD_REPAIR_TIMEOUT_MS)
+        ).filter((candidate) => isCategoryAppropriateCandidate(category.id, candidate));
+        if (repairedBatch.length >= Math.min(TARGET_RESULT_COUNT, firstBatch.length)) {
+          const repairedSeen = new Set<string>();
+          firstBatch = [...repairedBatch, ...firstBatch]
+            .filter((candidate) => {
+              const key = `${candidate.title}|${candidate.mainKeyword}|${candidate.subKeyword1}|${candidate.subKeyword2}`;
+              if (repairedSeen.has(key)) return false;
+              repairedSeen.add(key);
+              return true;
+            })
+            .slice(0, TARGET_RESULT_COUNT * 8);
+        }
+      } catch {
+        // 제목 보정 실패 시 1차 편집 후보로 계속 진행한다.
       }
-    } catch {
-      // 제목 보정 실패 시 1차 편집 후보로 계속 진행한다.
     }
+
+    const firstVolumeGate = applyVolumeGate(firstBatch, demandSignals);
+    firstBatch = firstVolumeGate.candidates;
+    const volumeGateNotes = firstVolumeGate.notes;
 
     const analyzed = await analyzeOptions({
       rawOptions: firstBatch,
@@ -2478,11 +3260,21 @@ export async function POST(request: NextRequest) {
       referenceList,
       competitorList,
       demandSignals,
+      topic: effectiveTopic,
+      productHeads,
+      meshKeywordKeys,
     });
 
     let cleanCandidates = analyzed.filter(isCleanCandidate);
 
-    if (!usedFallbackBatch && cleanCandidates.length < 4) {
+    const broadlyUsableCount = analyzed.filter(isBroadlyUsableCandidate).length;
+
+    if (
+      KEYWORD_AI_EXPANSION_ENABLED &&
+      !usedFallbackBatch &&
+      cleanCandidates.length < 4 &&
+      broadlyUsableCount < TARGET_RESULT_COUNT
+    ) {
       const overlapTitles = Array.from(
         new Set(
           analyzed
@@ -2508,12 +3300,16 @@ export async function POST(request: NextRequest) {
         });
         const retryBatch = await generateKeywords(retryPrompt, KEYWORD_RETRY_TIMEOUT_MS);
         if (Array.isArray(retryBatch) && retryBatch.length > 0) {
+          const retryGate = applyVolumeGate(retryBatch, demandSignals);
           const retryAnalyzed = await analyzeOptions({
-            rawOptions: retryBatch,
+            rawOptions: retryGate.candidates,
             forbiddenList,
             referenceList,
             competitorList,
             demandSignals,
+            topic: effectiveTopic,
+            productHeads,
+            meshKeywordKeys,
           });
           const titleSeen = new Set(analyzed.map((item) => item.title.trim()));
           for (const candidate of retryAnalyzed) {
@@ -2570,29 +3366,50 @@ export async function POST(request: NextRequest) {
     }
 
     const analyzedFallback = await analyzeOptions({
-      rawOptions: normalizeGeneratedOptions(fallbackBatch).filter((candidate) =>
-        isCategoryAppropriateCandidate(category.id, candidate)
-      ),
+      rawOptions: applyVolumeGate(
+        normalizeGeneratedOptions(fallbackBatch).filter((candidate) =>
+          isCategoryAppropriateCandidate(category.id, candidate)
+        ),
+        demandSignals
+      ).candidates,
       forbiddenList,
       referenceList,
       competitorList,
       demandSignals,
+      topic: effectiveTopic,
+      productHeads,
+      meshKeywordKeys,
     });
     const safeFallback = [...analyzedFallback, ...noStoreOverlapCandidates]
       .filter((item) => !hasRegisteredStoreOverlap(item))
       .filter(isBroadlyUsableCandidate)
       .sort((a, b) => b._priorityScore - a._priorityScore);
 
-    const diverseRankedResults = appendEmergencyDiverseBackfill(
+    const representationPool = [...safeFallback, ...analyzedFallback, ...noStoreOverlapCandidates, ...analyzed].sort(
+      (a, b) => b._priorityScore - a._priorityScore
+    );
+    let diverseRankedResults = appendEmergencyDiverseBackfill(
       appendCategoryBackfill(
       pickIntentBalancedKeywordResults(rankedPool),
       rankedPool,
       safeFallback
       ),
-      [...safeFallback, ...analyzedFallback, ...noStoreOverlapCandidates, ...analyzed].sort(
-        (a, b) => b._priorityScore - a._priorityScore
-      )
+      representationPool
     );
+    diverseRankedResults = ensureProductRepresentation(
+      diverseRankedResults,
+      representationPool,
+      productHeads,
+      category.id === "eye-info" || category.id === "glasses-story" ? 1 : 2
+    );
+    diverseRankedResults = ensureKeywordMeshRepresentation(
+      diverseRankedResults,
+      representationPool,
+      nonProductMeshKeywordKeys,
+      productHeads,
+      category.id === "eye-info" || category.id === "glasses-story" ? 2 : 3
+    );
+    diverseRankedResults = dedupeFinalKeywordResults(diverseRankedResults, representationPool, productHeads);
     const topForExternalSignals = diverseRankedResults.slice(0, EXTERNAL_SIGNAL_TOP_K);
 
     // 후보별 외부 검색 신호 조회를 병렬로 수행한다. (이전에는 직렬 for 루프라
@@ -2632,22 +3449,86 @@ export async function POST(request: NextRequest) {
       const bScore = b._priorityScore + getExternalDemandScore(externalSignalMap.get(b.title));
       return bScore - aScore;
     });
+    const topicRankedResults = prioritizeTopicFocusedResults(demandRankedResults, effectiveTopic);
 
-    const results = demandRankedResults.map((item) => {
-      const { _priorityScore, analysis, ...rest } = item;
+    const smartBlockEntries = await Promise.all(
+      topicRankedResults.slice(0, SMART_BLOCK_TOP_K).map(async (item) => {
+        try {
+          return [item.title, await inferSmartBlockSubKeywords(item.mainKeyword)] as const;
+        } catch {
+          return [item.title, undefined] as const;
+        }
+      })
+    );
+    const smartBlockMap = new Map(smartBlockEntries);
+
+    const results = topicRankedResults.map((item) => {
+      const {
+        _priorityScore,
+        _volumeTier,
+        _volumeSignal,
+        _volumeSaturation,
+        analysis,
+        ...rest
+      } = item;
       void _priorityScore;
+      const volumeSignal = _volumeSignal ?? findDemandSignalForKeyword(item.mainKeyword, demandSignals);
+      const volumeTier = _volumeTier ?? "unknown";
+      const saturation = _volumeSaturation ?? volumeSignal?.competitionRatio ?? null;
+      const smartBlock = smartBlockMap.get(item.title);
+      const recommendedSmartBlockCandidate = smartBlock?.subKeywordCandidates.find(
+        (candidate) =>
+          candidate.keyword.replace(/\s+/g, "").toLowerCase() ===
+          smartBlock.recommendedTitleKeyword.replace(/\s+/g, "").toLowerCase()
+      );
+      const suggestedTitleKeyword =
+        smartBlock &&
+        smartBlock.recommendedTitleKeyword.replace(/\s+/g, "").toLowerCase() !==
+          item.mainKeyword.replace(/\s+/g, "").toLowerCase() &&
+        (recommendedSmartBlockCandidate?.titleHits ?? 0) >= 2
+          ? smartBlock.recommendedTitleKeyword
+          : undefined;
+
       return {
         ...rest,
+        volumeTier,
+        monthlyTotalSearches: volumeSignal?.monthlyTotalSearches ?? null,
+        blogDocumentCount: volumeSignal?.blogDocumentCount ?? null,
+        competitionRatio: saturation,
+        opportunityScore: volumeSignal?.opportunityScore ?? null,
+        suggestedTitleKeyword,
         analysis: {
           ...analysis,
-          externalSignals: externalSignalMap.get(item.title) ?? analysis.externalSignals,
+          externalSignals: mergeExternalSignalsWithVolumeGate({
+            externalSignals: externalSignalMap.get(item.title) ?? analysis.externalSignals,
+            volumeSignal,
+            volumeTier,
+            gateNotes: volumeGateNotes,
+          }),
+          ...(smartBlock ? { smartBlock } : {}),
         },
       };
     });
 
+    const responseData: KeywordResultResponseData = {
+      results,
+      notes: volumeGateNotes,
+      topic: articleTopic,
+      topicLabel: effectiveTopic,
+      topicPlan,
+    };
+
+    await saveKeywordResultData(resultCacheKey, responseData);
+
     return NextResponse.json({
       success: true,
-      data: { results },
+      data: {
+        ...responseData,
+        cache: {
+          status: "miss",
+          month: getKeywordResultCacheMonth(),
+        },
+      },
     });
   } catch (error) {
     const message =

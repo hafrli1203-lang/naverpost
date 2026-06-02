@@ -7,9 +7,32 @@ import type {
 import { generateRelatedKeywords } from "@/lib/nlp/nounExtractor";
 import { enrichOpportunitySignal } from "@/lib/keywords/opportunityScoring";
 import { createHmac } from "crypto";
+import fs from "fs/promises";
+import path from "path";
 
 const NAVER_FETCH_TIMEOUT_MS = 8_000;
 const NAVER_SEARCHAD_TIMEOUT_MS = 18_000;
+const KEYWORD_SIGNAL_CACHE_FILE = path.join(process.cwd(), "data", "keyword-signal-cache.json");
+const KEYWORD_SIGNAL_CACHE_VERSION = 1;
+const SEARCHAD_CHUNK_SIZE = 5;
+const SEARCHAD_MAX_FRESH_KEYWORDS_PER_RUN = 35;
+const SEARCHAD_CHUNK_DELAY_MS = 1_250;
+const SEARCHAD_RATE_LIMIT_RETRY_DELAY_MS = 5_000;
+const SEARCHAD_MAX_RETRIES = 1;
+const BLOG_COUNT_FETCH_DELAY_MS = 180;
+const BLOG_COUNT_MAX_FRESH_KEYWORDS_PER_RUN = 45;
+
+type KeywordSignalCacheEntry = {
+  checkedAt: string;
+  signal: SearchVolumeSignal;
+};
+
+type KeywordSignalCacheFile = {
+  version: number;
+  months: Record<string, Record<string, KeywordSignalCacheEntry>>;
+};
+
+let keywordSignalCache: KeywordSignalCacheFile | null = null;
 
 export class NaverSearchDependencyError extends Error {
   constructor(message: string) {
@@ -26,6 +49,89 @@ function uniqueTokens(source: string): string[] {
 
 function normalizeNaverCredential(value: string | undefined): string {
   return (value ?? "").trim();
+}
+
+function getKeywordSignalCacheMonth(date = new Date()): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function emptyKeywordSignalCache(): KeywordSignalCacheFile {
+  return {
+    version: KEYWORD_SIGNAL_CACHE_VERSION,
+    months: {},
+  };
+}
+
+async function readKeywordSignalCache(): Promise<KeywordSignalCacheFile> {
+  if (keywordSignalCache) return keywordSignalCache;
+
+  try {
+    const raw = await fs.readFile(KEYWORD_SIGNAL_CACHE_FILE, "utf-8");
+    const parsed = JSON.parse(raw) as KeywordSignalCacheFile;
+    keywordSignalCache =
+      parsed && parsed.version === KEYWORD_SIGNAL_CACHE_VERSION && parsed.months
+        ? parsed
+        : emptyKeywordSignalCache();
+  } catch {
+    keywordSignalCache = emptyKeywordSignalCache();
+  }
+
+  return keywordSignalCache;
+}
+
+async function writeKeywordSignalCache(cache: KeywordSignalCacheFile): Promise<void> {
+  keywordSignalCache = cache;
+  await fs.mkdir(path.dirname(KEYWORD_SIGNAL_CACHE_FILE), { recursive: true });
+  await fs.writeFile(
+    KEYWORD_SIGNAL_CACHE_FILE,
+    JSON.stringify(cache, null, 2),
+    "utf-8"
+  );
+}
+
+async function getCachedMonthlySignals(
+  keywords: string[],
+  month = getKeywordSignalCacheMonth()
+): Promise<Map<string, SearchVolumeSignal>> {
+  const cache = await readKeywordSignalCache();
+  const monthCache = cache.months[month] ?? {};
+  const result = new Map<string, SearchVolumeSignal>();
+  for (const keyword of keywords) {
+    const key = normalizeKeywordKey(keyword);
+    const cached = monthCache[key]?.signal;
+    if (cached) result.set(key, cached);
+  }
+  return result;
+}
+
+async function saveMonthlySignals(
+  signals: SearchVolumeSignal[],
+  month = getKeywordSignalCacheMonth()
+): Promise<void> {
+  if (signals.length === 0) return;
+  const cache = await readKeywordSignalCache();
+  const monthCache = cache.months[month] ?? {};
+  const checkedAt = new Date().toISOString();
+
+  for (const signal of signals) {
+    const key = normalizeKeywordKey(signal.keyword);
+    if (!key) continue;
+    monthCache[key] = {
+      checkedAt,
+      signal,
+    };
+  }
+
+  cache.months[month] = monthCache;
+  await writeKeywordSignalCache(cache);
+}
+
+function isSearchAdRateLimitError(error: unknown): boolean {
+  return error instanceof Error && /\b429\b|Too Many Requests/i.test(error.message);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function hasWorkingCredentials(): boolean {
@@ -273,7 +379,11 @@ async function fetchSearchAdKeywordStats(
 
   const path = "/keywordstool";
   const url = new URL(`https://api.searchad.naver.com${path}`);
-  url.searchParams.set("hintKeywords", uniqueKeywords.join(","));
+  const hintKeywords = Array.from(
+    new Set(uniqueKeywords.map((keyword) => keyword.replace(/\s+/g, "")).filter(Boolean))
+  );
+  if (hintKeywords.length === 0) return resultMap;
+  url.searchParams.set("hintKeywords", hintKeywords.join(","));
   url.searchParams.set("showDetail", "1");
 
   const response = await fetchWithTimeout(
@@ -336,25 +446,96 @@ async function fetchSearchAdKeywordStats(
   return resultMap;
 }
 
+async function fetchSearchAdKeywordStatsWithRetry(
+  keywords: string[]
+): Promise<Map<string, SearchVolumeSignal>> {
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt <= SEARCHAD_MAX_RETRIES; attempt += 1) {
+    try {
+      return await fetchSearchAdKeywordStats(keywords);
+    } catch (error) {
+      lastError = error;
+      if (!isSearchAdRateLimitError(error) || attempt >= SEARCHAD_MAX_RETRIES) {
+        throw error;
+      }
+      await sleep(SEARCHAD_RATE_LIMIT_RETRY_DELAY_MS * (attempt + 1));
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new NaverSearchDependencyError("네이버 검색광고 키워드 도구 API 호출에 실패했습니다.");
+}
+
+function sortDemandSignalsForRequestedKeywords(
+  merged: Map<string, SearchVolumeSignal>,
+  uniqueKeywords: string[]
+): SearchVolumeSignal[] {
+  const requestedKeys = new Set(uniqueKeywords.map(normalizeKeywordKey));
+  const requestedSignals = uniqueKeywords
+    .map((keyword) => merged.get(normalizeKeywordKey(keyword)))
+    .filter((signal): signal is SearchVolumeSignal => Boolean(signal));
+  const requestedSignalKeys = new Set(
+    requestedSignals.map((signal) => normalizeKeywordKey(signal.keyword))
+  );
+  const relatedSignals = Array.from(merged.values())
+    .filter((signal) => !requestedKeys.has(normalizeKeywordKey(signal.keyword)))
+    .filter((signal) => !requestedSignalKeys.has(normalizeKeywordKey(signal.keyword)))
+    .sort((a, b) => (b.monthlyTotalSearches ?? 0) - (a.monthlyTotalSearches ?? 0))
+    .slice(0, Math.max(0, 120 - requestedSignals.length));
+
+  return [...requestedSignals, ...relatedSignals];
+}
+
 export async function fetchKeywordDemandSignals(
   keywords: string[]
 ): Promise<SearchVolumeSignal[]> {
   const uniqueKeywords = Array.from(
     new Set(keywords.map((keyword) => keyword.trim()).filter(Boolean))
   );
-  const merged = new Map<string, SearchVolumeSignal>();
+  const merged = await getCachedMonthlySignals(uniqueKeywords);
 
-  for (let i = 0; i < uniqueKeywords.length; i += 5) {
-    const chunk = uniqueKeywords.slice(i, i + 5);
-    const chunkMap = await fetchSearchAdKeywordStats(chunk);
+  const missingKeywords = uniqueKeywords
+    .filter((keyword) => !merged.has(normalizeKeywordKey(keyword)))
+    .slice(0, SEARCHAD_MAX_FRESH_KEYWORDS_PER_RUN);
+
+  if (!hasWorkingSearchAdCredentials() || missingKeywords.length === 0) {
+    return sortDemandSignalsForRequestedKeywords(merged, uniqueKeywords);
+  }
+
+  for (let i = 0; i < missingKeywords.length; i += SEARCHAD_CHUNK_SIZE) {
+    const chunk = missingKeywords.slice(i, i + SEARCHAD_CHUNK_SIZE);
+    let chunkMap: Map<string, SearchVolumeSignal>;
+    try {
+      chunkMap = await fetchSearchAdKeywordStatsWithRetry(chunk);
+    } catch (error) {
+      if (isSearchAdRateLimitError(error)) break;
+      break;
+    }
+
     for (const [key, signal] of chunkMap.entries()) {
       merged.set(key, signal);
     }
+    await saveMonthlySignals(Array.from(chunkMap.values()));
+
+    if (i + SEARCHAD_CHUNK_SIZE < missingKeywords.length) {
+      await sleep(SEARCHAD_CHUNK_DELAY_MS);
+    }
   }
 
-  return Array.from(merged.values())
-    .sort((a, b) => (b.monthlyTotalSearches ?? 0) - (a.monthlyTotalSearches ?? 0))
-    .slice(0, 120);
+  return sortDemandSignalsForRequestedKeywords(merged, uniqueKeywords);
+}
+
+async function fetchSearchAdKeywordStatsFromMonthlyCache(
+  keywords: string[]
+): Promise<Map<string, SearchVolumeSignal>> {
+  const signals = await fetchKeywordDemandSignals(keywords);
+  const map = new Map<string, SearchVolumeSignal>();
+  for (const signal of signals) {
+    map.set(normalizeKeywordKey(signal.keyword), signal);
+  }
+  return map;
 }
 
 export async function fetchKeywordOpportunitySignals(
@@ -365,27 +546,44 @@ export async function fetchKeywordOpportunitySignals(
   );
   if (uniqueKeywords.length === 0) return [];
 
-  const [demandSignals, blogCounts] = await Promise.all([
-    fetchKeywordDemandSignals(uniqueKeywords),
-    Promise.all(
-      uniqueKeywords.map(async (keyword): Promise<[string, number | null]> => {
-        try {
-          const blogSearch = await fetchBlogSearch(keyword);
-          return [normalizeKeywordKey(keyword), blogSearch.total];
-        } catch {
-          return [normalizeKeywordKey(keyword), null];
-        }
-      })
-    ),
-  ]);
-  const blogCountMap = new Map(blogCounts);
+  const demandSignals = await fetchKeywordDemandSignals(uniqueKeywords);
+  const blogCountMap = new Map<string, number | null>();
+  const missingBlogKeywords: string[] = [];
 
-  return demandSignals.map((signal) =>
+  for (const signal of demandSignals) {
+    const key = normalizeKeywordKey(signal.keyword);
+    if (typeof signal.blogDocumentCount === "number") {
+      blogCountMap.set(key, signal.blogDocumentCount);
+    } else {
+      missingBlogKeywords.push(signal.keyword);
+    }
+  }
+
+  const freshBlogKeywords = missingBlogKeywords.slice(0, BLOG_COUNT_MAX_FRESH_KEYWORDS_PER_RUN);
+  for (let i = 0; i < freshBlogKeywords.length; i += 1) {
+    const keyword = freshBlogKeywords[i];
+    try {
+      const blogSearch = await fetchBlogSearch(keyword);
+      blogCountMap.set(normalizeKeywordKey(keyword), blogSearch.total);
+    } catch {
+      blogCountMap.set(normalizeKeywordKey(keyword), null);
+    }
+    if (i + 1 < freshBlogKeywords.length) {
+      await sleep(BLOG_COUNT_FETCH_DELAY_MS);
+    }
+  }
+
+  const enrichedSignals = demandSignals.map((signal) =>
     enrichOpportunitySignal({
       ...signal,
-      blogDocumentCount: blogCountMap.get(normalizeKeywordKey(signal.keyword)) ?? null,
+      blogDocumentCount:
+        blogCountMap.get(normalizeKeywordKey(signal.keyword)) ??
+        signal.blogDocumentCount ??
+        null,
     })
   );
+  await saveMonthlySignals(enrichedSignals);
+  return enrichedSignals;
 }
 
 function mergeSearchTrendAndAdStats(
@@ -546,7 +744,7 @@ export async function getExternalSearchSignals(params: {
     await Promise.allSettled([
       fetchBlogSearch(mainKeyword),
       fetchSearchTrend(tokens),
-      fetchSearchAdKeywordStats(autocompleteSeeds),
+      fetchSearchAdKeywordStatsFromMonthlyCache(autocompleteSeeds),
       buildRelatedFromAutocomplete(autocompleteSeeds),
     ]);
   const blogSearch =
