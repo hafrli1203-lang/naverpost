@@ -171,6 +171,9 @@ export default function Home() {
           shopId: state.shop.id,
           categoryId: state.category.id,
           topic: state.topic,
+          // "다시 생성"은 월 캐시를 우회해 새 배치를 뽑고 캐시를 갱신한다.
+          // (초기 생성은 캐시를 사용해 한 달에 한 번만 실제 생성)
+          refresh: true,
         }),
       });
       const json = await safeJson(res);
