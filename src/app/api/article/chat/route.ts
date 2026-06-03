@@ -78,6 +78,7 @@ export async function POST(request: NextRequest) {
       glossaryHint,
       messages,
       charCount,
+      tone: article.washingTone,
     });
 
     let revisedRaw: string;

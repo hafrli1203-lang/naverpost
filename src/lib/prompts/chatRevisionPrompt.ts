@@ -1,4 +1,5 @@
 import type { ChatMessage } from "@/types";
+import { getToneGuide } from "./articlePrompt";
 
 /**
  * Builds an instruction-driven revision prompt from a multi-turn chat thread.
@@ -14,6 +15,7 @@ export function buildChatRevisionPrompt(params: {
   glossaryHint?: string;
   messages: ChatMessage[];
   charCount?: number;
+  tone?: string;
 }): string {
   const {
     currentContent,
@@ -24,7 +26,10 @@ export function buildChatRevisionPrompt(params: {
     glossaryHint,
     messages,
     charCount = 2000,
+    tone,
   } = params;
+
+  const toneGuide = getToneGuide(tone);
 
   const conversation = messages
     .map((message) => {
@@ -47,6 +52,9 @@ export function buildChatRevisionPrompt(params: {
 서브 키워드1: ${subKeyword1}
 서브 키워드2: ${subKeyword2}
 ${glossarySection}
+[어투 — 원문 어투를 처음부터 끝까지 그대로 유지]
+${toneGuide}
+
 [대화 내역 — 마지막 사용자 지시를 최우선으로 반영]
 ${conversation}
 
@@ -58,6 +66,7 @@ ${conversation}
 5. 글 길이는 약 ${charCount}자 내외를 유지하세요.
 6. 효과를 단정하는 표현이나 광고성 과장 표현을 쓰지 마세요.
 7. 지시와 무관한 부분은 원문의 흐름과 문체를 최대한 유지하세요.
+8. 위 [어투] 지침의 말투를 본문 전체에 일관되게 유지하세요. 사용자가 어투 변경을 명시적으로 지시하지 않는 한 원문 어투를 바꾸지 마세요.
 
 [현재 본문]
 ${currentContent}

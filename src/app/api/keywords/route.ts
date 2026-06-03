@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import fs from "fs/promises";
 import path from "path";
-import { generateKeywords } from "@/lib/ai/claude";
+import { generateKeywords, reviseKeywordTitles } from "@/lib/ai/claude";
+import { buildTitlePolishPrompt } from "@/lib/prompts/titlePrompt";
 import { generateKeywordCandidatesWithGpt } from "@/lib/ai/openaiKeywords";
 import { CATEGORIES } from "@/lib/constants";
 import { getShopById } from "@/lib/data/shops";
@@ -82,6 +83,7 @@ const SMART_BLOCK_TOP_K = Math.max(
   ) || (KEYWORD_FAST_MODE ? 3 : TARGET_RESULT_COUNT)
 );
 const KEYWORD_FIRST_EDIT_TIMEOUT_MS = 70_000;
+const KEYWORD_TITLE_POLISH_TIMEOUT_MS = 90_000;
 const KEYWORD_RESULT_CACHE_ENABLED = process.env.KEYWORD_RESULT_CACHE !== "0";
 const KEYWORD_RESULT_CACHE_VERSION = 9;
 const KEYWORD_RESULT_CACHE_FILE = path.join(process.cwd(), "data", "keyword-result-cache.json");
@@ -2828,6 +2830,31 @@ export async function POST(request: NextRequest) {
     diverseRankedResults = appendLooseLlmBackfill(diverseRankedResults, representationPool);
     // 같은 명사형 끝맺음(원인/요소/문제 등)이 3개 이상 몰리면 다른 끝맺음 후보로 교체(개수 유지).
     diverseRankedResults = diversifyTitleEndings(diverseRankedResults, representationPool);
+
+    // 최종 제목을 Opus로 자연스러움·오타·비문 교정. 키워드 토큰 보존 + 쉼표 금지 +
+    // 길이/기계적패턴 통과 시에만 교체하고, 실패 시 원본 제목을 유지한다(graceful).
+    if (KEYWORD_AI_EXPANSION_ENABLED && diverseRankedResults.length > 0) {
+      try {
+        const polished = await reviseKeywordTitles(
+          buildTitlePolishPrompt(diverseRankedResults),
+          KEYWORD_TITLE_POLISH_TIMEOUT_MS
+        );
+        const polishedByIndex = new Map(polished.map((p) => [p.index, p.title.trim()]));
+        diverseRankedResults = diverseRankedResults.map((item, i) => {
+          const next = polishedByIndex.get(i + 1);
+          if (!next) return item;
+          if (/[,，、]/.test(next)) return item;
+          if (next.length < 12 || next.length > 42) return item;
+          if (isAwkwardGeneratedTitle(next)) return item;
+          const mainTokens = item.mainKeyword.split(/\s+/).filter(Boolean);
+          if (!mainTokens.every((token) => next.includes(token))) return item;
+          return { ...item, title: next };
+        });
+      } catch {
+        // 제목 교정 실패 시 원본 제목을 그대로 유지한다.
+      }
+    }
+
     const topForExternalSignals = diverseRankedResults.slice(0, EXTERNAL_SIGNAL_TOP_K);
 
     // 후보별 외부 검색 신호 조회를 병렬로 수행한다. (이전에는 직렬 for 루프라

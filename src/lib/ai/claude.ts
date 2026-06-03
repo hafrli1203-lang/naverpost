@@ -30,6 +30,25 @@ export async function generateKeywords(
   }));
 }
 
+// 최종 제목 후보의 어색한 표현·오타·비문만 다듬는다(키워드는 보존). Opus(EDIT_MODEL) 사용.
+export async function reviseKeywordTitles(
+  prompt: string,
+  timeoutMs = 90_000
+): Promise<Array<{ index: number; title: string }>> {
+  const text = await runClaude({ prompt, model: EDIT_MODEL, timeoutMs });
+  const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+  const jsonText = jsonMatch ? jsonMatch[1].trim() : text.trim();
+  const parsed = JSON.parse(jsonText);
+  const rawResults = Array.isArray(parsed) ? parsed : parsed.results;
+  if (!Array.isArray(rawResults)) {
+    throw new Error("Title polish returned an unexpected response shape.");
+  }
+  return rawResults.map((result: Record<string, unknown>) => ({
+    index: Number(result.index),
+    title: typeof result.title === "string" ? result.title : "",
+  }));
+}
+
 export async function writeArticle(prompt: string, timeoutMs = 220_000): Promise<string> {
   return runClaude({ prompt, model: ARTICLE_MODEL, timeoutMs });
 }

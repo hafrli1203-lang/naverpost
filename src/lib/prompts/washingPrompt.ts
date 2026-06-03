@@ -11,6 +11,8 @@
  * LLM이 마지막 결을 다듬는 단계다. 본문 구조·정보를 새로 만들지 않는다.
  */
 
+import { getToneGuide } from "./articlePrompt";
+
 export function buildWashingPrompt(params: {
   originalContent: string;
   mainKeyword: string;
@@ -18,8 +20,10 @@ export function buildWashingPrompt(params: {
   subKeyword2: string;
   charCount: number;
   shopName: string;
+  tone?: string;
 }): string {
-  const { originalContent, mainKeyword, subKeyword1, subKeyword2, charCount, shopName } = params;
+  const { originalContent, mainKeyword, subKeyword1, subKeyword2, charCount, shopName, tone } = params;
+  const toneGuide = getToneGuide(tone);
 
   return `당신은 안경원 블로그 본문을 광고법·의료법에 안전하게 다듬는 워싱 에디터입니다.
 원문은 정보 구조와 SEO 키워드가 이미 잡혀 있고, 명백한 광고 위반 표현은 사전에 결정론적으로 교체된 상태입니다.
@@ -51,8 +55,8 @@ export function buildWashingPrompt(params: {
 - 전문적이지만 딱딱하지 않게.
 - 어려운 광학 용어는 쉬운 말로 풀어 쓰기.
 - 광고성 멘트 과다 사용 지양.
-- 친근체이면 모든 문장이 "~해요/~예요/~네요/~거든요" 계열로 끝나게. "~합니다" 어미 섞이지 않게.
-- 표준체이면 모든 문장이 "~합니다/~됩니다/~입니다" 계열로 끝나게. "~해요" 어미 섞이지 않게.
+- 이 글의 어투는 아래 지침을 그대로 따르세요. 원문 어투를 바꾸지 말고 한 가지 어미 계열로 일관되게 정렬하세요(어미 혼용 금지):
+${toneGuide}
 
 [본문 구조 점검]
 원문 구조를 그대로 유지하되 빠진 요소가 있으면 자연스럽게 보완합니다.

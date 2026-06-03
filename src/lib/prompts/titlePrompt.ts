@@ -1,4 +1,43 @@
 /**
+ * 최종 제목 후보의 어색한 표현·오타·비문만 다듬는 교정 프롬프트.
+ * 키워드(메인/서브)는 절대 바꾸지 않고, 문장만 자연스럽게 한다.
+ */
+export function buildTitlePolishPrompt(
+  candidates: Array<{
+    title: string;
+    mainKeyword: string;
+    subKeyword1: string;
+    subKeyword2: string;
+  }>
+): string {
+  const lines = candidates
+    .map(
+      (c, i) =>
+        `${i + 1}. title=${c.title} / main=${c.mainKeyword} / sub1=${c.subKeyword1} / sub2=${c.subKeyword2}`
+    )
+    .join("\n");
+
+  return `당신은 네이버 블로그 제목을 다듬는 한국어 교정 에디터입니다.
+아래 제목들에서 어색한 표현, 오타, 비문, 부자연스러운 조사만 자연스럽게 고치세요.
+
+[제목 목록]
+${lines}
+
+[교정 규칙]
+- main 키워드 단어는 제목 안에 원형 그대로 유지하세요(바꾸거나 빼지 마세요).
+- 의미와 소재는 그대로 두고, 문장만 매끄럽게 다듬으세요. 새 소재나 새 관점을 만들지 마세요.
+- 명백한 오타·비문을 고치세요. 예: "동보기안경"→"돋보기안경", "오래 끼리는"→"오래 쓰는".
+- 어색한 명사 조합을 자연스럽게: 예: "업무 중 사이가 느껴질"→"업무 중 더 불편하게 느껴질".
+- 쉼표(,)와 이모지 사용 금지. 접속 어미로 자연스럽게 이으세요.
+- 제목 길이 12~40자.
+- 후보마다 끝맺음이 서로 다르도록 유지하세요(같은 끝맺음 반복 금지).
+- 이미 자연스러운 제목은 그대로 두세요.
+
+JSON만 출력하세요. 입력과 같은 개수, 같은 index로:
+{"results":[{"index":1,"title":"다듬은 제목"}, ...]}`;
+}
+
+/**
  * Builds the title/keyword generation prompt for the 수석 에디터 (Senior Editor) role.
  * Extracted from spec: 네이버 블로그 자동 작성 프로그램 (안경원).md
  */

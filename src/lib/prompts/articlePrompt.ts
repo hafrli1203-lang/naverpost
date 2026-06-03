@@ -15,7 +15,7 @@ import type { Shop, Category, ArticleBrief } from "@/types";
 type ToneType = "standard" | "friendly" | "casual";
 type CharCountType = 1000 | 1500 | 2000 | 2500;
 
-function getToneGuide(tone: ToneType): string {
+export function getToneGuide(tone?: string): string {
   switch (tone) {
     case "friendly":
       return `- 본문(내용): "~거든요" "~이에요" "~랍니다" "~죠" "~네요" 등 따뜻하고 다정한 구어체를 사용하세요.

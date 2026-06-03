@@ -50,6 +50,7 @@ export async function POST(request: NextRequest) {
       subKeyword2: article.subKeyword2,
       charCount,
       shopName: article.shopName,
+      tone: article.washingTone,
     });
 
     let washedRaw: string;
