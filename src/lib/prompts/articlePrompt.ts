@@ -143,6 +143,38 @@ export function buildArticlePrompt(params: {
       ? `\n- 상위 글 공통 명사(질의 의도 핵심 형태소) 중 주제에 맞는 것들을 본문에 충분한 비중으로 분산해 넣었는가?`
       : "";
 
+  // G1: 상위 노출 글의 본문 구조/주의점을 "조사 요약"에 묻힌 평문이 아니라
+  // 명시적 구조 지시로 승격한다(하드코딩 문장 삽입이 아니라 구조 지시).
+  const competitorStructureSection =
+    brief?.competitorMorphology?.status === "available" &&
+    (((brief.competitorMorphology.contentBlocks?.length ?? 0) > 0) ||
+      ((brief.competitorMorphology.cautionPoints?.length ?? 0) > 0))
+      ? `\n[상위 노출 글 구조 참고]\n${
+          (brief.competitorMorphology.contentBlocks?.length ?? 0) > 0
+            ? `- 상위 노출 글 다수가 다음 구조를 사용합니다: ${brief.competitorMorphology.contentBlocks!.join(
+                " / "
+              )}. 주제에 맞으면 본문에 해당 구조(단계 안내, 체크리스트, 비교 정리 등)를 반영하세요.\n`
+            : ""
+        }${
+          (brief.competitorMorphology.cautionPoints?.length ?? 0) > 0
+            ? `- 노출 관점 주의: ${brief.competitorMorphology.cautionPoints!.join(" / ")}\n`
+            : ""
+        }`
+      : "";
+
+  // G2: 스마트블록 하위키워드를 본문 소제목/단락 소재로 주입(제목 자동 치환은 하지 않음).
+  const smartBlockSection =
+    brief?.smartBlock && brief.smartBlock.subKeywordCandidates.length > 0
+      ? `\n[스마트블록 하위키워드 — 본문 소제목/단락 소재]\n- 이 주제의 하위 검색 키워드: ${brief.smartBlock.subKeywordCandidates.join(
+          ", "
+        )}\n- 이 중 주제에 맞는 것을 본문 소제목이나 단락 소재로 자연스럽게 다루면 추가 노출에 유리합니다.${
+          brief.smartBlock.recommendedTitleKeyword &&
+          brief.smartBlock.recommendedTitleKeyword !== brief.mainKeyword
+            ? ` 특히 "${brief.smartBlock.recommendedTitleKeyword}"는 상위 글이 자주 쓰는 하위키워드이니 본문에서 비중 있게 다루세요(제목은 그대로 두세요).`
+            : ""
+        }\n`
+      : "";
+
   const internalBriefSection = brief
     ? `\n[내부 작성 브리프]\n- 이번 글의 검색의도 축: ${brief.title}\n- 제목 활성화 규칙:\n${brief.titleMorphologyGuide
         .map((item) => `  - ${item}`)
@@ -168,15 +200,16 @@ ${glossarySection}${topicThesisSection}
 [조사 자료]
 ${researchData}
 ${externalRefSection}
-${internalBriefSection}
+${internalBriefSection}${competitorStructureSection}${smartBlockSection}
 ────────────────────────────────────
 [작성 지침]
 ────────────────────────────────────
 
 1. 목표 분량 및 구조
 
-글자 수: 공백 포함 약 ${charCount}자 내외로 작성하세요.
+글자 수: 공백 포함 ${charCount}자 내외로 작성하세요.
 ※ ${charCount}자는 반드시 지켜야 할 목표치입니다. ±10% 이내로 맞추세요.
+※ 절대 ${Math.ceil(charCount * 1.1)}자를 넘기지 마세요. 분량이 늘어나면 소제목 수를 늘리지 말고 각 문단을 더 압축하세요(군더더기 설명·중복 비유 제거).
 
 구조화: ${sectionCount}개의 소제목으로 본문을 명확히 구분하세요.
 소제목 스타일: 증상형·관리형·비교형 주제에서는 소제목의 절반 이상을 검색자가 실제로 묻는 질문형으로 작성하세요. 나머지는 핵심 내용을 요약하는 담백한 서술형으로 작성하세요.

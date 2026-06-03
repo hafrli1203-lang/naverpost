@@ -1,6 +1,6 @@
 import { runClaude } from "@/lib/ai/cli/claudeCli";
 
-const MODEL = "claude-haiku-4-5-20251001";
+const MODEL = "claude-sonnet-4-6";
 
 export interface CompetitorNounResult {
   titleNouns: Array<{ noun: string; occurrences: number }>;

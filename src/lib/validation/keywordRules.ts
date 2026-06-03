@@ -88,18 +88,19 @@ export function validateKeywordOption(
   // Rule 2: Main keyword's anchor must appear in both sub keywords. In
   // target/product forms such as "부모님 노안안경", the product word is the
   // anchor, not the target word.
+  // Rule 2 (완화): 서브 키워드는 본문 확장 소재이므로 둘 다 메인 기준어를 강제하지
+  // 않는다. 자연스러운 키워드 다양성을 위해 서브 중 "최소 한 개"에만 메인 기준어가
+  // 들어가면 통과시킨다(주제 응집성 최소 보장).
   if (mainWords.length >= 1) {
     const mainAnchor = selectKeywordAnchor(mainWords);
-    if (!subKeyword1.includes(mainAnchor)) {
+    if (
+      mainAnchor &&
+      !subKeyword1.includes(mainAnchor) &&
+      !subKeyword2.includes(mainAnchor)
+    ) {
       failures.push({
         rule: "rule2",
-        reason: `서브 키워드1 "${subKeyword1}"에 메인 키워드의 기준어 "${mainAnchor}"가 포함되어야 합니다`,
-      });
-    }
-    if (!subKeyword2.includes(mainAnchor)) {
-      failures.push({
-        rule: "rule2",
-        reason: `서브 키워드2 "${subKeyword2}"에 메인 키워드의 기준어 "${mainAnchor}"가 포함되어야 합니다`,
+        reason: `서브 키워드 중 적어도 하나에는 메인 키워드의 기준어 "${mainAnchor}"가 포함되어야 합니다`,
       });
     }
   }
@@ -112,26 +113,18 @@ export function validateKeywordOption(
     });
   }
 
-  // Rule 4: Sub keywords guide body expansion. The title should expose at
-  // least one core subtopic, while the second subtopic can be expanded in the
-  // body. Requiring both cores caused mechanical titles such as "A B와 C 확인".
-  const sub1Core = sub1Words[1];
-  const sub2Core = sub2Words[1];
-  const hasSub1Core = Boolean(sub1Core && (title.includes(sub1Core) || title.includes(subKeyword1)));
-  const hasSub2Core = Boolean(sub2Core && (title.includes(sub2Core) || title.includes(subKeyword2)));
-  if (sub1Core && sub2Core && !hasSub1Core && !hasSub2Core) {
-    failures.push({
-      rule: "rule4",
-      reason: `제목에서 서브 키워드 "${subKeyword1}" 또는 "${subKeyword2}" 중 하나의 의미는 확인되어야 합니다`,
-    });
-  }
+  // Rule 4 (완화/삭제): 서브 키워드는 본문 확장 소재이며 제목에 억지로 넣지 않는다.
+  // 제목에 서브 코어 노출을 강제하면 "메인 + 서브 욱여넣기"식 기계적 제목이 되어
+  // 자연스러움을 해친다. 서브 키워드는 본문 단계에서 소제목/단락으로 확장한다.
 
-  // Rule 5: Title length must be 15-30 characters
+  // Rule 5 (완화): 지역명은 사용자가 최종 단계에서 직접 붙이므로 생성 제목은 다소
+  // 짧을 수 있고, 자연문 제목은 30자를 넘길 수 있다. 검색 노출에서 의미 있는
+  // 범위(12~42자)로 완화한다.
   const titleLength = title.length;
-  if (titleLength < 15 || titleLength > 30) {
+  if (titleLength < 12 || titleLength > 42) {
     failures.push({
       rule: "rule5",
-      reason: `제목 길이는 15~30자이어야 합니다 (현재 ${titleLength}자): "${title}"`,
+      reason: `제목 길이는 12~42자이어야 합니다 (현재 ${titleLength}자): "${title}"`,
     });
   }
 

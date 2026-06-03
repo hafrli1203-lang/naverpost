@@ -202,18 +202,9 @@ function makeOption(params: {
     .filter((core) => core !== mainCore && !normalizeKey(head).includes(normalizeKey(core)));
   const sub1 = subCores[0] ?? "착용감";
   const sub2 = subCores[1] ?? "검사";
-  const titleCore = params.titleCore && params.titleCore !== mainCore
-    ? compactAxisTerm(params.titleCore)
-    : sub1;
-
   const mainKeyword = `${head} ${mainCore}`;
-  const title = buildMeshTitle({
-    mainKeyword,
-    mainCore,
-    titleCore,
-  });
   return {
-    title,
+    title: "",
     mainKeyword,
     subKeyword1: `${head} ${sub1}`,
     subKeyword2: `${head} ${sub2}`,
@@ -236,51 +227,14 @@ function makeQualifiedHeadOption(params: {
     .filter((core) => !normalizeKey(head).includes(normalizeKey(core)));
   const sub1 = subCores[0] ?? "착용감";
   const sub2 = subCores[1] ?? "검사";
-  const titleCore = params.titleCore ? compactAxisTerm(params.titleCore) : sub1;
   const mainKeyword = `${qualifier} ${head}`;
 
   return {
-    title: buildMeshTitle({
-      mainKeyword,
-      mainCore: head,
-      titleCore,
-    }),
+    title: "",
     mainKeyword,
     subKeyword1: `${head} ${sub1}`,
     subKeyword2: `${head} ${sub2}`,
   };
-}
-
-function buildMeshTitle(params: {
-  mainKeyword: string;
-  mainCore: string;
-  titleCore: string;
-}): string {
-  const { mainKeyword, mainCore } = params;
-  const titleCore = /처음/.test(params.titleCore) ? "사용감" : params.titleCore;
-  if (/착용감|시야|건조|흐림|이물감|울렁임|어지러움/.test(mainCore)) {
-    if (/검사|도수/.test(titleCore)) return `${mainKeyword} ${titleCore} 전 확인할 점`;
-    if (/관리|습관|착용시간/.test(titleCore)) return `${mainKeyword} ${titleCore}이 영향을 줄 때`;
-    return `${mainKeyword} 오래 남을 때 확인할 점`;
-  }
-  if (/관리|보관|세척|교체|피팅/.test(mainCore)) {
-    if (/세척|얼룩|흠집|코팅/.test(titleCore)) return `${mainKeyword} 얼룩이 남을 때`;
-    if (/착용감|피팅|조정/.test(titleCore)) return `${mainKeyword} 후 착용감이 달라질 때`;
-    if (/교체|시기/.test(titleCore)) return `${mainKeyword} 시기를 놓치기 쉬운 경우`;
-    return `${mainKeyword}에서 놓치기 쉬운 습관`;
-  }
-  if (/검사|원인|증상|도수|근시|난시|노안/.test(mainCore)) {
-    if (/피로|흐림|시야|눈부심/.test(titleCore)) return `${mainKeyword} ${titleCore}이 반복될 때`;
-    if (/습관|관리/.test(titleCore)) return `${mainKeyword} 생활습관부터 볼 때`;
-    return `${mainKeyword} 먼저 확인할 부분`;
-  }
-  if (/얼굴형|소재|재질|크기|사이즈|두께|코팅|선택|특징/.test(mainCore)) {
-    if (/착용감|무게/.test(titleCore)) return `${mainKeyword} 착용감이 달라지는 이유`;
-    if (/얼굴형|인상/.test(titleCore)) return `${mainKeyword} 인상이 달라지는 이유`;
-    if (/도수|두께|압축/.test(titleCore)) return `${mainKeyword} 도수에 따라 달라지는 점`;
-    return `${mainKeyword} 선택 전 비교할 부분`;
-  }
-  return `${mainKeyword} 확인할 점`;
 }
 
 function buildTargetHeadOptions(axes: MeshCategoryAxes): KeywordOption[] {

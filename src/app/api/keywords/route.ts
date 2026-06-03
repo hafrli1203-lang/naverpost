@@ -31,12 +31,12 @@ import {
   getProductModifiersByHead,
   getShopProductHeads,
 } from "@/lib/keywords/productKeywordCatalog";
-import { applyVolumeGate, type VolumeGateFields } from "@/lib/keywords/volumeGate";
 import {
-  MECHANICAL_TITLE_PATTERNS,
-  NAVER_TITLE_SKILL_RULES,
-} from "@/lib/keywords/naverTitleSkill";
-import { buildTitleGenerationPrompt } from "@/lib/prompts/titlePrompt";
+  applyVolumeGate,
+  normalizeKeywordKey,
+  type VolumeGateFields,
+} from "@/lib/keywords/volumeGate";
+import { MECHANICAL_TITLE_PATTERNS } from "@/lib/keywords/naverTitleSkill";
 import { listSessions } from "@/lib/storage/sessionStore";
 import { planBlogTopic } from "@/lib/topics/topicPlanner";
 import { analyzeLanguageRisk } from "@/lib/validation/contentSignalAnalyzer";
@@ -49,8 +49,24 @@ import type { KeywordOption, KeywordOptionAnalysis, SearchVolumeSignal } from "@
 export const maxDuration = 360;
 const TARGET_RESULT_COUNT = 10;
 const KEYWORD_FAST_MODE = process.env.KEYWORD_FAST_MODE !== "0";
-const KEYWORD_AI_EXPANSION_ENABLED =
-  process.env.KEYWORD_AI_EXPANSION === "1" || !KEYWORD_FAST_MODE;
+const KEYWORD_AI_EXPANSION_ENABLED = process.env.KEYWORD_AI_EXPANSION !== "0";
+const KEYWORD_GPT_EXPANSION_ENABLED = process.env.KEYWORD_GPT_EXPANSION !== "0";
+// LLM 후보 수집은 codex CLI 프로세스를 spawn한다. 동시에 너무 많이 띄우면
+// Windows 리소스/구독 동시요청 한도를 초과해 spawn이 실패한다(os error 1453).
+// 그래서 한 번에 띄우는 프로세스 수(concurrency)와 호출당 요청 개수, 재시도 라운드 수를
+// 분리해서 제한하고, 부족분만 라운드를 늘려 채운다.
+const KEYWORD_GPT_CONCURRENCY = Math.max(
+  1,
+  Math.min(4, Number(process.env.KEYWORD_GPT_CONCURRENCY) || 2)
+);
+const KEYWORD_GPT_PER_CALL = Math.max(
+  1,
+  Math.min(8, Number(process.env.KEYWORD_GPT_PER_CALL) || 4)
+);
+const KEYWORD_GPT_MAX_ROUNDS = Math.max(
+  1,
+  Math.min(8, Number(process.env.KEYWORD_GPT_MAX_ROUNDS) || 6)
+);
 const EXTERNAL_SIGNAL_TOP_K = Math.max(
   0,
   Number(
@@ -66,10 +82,8 @@ const SMART_BLOCK_TOP_K = Math.max(
   ) || (KEYWORD_FAST_MODE ? 3 : TARGET_RESULT_COUNT)
 );
 const KEYWORD_FIRST_EDIT_TIMEOUT_MS = 70_000;
-const KEYWORD_REPAIR_TIMEOUT_MS = 90_000;
-const KEYWORD_RETRY_TIMEOUT_MS = 90_000;
 const KEYWORD_RESULT_CACHE_ENABLED = process.env.KEYWORD_RESULT_CACHE !== "0";
-const KEYWORD_RESULT_CACHE_VERSION = 6;
+const KEYWORD_RESULT_CACHE_VERSION = 9;
 const KEYWORD_RESULT_CACHE_FILE = path.join(process.cwd(), "data", "keyword-result-cache.json");
 
 type KeywordResultResponseData = {
@@ -149,7 +163,9 @@ async function getCachedKeywordResultData(
 ): Promise<KeywordResultCacheEntry | null> {
   if (!KEYWORD_RESULT_CACHE_ENABLED) return null;
   const cache = await readKeywordResultCache();
-  return cache.months[month]?.[key] ?? null;
+  const entry = cache.months[month]?.[key] ?? null;
+  if (!entry || entry.data.results.length < TARGET_RESULT_COUNT) return null;
+  return entry;
 }
 
 async function saveKeywordResultData(
@@ -158,6 +174,7 @@ async function saveKeywordResultData(
   month = getKeywordResultCacheMonth()
 ): Promise<void> {
   if (!KEYWORD_RESULT_CACHE_ENABLED) return;
+  if (data.results.length < TARGET_RESULT_COUNT) return;
   const cache = await readKeywordResultCache();
   const monthCache = cache.months[month] ?? {};
   monthCache[key] = {
@@ -541,234 +558,12 @@ function inferRegionFromShopName(shopName: string): string {
   );
 }
 
-function extractTitleCoreWords(title: string): string[] {
-  const words = title.match(/[가-힣A-Za-z0-9]{2,}/g) ?? [];
-  return words
-    .map((word) => stripKoreanParticle(word.trim()))
-    .filter((word) => word.length >= 2 && isUsableKeywordCore(word));
-}
-
 function stripKoreanParticle(word: string): string {
   if (word === "어린이") return word;
   if (word === "차이로") return "차이";
   return word
     .replace(/(으로|부터|까지|처럼|보다|에서)$/g, "")
     .replace(/(과|와|을|를|은|는|이|가|의)$/g, "");
-}
-
-function getFallbackCores(head: string, source: string): string[] {
-  const direct = DEFAULT_CORES_BY_HEAD[head] ?? [];
-  if (/안경점|안경$/.test(source)) {
-    return [...direct, "안경렌즈", "안경테", "시력검사", "피팅", "착용감"];
-  }
-  return direct;
-}
-
-function uniqueCores(cores: string[], mainCore: string): string[] {
-  const seen = new Set<string>([mainCore]);
-  return cores
-    .map((core) =>
-      normalizeKeywordCore(stripKoreanParticle(core.replace(/[^\uAC00-\uD7A3A-Za-z0-9]/g, "").trim()))
-    )
-    .filter((core) => core.length >= 2 && isUsableKeywordCore(core))
-    .filter((core) => {
-      if (seen.has(core)) return false;
-      seen.add(core);
-      return true;
-    });
-}
-
-function normalizeKeywordCore(core: string): string {
-  return core
-    .replace(/^안경(?=소재|무게|착용감|코패드|피팅|나사|렌즈|테|관리|보관|세척|수리)/, "")
-    .trim();
-}
-
-function isUsableKeywordCore(core: string): boolean {
-  if (COMMON_TITLE_WORDS.has(core)) return false;
-  if (/산소투$|자외$|시력검$/.test(core)) return false;
-  return !/(할|하려|하려고|줄이려|줄이는|남을|남는|심할|심한|되는|될)$/.test(core);
-}
-
-function pickKeywordCores(option: KeywordOption): [string, string] {
-  const main = splitKeyword(option.mainKeyword);
-  const head = main?.[0] ?? option.mainKeyword.trim().split(/\s+/)[0] ?? "";
-  const mainCore = main?.[1] ?? "";
-  const source = `${option.title} ${option.mainKeyword} ${option.subKeyword1} ${option.subKeyword2}`;
-  const subCores = [splitKeyword(option.subKeyword1)?.[1], splitKeyword(option.subKeyword2)?.[1]]
-    .map((core) => (core ? normalizeKeywordCore(core) : core))
-    .filter((core): core is string => {
-      if (!core) return false;
-      if (
-        core === "원인" &&
-        !/원인|증상|흐림|건조|충혈|피로|불편|흘러내림|통증/.test(mainCore)
-      ) {
-        return false;
-      }
-      return true;
-    });
-  const titleCores = extractTitleCoreWords(option.title).filter(
-    (word) =>
-      word !== head &&
-      word !== mainCore &&
-      !head.includes(word) &&
-      !option.mainKeyword.includes(word)
-  );
-  const cores = uniqueCores(
-    [...subCores, ...titleCores, ...getFallbackCores(head, source), "원인", "기준", "관리"],
-    mainCore
-  );
-
-  return [cores[0] ?? "원인", cores[1] ?? "관리"];
-}
-
-function hasFinalConsonant(word: string): boolean {
-  const char = word.charCodeAt(word.length - 1);
-  if (char < 0xac00 || char > 0xd7a3) return false;
-  return (char - 0xac00) % 28 !== 0;
-}
-
-function joinCores(core1: string, core2: string): string {
-  const particle = hasFinalConsonant(core1) ? "과" : "와";
-  return `${core1}${particle} ${core2}`;
-}
-
-function makeSubjectPhrase(word: string): string {
-  return `${word}${hasFinalConsonant(word) ? "이" : "가"}`;
-}
-
-function pickConcernCore(core1: string, core2: string): string {
-  const concernPattern = /눈피로|눈부심|흐림|건조|충혈|야간|자외선|통증|흘러내림|울렁임|어지러움/;
-  if (concernPattern.test(core1)) return core1;
-  if (concernPattern.test(core2)) return core2;
-  return core1;
-}
-
-function getTitleContext(mainCore: string): string {
-  if (/착용|적응|운전|사용/.test(mainCore)) return "중";
-  if (/선택|교체|구입|검사|수리/.test(mainCore)) return "전";
-  if (/관리|세척|보관|조정|피팅|방법/.test(mainCore)) return "에서";
-  if (/원인|증상|흐림|건조|충혈|피로|불편/.test(mainCore)) return "때";
-  return "";
-}
-
-function joinMainWithContext(mainKeyword: string, context: string): string {
-  if (context === "에서") {
-    if (/방법$/.test(mainKeyword)) return mainKeyword;
-    return `${mainKeyword}할 때`;
-  }
-  if (context === "때") return mainKeyword;
-  return `${mainKeyword} ${context}`;
-}
-
-function composeRegionalTitle(mainKeyword: string, core1: string, core2: string): string | null {
-  void mainKeyword;
-  void core1;
-  void core2;
-  return null;
-}
-
-/**
- * @deprecated 더 이상 호출되지 않는다. 과거에는 LLM 제목을 템플릿 문자열로 덮어쓰는
- * 용도였으나, 이 기계적 조립이 부자연스러운 제목의 원인이었다. 이제 LLM 제목을
- * 그대로 신뢰하고 normalizeGeneratedOptions에서 드롭만 한다. 안전하게 삭제 가능.
- */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function composeAlignedTitle(params: {
-  mainKeyword: string;
-  core1: string;
-  core2: string;
-  index: number;
-}): string {
-  const { mainKeyword, core1, core2, index } = params;
-  const mainCore = splitKeyword(mainKeyword)?.[1] ?? "";
-  const source = `${mainKeyword} ${core1} ${core2}`;
-  const regionalTitle = composeRegionalTitle(mainKeyword, core1, core2);
-  if (
-    regionalTitle &&
-    regionalTitle.includes(core1) &&
-    regionalTitle.includes(core2)
-  ) {
-    return regionalTitle;
-  }
-
-  const situationalTemplates = /적응|착용|운전|사용/.test(mainCore)
-    ? [
-        `${mainKeyword} 중 ${makeSubjectPhrase(core1)} 불편할 때`,
-        `${mainKeyword} 중 ${core1} 때문에 어려울 때`,
-      ]
-    : [];
-  const problemTemplates = /원인|증상|흐림|건조|충혈|피로|불편/.test(mainCore)
-    ? [
-        `${mainKeyword} ${core1}부터 봐야 하는 이유`,
-        `${mainKeyword} ${makeSubjectPhrase(core1)} 반복되는 이유`,
-        `${mainKeyword} ${core2}까지 살펴봐야 할 때`,
-      ]
-    : [];
-  const selectionTemplates = /선택|고르|구입/.test(mainCore)
-    ? [
-        /눈피로|눈부심|흐림|건조|충혈|야간|자외선/.test(source)
-          ? `${mainKeyword} 전 ${makeSubjectPhrase(pickConcernCore(core1, core2))} 걱정될 때`
-          : `${mainKeyword} 전 ${core1} 차이`,
-        `${mainKeyword}할 때 ${core1}부터 볼 부분`,
-      ]
-    : [];
-  const inspectionTemplates = /검사|시력|도수/.test(mainCore)
-    ? [
-        /도수/.test(source)
-          ? `${mainKeyword} 전 도수 변화가 걱정될 때`
-          : /어린이|근시|청소년/.test(source)
-          ? `${mainKeyword} 근시가 걱정될 때`
-          : `${mainKeyword} 전에 ${core1}부터 볼 때`,
-        `${mainKeyword} 후 ${core1} 변화가 남을 때`,
-      ]
-    : [];
-  const careTemplates = /관리|세척|보관|교체|수리/.test(mainCore)
-    ? [
-        `${mainKeyword}할 때 ${core1}부터 볼 부분`,
-        `${mainKeyword} 전 ${core1}이 달라질 때`,
-      ]
-    : [];
-  const context = getTitleContext(mainCore);
-  const contextBase = context ? joinMainWithContext(mainKeyword, context) : "";
-  const contextualTemplates = context
-    ? [
-        `${contextBase} ${joinCores(core1, core2)}`,
-        `${contextBase} ${core1}부터 볼 부분`,
-      ]
-    : [];
-  const fallbackTemplates = [
-    `${mainKeyword} ${joinCores(core1, core2)}를 구분할 때`,
-    `${mainKeyword} ${makeSubjectPhrase(core1)} 중요한 이유`,
-    `${mainKeyword} ${core2} 때문에 불편할 때`,
-    `${mainKeyword} ${joinCores(core1, core2)}를 나눠 볼 때`,
-    `${mainKeyword} ${core1} 신호가 보일 때`,
-    `${mainKeyword} ${core2}를 확인해야 할 때`,
-    `${mainKeyword} 불편이 오래 남을 때`,
-    `${mainKeyword} 관리에서 놓치기 쉬운 부분`,
-    `${mainKeyword} 생활에서 불편한 이유`,
-    ...situationalTemplates,
-  ];
-  const rotatedFallbacks = fallbackTemplates
-    .slice(index % fallbackTemplates.length)
-    .concat(fallbackTemplates);
-  const preferred = [
-    ...problemTemplates,
-    ...selectionTemplates,
-    ...inspectionTemplates,
-    ...careTemplates,
-    ...contextualTemplates,
-    ...rotatedFallbacks,
-  ];
-  return (
-    preferred.find(
-      (title) =>
-        title.length >= 15 &&
-        title.length <= 30 &&
-        (title.includes(core1) || title.includes(core2))
-    ) ??
-    `${mainKeyword} ${core1} ${core2}`.slice(0, 30)
-  );
 }
 
 function getSeasonalFallbackOptions(params: {
@@ -782,13 +577,13 @@ function getSeasonalFallbackOptions(params: {
   if ((month === 3 || month === 9) && (categoryId === "eye-info" || categoryId === "lenses")) {
     options.push(
       {
-        title: `어린이시력 검사 새학기 근시 흐름`,
+        title: "",
         mainKeyword: `어린이시력 검사`,
         subKeyword1: `어린이시력 근시`,
         subKeyword2: `어린이시력 관리`,
       },
       {
-        title: `어린이시력 관리 개학 후 근시 확인`,
+        title: "",
         mainKeyword: "어린이시력 관리",
         subKeyword1: "어린이시력 검사",
         subKeyword2: "어린이시력 근시",
@@ -799,13 +594,13 @@ function getSeasonalFallbackOptions(params: {
   if ((month === 4 || month === 5) && (categoryId === "eye-info" || categoryId === "lenses")) {
     options.push(
       {
-        title: `어린이시력 검사 근시가 걱정될 때`,
+        title: "",
         mainKeyword: `어린이시력 검사`,
         subKeyword1: `어린이시력 근시`,
         subKeyword2: `어린이시력 관리`,
       },
       {
-        title: `안구건조 증상 봄철 알레르기와 차이`,
+        title: "",
         mainKeyword: "안구건조 증상",
         subKeyword1: "안구건조 원인",
         subKeyword2: "안구건조 관리",
@@ -815,7 +610,7 @@ function getSeasonalFallbackOptions(params: {
 
   if ((month === 4 || month === 5) && categoryId === "progressive") {
     options.push({
-      title: `노안안경 부모님 시야가 불편할 때`,
+      title: "",
       mainKeyword: `노안안경 부모님`,
       subKeyword1: `노안안경 시야`,
       subKeyword2: `노안안경 검사`,
@@ -826,13 +621,13 @@ function getSeasonalFallbackOptions(params: {
     if (categoryId === "contacts") {
       options.push(
         {
-          title: `렌즈건조 여름 착용 시간이 길 때`,
+          title: "",
           mainKeyword: `렌즈건조 여름`,
           subKeyword1: `렌즈건조 착용`,
           subKeyword2: `렌즈건조 관리`,
         },
         {
-          title: `원데이렌즈 착용시간 여름 건조 기준`,
+          title: "",
           mainKeyword: "원데이렌즈 착용시간",
           subKeyword1: "원데이렌즈 건조",
           subKeyword2: "원데이렌즈 관리",
@@ -841,7 +636,7 @@ function getSeasonalFallbackOptions(params: {
     }
     if (categoryId === "lenses") {
       options.push({
-        title: `변색렌즈 자외선 많은 날 쓰기 좋은 경우`,
+        title: "",
         mainKeyword: `변색렌즈 자외선`,
         subKeyword1: `변색렌즈 야외`,
         subKeyword2: `변색렌즈 안경`,
@@ -852,7 +647,7 @@ function getSeasonalFallbackOptions(params: {
   if (month >= 10 || month <= 2) {
     if (categoryId === "glasses-story") {
       options.push({
-        title: `안경김서림 겨울에 심해지는 이유`,
+        title: "",
         mainKeyword: `안경김서림 겨울`,
         subKeyword1: `안경김서림 관리`,
         subKeyword2: `안경김서림 세척`,
@@ -860,7 +655,7 @@ function getSeasonalFallbackOptions(params: {
     }
     if (categoryId === "eye-info" || categoryId === "contacts") {
       options.push({
-        title: `안구건조 증상 겨울 실내에서 심할 때`,
+        title: "",
         mainKeyword: "안구건조 증상",
         subKeyword1: "안구건조 원인",
         subKeyword2: "안구건조 관리",
@@ -874,7 +669,7 @@ function getSeasonalFallbackOptions(params: {
 // 진짜 "기계적/스팸" 제목만 걸러낸다.
 // (과거에는 자연스러운 제목까지 광범위하게 막아서, LLM이 좋은 제목을 줘도
 //  후보 풀에서 탈락시키고 하드코딩 폴백으로 떨어지게 만들었다.)
-// 키워드 나열형("A와 B 확인/기준"), 같은 토큰 반복, 의미 없는 나열 어미만 차단한다.
+// 키워드 나열형, 같은 토큰 반복, 슬래시 나열만 차단한다.
 function isAwkwardGeneratedTitle(title: string): boolean {
   return (
     MECHANICAL_TITLE_PATTERNS.some((pattern) => pattern.test(title)) ||
@@ -882,10 +677,6 @@ function isAwkwardGeneratedTitle(title: string): boolean {
     /(확인 확인|기준 기준|선택 선택|관리 관리|검사 검사|차이 차이|원인 원인)/.test(title) ||
     // "A와 B 확인/기준/점검" 식 키워드 나열
     /\S+\s*(와|과)\s+\S+\s+(확인|기준|점검)$/.test(title) ||
-    // 정보 기대감 없는 나열형 어미
-    /살펴보기$|점검 항목$|확인할 것$|살펴야 할 것$|챙겨야 할 것$/.test(title) ||
-    // 반복 생성된 빈 템플릿 어미
-    /관리 습관이 흔들릴 때$|사용감이 달라질 때$|사용감이 달라지는 이유$|방문 전 살펴볼 기준$|착용 후 달라지는 부분$|달라지는 부분$/.test(title) ||
     // 슬래시 나열
     /\S\s*\/\s*\S/.test(title)
   );
@@ -893,173 +684,173 @@ function isAwkwardGeneratedTitle(title: string): boolean {
 
 const FALLBACK_KEYWORD_SETS: Record<
   string,
-  Array<{ main: string; sub1: string; sub2: string; title: string }>
+  Array<{ main: string; sub1: string; sub2: string }>
 > = {
   progressive: [
-    { main: "누진렌즈 적응", sub1: "누진렌즈 울렁임", sub2: "누진렌즈 시야", title: "누진렌즈 적응 울렁임이 오래 갈 때" },
-    { main: "누진다초점 렌즈", sub1: "누진다초점 적응", sub2: "누진다초점 시야", title: "누진다초점 렌즈 처음 쓸 때 어색한 이유" },
-    { main: "노안안경 선택", sub1: "노안안경 돋보기", sub2: "노안안경 시야", title: "노안안경 선택 돋보기와 다른 착용감" },
-    { main: "다초점렌즈 적응", sub1: "다초점렌즈 울렁임", sub2: "다초점렌즈 운전", title: "다초점렌즈 적응 중 불편한 이유" },
-    { main: "돋보기 불편", sub1: "돋보기 시야", sub2: "돋보기 노안", title: "돋보기 불편 가까운 글씨가 흔들릴 때" },
-    { main: "누진렌즈 운전", sub1: "누진렌즈 야간", sub2: "누진렌즈 시야", title: "누진렌즈 운전 야간 시야가 답답할 때" },
-    { main: "누진렌즈 도수", sub1: "누진렌즈 검사", sub2: "누진렌즈 시야", title: "누진렌즈 도수 바뀐 뒤 시야가 낯설 때" },
-    { main: "누진다초점 안경", sub1: "누진다초점 적응", sub2: "누진다초점 시야", title: "누진다초점 안경 시야가 좁게 느껴질 때" },
-    { main: "노안안경 도수", sub1: "노안안경 검사", sub2: "노안안경 시야", title: "노안안경 도수 가까운 글씨가 흐릴 때" },
-    { main: "노안안경 착용감", sub1: "노안안경 돋보기", sub2: "노안안경 시야", title: "노안안경 착용감 어지러움이 생길 때" },
-    { main: "중근용렌즈 선택", sub1: "중근용렌즈 실내", sub2: "중근용렌즈 업무", title: "중근용렌즈 선택 실내 사용감이 다를 때" },
-    { main: "사무용렌즈 선택", sub1: "사무용렌즈 컴퓨터", sub2: "사무용렌즈 시야", title: "사무용렌즈 선택 모니터가 흐려 보일 때" },
-    { main: "실내용누진 선택", sub1: "실내용누진 업무", sub2: "실내용누진 시야", title: "실내용누진 선택 업무 중 시야가 답답할 때" },
-    { main: "누진렌즈 울렁임", sub1: "누진렌즈 적응", sub2: "누진렌즈 시야", title: "누진렌즈 울렁임 적응이 오래 걸릴 때" },
-    { main: "다초점렌즈 운전", sub1: "다초점렌즈 적응", sub2: "다초점렌즈 시야", title: "다초점렌즈 운전 시야가 흔들릴 때" },
-    { main: "중근용렌즈 업무", sub1: "중근용렌즈 실내", sub2: "중근용렌즈 시야", title: "중근용렌즈 업무 중 초점이 흐릴 때" },
-    { main: "실내용누진 시야", sub1: "실내용누진 업무", sub2: "실내용누진 적응", title: "실내용누진 시야 책상 거리에서 답답할 때" },
-    { main: "노안렌즈 선택", sub1: "노안렌즈 시야", sub2: "노안렌즈 검사", title: "노안렌즈 선택 가까운 글씨가 흐릴 때" },
-    { main: "노안렌즈 적응", sub1: "노안렌즈 울렁임", sub2: "노안렌즈 시야", title: "노안렌즈 적응 시야가 낯설게 느껴질 때" },
+    { main: "누진렌즈 적응", sub1: "누진렌즈 울렁임", sub2: "누진렌즈 시야" },
+    { main: "누진다초점 렌즈", sub1: "누진다초점 적응", sub2: "누진다초점 시야" },
+    { main: "노안안경 선택", sub1: "노안안경 돋보기", sub2: "노안안경 시야" },
+    { main: "다초점렌즈 적응", sub1: "다초점렌즈 울렁임", sub2: "다초점렌즈 운전" },
+    { main: "돋보기 불편", sub1: "돋보기 시야", sub2: "돋보기 노안" },
+    { main: "누진렌즈 운전", sub1: "누진렌즈 야간", sub2: "누진렌즈 시야" },
+    { main: "누진렌즈 도수", sub1: "누진렌즈 검사", sub2: "누진렌즈 시야" },
+    { main: "누진다초점 안경", sub1: "누진다초점 적응", sub2: "누진다초점 시야" },
+    { main: "노안안경 도수", sub1: "노안안경 검사", sub2: "노안안경 시야" },
+    { main: "노안안경 착용감", sub1: "노안안경 돋보기", sub2: "노안안경 시야" },
+    { main: "중근용렌즈 선택", sub1: "중근용렌즈 실내", sub2: "중근용렌즈 업무" },
+    { main: "사무용렌즈 선택", sub1: "사무용렌즈 컴퓨터", sub2: "사무용렌즈 시야" },
+    { main: "실내용누진 선택", sub1: "실내용누진 업무", sub2: "실내용누진 시야" },
+    { main: "누진렌즈 울렁임", sub1: "누진렌즈 적응", sub2: "누진렌즈 시야" },
+    { main: "다초점렌즈 운전", sub1: "다초점렌즈 적응", sub2: "다초점렌즈 시야" },
+    { main: "중근용렌즈 업무", sub1: "중근용렌즈 실내", sub2: "중근용렌즈 시야" },
+    { main: "실내용누진 시야", sub1: "실내용누진 업무", sub2: "실내용누진 적응" },
+    { main: "노안렌즈 선택", sub1: "노안렌즈 시야", sub2: "노안렌즈 검사" },
+    { main: "노안렌즈 적응", sub1: "노안렌즈 울렁임", sub2: "노안렌즈 시야" },
   ],
   lenses: [
-    { main: "렌즈교체 기준", sub1: "렌즈교체 시기", sub2: "렌즈교체 코팅", title: "렌즈교체 기준을 봐야 하는 경우" },
-    { main: "안경렌즈 압축", sub1: "안경렌즈 두께", sub2: "안경렌즈 무게", title: "안경렌즈 압축 도수가 높을 때 두께 기준" },
-    { main: "블루라이트렌즈 선택", sub1: "블루라이트렌즈 눈피로", sub2: "블루라이트렌즈 코팅", title: "블루라이트렌즈 선택 전 눈피로가 걱정될 때" },
-    { main: "근시억제렌즈 검사", sub1: "근시억제렌즈 어린이", sub2: "근시억제렌즈 도수", title: "근시억제렌즈 검사 어린이 근시가 걱정될 때" },
-    { main: "근시완화렌즈 검사", sub1: "근시완화렌즈 어린이", sub2: "근시완화렌즈 도수", title: "근시완화렌즈 검사 전 알아둘 부분" },
-    { main: "안경렌즈 코팅", sub1: "안경렌즈 흠집", sub2: "안경렌즈 관리", title: "안경렌즈 코팅 흠집이 자주 생길 때" },
-    { main: "안경렌즈 두께", sub1: "안경렌즈 압축", sub2: "안경렌즈 도수", title: "안경렌즈 두께 도수에 따라 달라지는 이유" },
-    { main: "변색렌즈 선택", sub1: "변색렌즈 자외선", sub2: "변색렌즈 실내", title: "변색렌즈 선택 야외 활동이 많을 때" },
-    { main: "누진렌즈 시야", sub1: "누진렌즈 적응", sub2: "누진렌즈 운전", title: "누진렌즈 시야 운전할 때 불편한 이유" },
-    { main: "렌즈코팅 손상", sub1: "렌즈코팅 얼룩", sub2: "렌즈코팅 관리", title: "렌즈코팅 손상 얼룩이 잘 남는 이유" },
-    { main: "안경렌즈 교체", sub1: "안경렌즈 코팅", sub2: "안경렌즈 흠집", title: "안경렌즈 교체 코팅이 벗겨졌을 때" },
-    { main: "자외선렌즈 선택", sub1: "자외선렌즈 야외", sub2: "자외선렌즈 눈부심", title: "자외선렌즈 선택 눈부심이 심할 때" },
-    { main: "운전렌즈 선택", sub1: "운전렌즈 야간", sub2: "운전렌즈 눈부심", title: "운전렌즈 선택 야간 눈부심이 불편할 때" },
-    { main: "사무용렌즈 선택", sub1: "사무용렌즈 컴퓨터", sub2: "사무용렌즈 눈피로", title: "사무용렌즈 선택 컴퓨터를 오래 볼 때" },
-    { main: "고굴절렌즈 선택", sub1: "고굴절렌즈 두께", sub2: "고굴절렌즈 도수", title: "고굴절렌즈 선택 두께가 고민될 때" },
-    { main: "렌즈압축 선택", sub1: "렌즈압축 두께", sub2: "렌즈압축 무게", title: "렌즈압축 선택 두께가 부담될 때" },
-    { main: "안경렌즈 선택", sub1: "안경렌즈 도수", sub2: "안경렌즈 두께", title: "안경렌즈 선택 도수에 따라 두께가 달라질 때" },
-    { main: "안경렌즈 관리", sub1: "안경렌즈 코팅", sub2: "안경렌즈 얼룩", title: "안경렌즈 관리 코팅 얼룩이 반복될 때" },
-    { main: "렌즈두께 선택", sub1: "렌즈두께 도수", sub2: "렌즈두께 압축", title: "렌즈두께 선택 도수가 높아졌을 때" },
-    { main: "기능렌즈 선택", sub1: "기능렌즈 눈부심", sub2: "기능렌즈 야외", title: "기능렌즈 선택 눈부심이 오래 남을 때" },
+    { main: "렌즈교체 기준", sub1: "렌즈교체 시기", sub2: "렌즈교체 코팅" },
+    { main: "안경렌즈 압축", sub1: "안경렌즈 두께", sub2: "안경렌즈 무게" },
+    { main: "블루라이트렌즈 선택", sub1: "블루라이트렌즈 눈피로", sub2: "블루라이트렌즈 코팅" },
+    { main: "근시억제렌즈 검사", sub1: "근시억제렌즈 어린이", sub2: "근시억제렌즈 도수" },
+    { main: "근시완화렌즈 검사", sub1: "근시완화렌즈 어린이", sub2: "근시완화렌즈 도수" },
+    { main: "안경렌즈 코팅", sub1: "안경렌즈 흠집", sub2: "안경렌즈 관리" },
+    { main: "안경렌즈 두께", sub1: "안경렌즈 압축", sub2: "안경렌즈 도수" },
+    { main: "변색렌즈 선택", sub1: "변색렌즈 자외선", sub2: "변색렌즈 실내" },
+    { main: "누진렌즈 시야", sub1: "누진렌즈 적응", sub2: "누진렌즈 운전" },
+    { main: "렌즈코팅 손상", sub1: "렌즈코팅 얼룩", sub2: "렌즈코팅 관리" },
+    { main: "안경렌즈 교체", sub1: "안경렌즈 코팅", sub2: "안경렌즈 흠집" },
+    { main: "자외선렌즈 선택", sub1: "자외선렌즈 야외", sub2: "자외선렌즈 눈부심" },
+    { main: "운전렌즈 선택", sub1: "운전렌즈 야간", sub2: "운전렌즈 눈부심" },
+    { main: "사무용렌즈 선택", sub1: "사무용렌즈 컴퓨터", sub2: "사무용렌즈 눈피로" },
+    { main: "고굴절렌즈 선택", sub1: "고굴절렌즈 두께", sub2: "고굴절렌즈 도수" },
+    { main: "렌즈압축 선택", sub1: "렌즈압축 두께", sub2: "렌즈압축 무게" },
+    { main: "안경렌즈 선택", sub1: "안경렌즈 도수", sub2: "안경렌즈 두께" },
+    { main: "안경렌즈 관리", sub1: "안경렌즈 코팅", sub2: "안경렌즈 얼룩" },
+    { main: "렌즈두께 선택", sub1: "렌즈두께 도수", sub2: "렌즈두께 압축" },
+    { main: "기능렌즈 선택", sub1: "기능렌즈 눈부심", sub2: "기능렌즈 야외" },
   ],
   frames: [
-    { main: "안경피팅 착용감", sub1: "안경피팅 코패드", sub2: "안경피팅 균형", title: "안경피팅 착용감이 달라지는 이유" },
-    { main: "안경흘러내림 원인", sub1: "안경흘러내림 코패드", sub2: "안경흘러내림 피팅", title: "안경흘러내림 원인 코패드부터 볼 때" },
-    { main: "가벼운안경 선택", sub1: "가벼운안경 소재", sub2: "가벼운안경 착용감", title: "가벼운안경 선택할 때 착용감 차이" },
-    { main: "티타늄안경 선택", sub1: "티타늄안경 무게", sub2: "티타늄안경 착용감", title: "티타늄안경 선택 전 무게감 차이" },
-    { main: "울템안경 특징", sub1: "울템안경 무게", sub2: "울템안경 탄성", title: "울템안경 특징 탄성이 편한 이유" },
-    { main: "뿔테안경 얼굴형", sub1: "뿔테안경 인상", sub2: "뿔테안경 사이즈", title: "뿔테안경 얼굴형 따라 인상이 다른 이유" },
-    { main: "금속테안경 착용감", sub1: "금속테안경 코패드", sub2: "금속테안경 무게", title: "금속테안경 착용감 코패드가 중요한 이유" },
-    { main: "안경테 얼굴형", sub1: "안경테 사이즈", sub2: "안경테 브릿지", title: "안경테 얼굴형에 맞게 고를 때" },
-    { main: "안경테 소재", sub1: "안경테 무게", sub2: "안경테 관리", title: "안경테 소재별 무게와 관리 차이" },
-    { main: "안경코받침 교체", sub1: "안경코받침 자국", sub2: "안경코받침 소재", title: "안경코받침 교체 전 자국이 남는 이유" },
-    { main: "안경귀통증 원인", sub1: "안경귀통증 피팅", sub2: "안경귀통증 착용감", title: "안경귀통증 원인 피팅과 착용감 먼저 확인" },
-    { main: "안경테 변형", sub1: "안경테 보관", sub2: "안경테 피팅", title: "안경테 변형 보관과 피팅 기준" },
-    { main: "안경사이즈 선택", sub1: "안경사이즈 얼굴형", sub2: "안경사이즈 착용감", title: "안경사이즈 선택 얼굴형부터 보는 이유" },
-    { main: "하금테안경 인상", sub1: "하금테안경 얼굴형", sub2: "하금테안경 착용감", title: "하금테안경 인상이 강해 보이는 이유" },
-    { main: "무테안경 관리", sub1: "무테안경 나사", sub2: "무테안경 렌즈", title: "무테안경 관리할 때 나사가 중요한 이유" },
-    { main: "안경다리 피팅", sub1: "안경다리 균형", sub2: "안경다리 귀통증", title: "안경다리 피팅 후 귀가 아픈 이유" },
-    { main: "베타티타늄안경 선택", sub1: "베타티타늄안경 탄성", sub2: "베타티타늄안경 무게", title: "베타티타늄안경 선택할 때 탄성 차이" },
-    { main: "메탈안경 관리", sub1: "메탈안경 변형", sub2: "메탈안경 착용감", title: "메탈안경 관리할 때 변형을 보는 이유" },
-    { main: "반무테안경 선택", sub1: "반무테안경 렌즈", sub2: "반무테안경 나사", title: "반무테안경 선택 렌즈와 나사 확인" },
-    { main: "안경브릿지 선택", sub1: "안경브릿지 얼굴형", sub2: "안경브릿지 착용감", title: "안경브릿지 선택 얼굴형에 맞춰 볼 때" },
-    { main: "안경테컬러 선택", sub1: "안경테컬러 피부톤", sub2: "안경테컬러 인상", title: "안경테컬러 선택 피부톤에 맞춰 볼 때" },
+    { main: "안경피팅 착용감", sub1: "안경피팅 코패드", sub2: "안경피팅 균형" },
+    { main: "안경흘러내림 원인", sub1: "안경흘러내림 코패드", sub2: "안경흘러내림 피팅" },
+    { main: "가벼운안경 선택", sub1: "가벼운안경 소재", sub2: "가벼운안경 착용감" },
+    { main: "티타늄안경 선택", sub1: "티타늄안경 무게", sub2: "티타늄안경 착용감" },
+    { main: "울템안경 특징", sub1: "울템안경 무게", sub2: "울템안경 탄성" },
+    { main: "뿔테안경 얼굴형", sub1: "뿔테안경 인상", sub2: "뿔테안경 사이즈" },
+    { main: "금속테안경 착용감", sub1: "금속테안경 코패드", sub2: "금속테안경 무게" },
+    { main: "안경테 얼굴형", sub1: "안경테 사이즈", sub2: "안경테 브릿지" },
+    { main: "안경테 소재", sub1: "안경테 무게", sub2: "안경테 관리" },
+    { main: "안경코받침 교체", sub1: "안경코받침 자국", sub2: "안경코받침 소재" },
+    { main: "안경귀통증 원인", sub1: "안경귀통증 피팅", sub2: "안경귀통증 착용감" },
+    { main: "안경테 변형", sub1: "안경테 보관", sub2: "안경테 피팅" },
+    { main: "안경사이즈 선택", sub1: "안경사이즈 얼굴형", sub2: "안경사이즈 착용감" },
+    { main: "하금테안경 인상", sub1: "하금테안경 얼굴형", sub2: "하금테안경 착용감" },
+    { main: "무테안경 관리", sub1: "무테안경 나사", sub2: "무테안경 렌즈" },
+    { main: "안경다리 피팅", sub1: "안경다리 균형", sub2: "안경다리 귀통증" },
+    { main: "베타티타늄안경 선택", sub1: "베타티타늄안경 탄성", sub2: "베타티타늄안경 무게" },
+    { main: "메탈안경 관리", sub1: "메탈안경 변형", sub2: "메탈안경 착용감" },
+    { main: "반무테안경 선택", sub1: "반무테안경 렌즈", sub2: "반무테안경 나사" },
+    { main: "안경브릿지 선택", sub1: "안경브릿지 얼굴형", sub2: "안경브릿지 착용감" },
+    { main: "안경테컬러 선택", sub1: "안경테컬러 피부톤", sub2: "안경테컬러 인상" },
   ],
   contacts: [
-    { main: "렌즈충혈 원인", sub1: "렌즈충혈 착용", sub2: "렌즈충혈 건조", title: "렌즈충혈 원인을 살펴봐야 할 때" },
-    { main: "렌즈건조 원인", sub1: "렌즈건조 착용", sub2: "렌즈건조 관리", title: "렌즈건조 원인과 착용 습관" },
-    { main: "난시렌즈 선택", sub1: "난시렌즈 착용", sub2: "난시렌즈 검사", title: "난시렌즈 선택 전 착용감이 흔들릴 때" },
-    { main: "소프트렌즈 착용", sub1: "소프트렌즈 건조", sub2: "소프트렌즈 관리", title: "소프트렌즈 착용 건조감이 오래 남을 때" },
-    { main: "원데이렌즈 교체", sub1: "원데이렌즈 위생", sub2: "원데이렌즈 착용", title: "원데이렌즈 교체 주기와 위생 관리" },
-    { main: "하드렌즈 관리", sub1: "하드렌즈 세척", sub2: "하드렌즈 보관", title: "하드렌즈 관리에서 놓치기 쉬운 부분" },
-    { main: "컬러렌즈 착용", sub1: "컬러렌즈 건조", sub2: "컬러렌즈 검사", title: "컬러렌즈 착용 전 봐야 할 눈 상태" },
-    { main: "멀티포컬렌즈 적응", sub1: "멀티포컬렌즈 시야", sub2: "멀티포컬렌즈 착용", title: "멀티포컬렌즈 적응 중 시야 변화" },
-    { main: "렌즈이물감 원인", sub1: "렌즈이물감 건조", sub2: "렌즈이물감 착용", title: "렌즈이물감 반복될 때 보는 원인" },
-    { main: "렌즈세척 방법", sub1: "렌즈세척 위생", sub2: "렌즈세척 보관", title: "렌즈세척 방법이 중요한 이유" },
-    { main: "장시간렌즈 착용", sub1: "장시간렌즈 건조", sub2: "장시간렌즈 관리", title: "장시간렌즈 착용 후 불편한 이유" },
-    { main: "렌즈검사 기준", sub1: "렌즈검사 시력", sub2: "렌즈검사 착용", title: "렌즈검사 전에 확인할 눈 상태" },
-    { main: "렌즈착용 시간", sub1: "렌즈착용 건조", sub2: "렌즈착용 관리", title: "렌즈착용 시간 건조와 관리 기준" },
-    { main: "렌즈관리 습관", sub1: "렌즈관리 세척", sub2: "렌즈관리 보관", title: "렌즈관리 습관 세척과 보관 기준" },
-    { main: "렌즈보관 방법", sub1: "렌즈보관 위생", sub2: "렌즈보관 케이스", title: "렌즈보관 방법 위생과 케이스 기준" },
-    { main: "렌즈교체 주기", sub1: "렌즈교체 위생", sub2: "렌즈교체 착용", title: "렌즈교체 주기 위생과 착용 기준" },
-    { main: "난시렌즈 검사", sub1: "난시렌즈 시력", sub2: "난시렌즈 착용", title: "난시렌즈 검사 시력과 착용 기준" },
-    { main: "원데이렌즈 위생", sub1: "원데이렌즈 교체", sub2: "원데이렌즈 착용", title: "원데이렌즈 위생 교체와 착용 기준" },
-    { main: "콘택트렌즈 검사", sub1: "콘택트렌즈 시력", sub2: "콘택트렌즈 착용", title: "콘택트렌즈 검사 시력과 착용 기준" },
-    { main: "렌즈건조 관리", sub1: "렌즈건조 착용", sub2: "렌즈건조 습관", title: "렌즈건조 관리 착용과 습관 기준" },
-    { main: "렌즈직경 차이", sub1: "렌즈직경 착용감", sub2: "렌즈직경 시야", title: "렌즈직경 차이 착용감이 낯설 때" },
-    { main: "베이스커브 선택", sub1: "베이스커브 착용감", sub2: "베이스커브 검사", title: "베이스커브 선택 렌즈가 자꾸 움직일 때" },
-    { main: "렌즈함수율 차이", sub1: "렌즈함수율 건조", sub2: "렌즈함수율 착용", title: "렌즈함수율 차이 건조감이 오래 갈 때" },
-    { main: "산소투과율 렌즈", sub1: "산소투과율 착용", sub2: "산소투과율 충혈", title: "산소투과율 렌즈 충혈이 반복될 때" },
-    { main: "렌즈돌아감 원인", sub1: "렌즈돌아감 난시", sub2: "렌즈돌아감 착용", title: "렌즈돌아감 원인 난시 교정이 흐릴 때" },
-    { main: "렌즈흐림 원인", sub1: "렌즈흐림 건조", sub2: "렌즈흐림 세척", title: "렌즈흐림 원인 착용 중 뿌옇게 보일 때" },
-    { main: "렌즈빠짐 원인", sub1: "렌즈빠짐 착용", sub2: "렌즈빠짐 검사", title: "렌즈빠짐 원인 눈 깜빡일 때 반복되면" },
-    { main: "토릭렌즈 검사", sub1: "토릭렌즈 난시", sub2: "토릭렌즈 착용", title: "토릭렌즈 검사 축이 맞지 않을 때" },
-    { main: "서클렌즈 직경", sub1: "서클렌즈 착용감", sub2: "서클렌즈 건조", title: "서클렌즈 직경 눈이 답답하게 느껴질 때" },
-    { main: "투명렌즈 착용", sub1: "투명렌즈 건조", sub2: "투명렌즈 검사", title: "투명렌즈 착용 하루 끝에 건조할 때" },
+    { main: "렌즈충혈 원인", sub1: "렌즈충혈 착용", sub2: "렌즈충혈 건조" },
+    { main: "렌즈건조 원인", sub1: "렌즈건조 착용", sub2: "렌즈건조 관리" },
+    { main: "난시렌즈 선택", sub1: "난시렌즈 착용", sub2: "난시렌즈 검사" },
+    { main: "소프트렌즈 착용", sub1: "소프트렌즈 건조", sub2: "소프트렌즈 관리" },
+    { main: "원데이렌즈 교체", sub1: "원데이렌즈 위생", sub2: "원데이렌즈 착용" },
+    { main: "하드렌즈 관리", sub1: "하드렌즈 세척", sub2: "하드렌즈 보관" },
+    { main: "컬러렌즈 착용", sub1: "컬러렌즈 건조", sub2: "컬러렌즈 검사" },
+    { main: "멀티포컬렌즈 적응", sub1: "멀티포컬렌즈 시야", sub2: "멀티포컬렌즈 착용" },
+    { main: "렌즈이물감 원인", sub1: "렌즈이물감 건조", sub2: "렌즈이물감 착용" },
+    { main: "렌즈세척 방법", sub1: "렌즈세척 위생", sub2: "렌즈세척 보관" },
+    { main: "장시간렌즈 착용", sub1: "장시간렌즈 건조", sub2: "장시간렌즈 관리" },
+    { main: "렌즈검사 기준", sub1: "렌즈검사 시력", sub2: "렌즈검사 착용" },
+    { main: "렌즈착용 시간", sub1: "렌즈착용 건조", sub2: "렌즈착용 관리" },
+    { main: "렌즈관리 습관", sub1: "렌즈관리 세척", sub2: "렌즈관리 보관" },
+    { main: "렌즈보관 방법", sub1: "렌즈보관 위생", sub2: "렌즈보관 케이스" },
+    { main: "렌즈교체 주기", sub1: "렌즈교체 위생", sub2: "렌즈교체 착용" },
+    { main: "난시렌즈 검사", sub1: "난시렌즈 시력", sub2: "난시렌즈 착용" },
+    { main: "원데이렌즈 위생", sub1: "원데이렌즈 교체", sub2: "원데이렌즈 착용" },
+    { main: "콘택트렌즈 검사", sub1: "콘택트렌즈 시력", sub2: "콘택트렌즈 착용" },
+    { main: "렌즈건조 관리", sub1: "렌즈건조 착용", sub2: "렌즈건조 습관" },
+    { main: "렌즈직경 차이", sub1: "렌즈직경 착용감", sub2: "렌즈직경 시야" },
+    { main: "베이스커브 선택", sub1: "베이스커브 착용감", sub2: "베이스커브 검사" },
+    { main: "렌즈함수율 차이", sub1: "렌즈함수율 건조", sub2: "렌즈함수율 착용" },
+    { main: "산소투과율 렌즈", sub1: "산소투과율 착용", sub2: "산소투과율 충혈" },
+    { main: "렌즈돌아감 원인", sub1: "렌즈돌아감 난시", sub2: "렌즈돌아감 착용" },
+    { main: "렌즈흐림 원인", sub1: "렌즈흐림 건조", sub2: "렌즈흐림 세척" },
+    { main: "렌즈빠짐 원인", sub1: "렌즈빠짐 착용", sub2: "렌즈빠짐 검사" },
+    { main: "토릭렌즈 검사", sub1: "토릭렌즈 난시", sub2: "토릭렌즈 착용" },
+    { main: "서클렌즈 직경", sub1: "서클렌즈 착용감", sub2: "서클렌즈 건조" },
+    { main: "투명렌즈 착용", sub1: "투명렌즈 건조", sub2: "투명렌즈 검사" },
   ],
   "eye-info": [
-    { main: "안구건조 원인", sub1: "안구건조 증상", sub2: "안구건조 관리", title: "안구건조 원인을 살펴봐야 할 때" },
-    { main: "눈초점 흐림", sub1: "눈초점 피로", sub2: "눈초점 검사", title: "눈초점 흐림이 반복될 때" },
-    { main: "어린이시력 관리", sub1: "어린이시력 검사", sub2: "어린이시력 근시", title: "어린이시력 관리에서 볼 부분" },
-    { main: "눈피로 원인", sub1: "눈피로 습관", sub2: "눈피로 검사", title: "눈피로 반복될 때 살펴볼 원인" },
-    { main: "시력검사 시기", sub1: "시력검사 도수", sub2: "시력검사 난시", title: "시력검사 시기를 놓치기 쉬운 경우" },
-    { main: "야간시력 흐림", sub1: "야간시력 운전", sub2: "야간시력 검사", title: "야간시력 흐림이 운전에 주는 영향" },
-    { main: "눈충혈 원인", sub1: "눈충혈 건조", sub2: "눈충혈 렌즈", title: "눈충혈 반복될 때 확인할 습관" },
-    { main: "어린이근시 확인", sub1: "어린이근시 검사", sub2: "어린이근시 관리", title: "어린이근시 진행에서 볼 부분" },
-    { main: "자외선 눈", sub1: "자외선 렌즈", sub2: "자외선 차단", title: "자외선 눈 영향과 렌즈 선택" },
-    { main: "난시 증상", sub1: "난시 검사", sub2: "난시 도수", title: "난시 증상 느껴질 때 검사 기준" },
-    { main: "근시 진행", sub1: "근시 검사", sub2: "근시 관리", title: "근시 진행이 의심될 때 보는 부분" },
-    { main: "원시 증상", sub1: "원시 검사", sub2: "원시 도수", title: "원시 증상과 가까운 거리 불편" },
-    { main: "노안 증상", sub1: "노안 검사", sub2: "노안 렌즈", title: "노안 증상 시작될 때 확인할 변화" },
-    { main: "눈건조 관리", sub1: "눈건조 습관", sub2: "눈건조 렌즈", title: "눈건조 관리에서 놓치기 쉬운 습관" },
-    { main: "스마트폰 눈피로", sub1: "스마트폰 시력", sub2: "스마트폰 습관", title: "스마트폰 눈피로 줄이는 생활 습관" },
-    { main: "독서 눈피로", sub1: "독서 시력", sub2: "독서 거리", title: "독서할 때 눈피로가 심해지는 이유" },
-    { main: "눈떨림 원인", sub1: "눈떨림 피로", sub2: "눈떨림 습관", title: "눈떨림 원인 피로가 쌓였을 때" },
-    { main: "시력저하 원인", sub1: "시력저하 검사", sub2: "시력저하 습관", title: "시력저하 원인 습관부터 돌아볼 때" },
-    { main: "근거리 흐림", sub1: "근거리 시력", sub2: "근거리 검사", title: "근거리 흐림 독서할 때 불편한 이유" },
-    { main: "눈초점 피로", sub1: "눈초점 습관", sub2: "눈초점 검사", title: "눈초점 피로가 반복되는 이유" },
-    { main: "눈건강 생활", sub1: "눈건강 습관", sub2: "눈건강 검사", title: "눈건강 생활 습관을 바꿔야 할 때" },
-    { main: "어린이 눈피로", sub1: "어린이 시력검사", sub2: "어린이 생활습관", title: "어린이 눈피로가 반복될 때" },
-    { main: "청소년시력 관리", sub1: "청소년시력 검사", sub2: "청소년시력 습관", title: "청소년시력 관리 생활습관이 중요한 이유" },
-    { main: "실내눈 피로", sub1: "실내눈 습관", sub2: "실내눈 조명", title: "실내눈 피로 조명에 따라 달라지는 이유" },
-    { main: "운전시야 흐림", sub1: "운전시야 야간", sub2: "운전시야 검사", title: "운전시야 흐림 야간에 더 불편한 이유" },
-    { main: "눈부심 원인", sub1: "눈부심 렌즈", sub2: "눈부심 검사", title: "눈부심 원인 빛에 민감해질 때" },
-    { main: "눈피로 습관", sub1: "눈피로 스마트폰", sub2: "눈피로 조명", title: "눈피로 습관 스마트폰을 오래 볼 때" },
-    { main: "시야흐림 원인", sub1: "시야흐림 피로", sub2: "시야흐림 검사", title: "시야흐림 원인 피로가 쌓였을 때" },
-    { main: "어린이근시 관리", sub1: "어린이근시 습관", sub2: "어린이근시 검사", title: "어린이근시 관리 생활습관이 중요한 이유" },
-    { main: "독서시력 피로", sub1: "독서시력 거리", sub2: "독서시력 습관", title: "독서시력 피로 책을 오래 볼 때" },
-    { main: "야간눈부심 원인", sub1: "야간눈부심 운전", sub2: "야간눈부심 검사", title: "야간눈부심 원인 운전할 때 불편한 이유" },
+    { main: "안구건조 원인", sub1: "안구건조 증상", sub2: "안구건조 관리" },
+    { main: "눈초점 흐림", sub1: "눈초점 피로", sub2: "눈초점 검사" },
+    { main: "어린이시력 관리", sub1: "어린이시력 검사", sub2: "어린이시력 근시" },
+    { main: "눈피로 원인", sub1: "눈피로 습관", sub2: "눈피로 검사" },
+    { main: "시력검사 시기", sub1: "시력검사 도수", sub2: "시력검사 난시" },
+    { main: "야간시력 흐림", sub1: "야간시력 운전", sub2: "야간시력 검사" },
+    { main: "눈충혈 원인", sub1: "눈충혈 건조", sub2: "눈충혈 렌즈" },
+    { main: "어린이근시 확인", sub1: "어린이근시 검사", sub2: "어린이근시 관리" },
+    { main: "자외선 눈", sub1: "자외선 렌즈", sub2: "자외선 차단" },
+    { main: "난시 증상", sub1: "난시 검사", sub2: "난시 도수" },
+    { main: "근시 진행", sub1: "근시 검사", sub2: "근시 관리" },
+    { main: "원시 증상", sub1: "원시 검사", sub2: "원시 도수" },
+    { main: "노안 증상", sub1: "노안 검사", sub2: "노안 렌즈" },
+    { main: "눈건조 관리", sub1: "눈건조 습관", sub2: "눈건조 렌즈" },
+    { main: "스마트폰 눈피로", sub1: "스마트폰 시력", sub2: "스마트폰 습관" },
+    { main: "독서 눈피로", sub1: "독서 시력", sub2: "독서 거리" },
+    { main: "눈떨림 원인", sub1: "눈떨림 피로", sub2: "눈떨림 습관" },
+    { main: "시력저하 원인", sub1: "시력저하 검사", sub2: "시력저하 습관" },
+    { main: "근거리 흐림", sub1: "근거리 시력", sub2: "근거리 검사" },
+    { main: "눈초점 피로", sub1: "눈초점 습관", sub2: "눈초점 검사" },
+    { main: "눈건강 생활", sub1: "눈건강 습관", sub2: "눈건강 검사" },
+    { main: "어린이 눈피로", sub1: "어린이 시력검사", sub2: "어린이 생활습관" },
+    { main: "청소년시력 관리", sub1: "청소년시력 검사", sub2: "청소년시력 습관" },
+    { main: "실내눈 피로", sub1: "실내눈 습관", sub2: "실내눈 조명" },
+    { main: "운전시야 흐림", sub1: "운전시야 야간", sub2: "운전시야 검사" },
+    { main: "눈부심 원인", sub1: "눈부심 렌즈", sub2: "눈부심 검사" },
+    { main: "눈피로 습관", sub1: "눈피로 스마트폰", sub2: "눈피로 조명" },
+    { main: "시야흐림 원인", sub1: "시야흐림 피로", sub2: "시야흐림 검사" },
+    { main: "어린이근시 관리", sub1: "어린이근시 습관", sub2: "어린이근시 검사" },
+    { main: "독서시력 피로", sub1: "독서시력 거리", sub2: "독서시력 습관" },
+    { main: "야간눈부심 원인", sub1: "야간눈부심 운전", sub2: "야간눈부심 검사" },
   ],
   "glasses-story": [
-    { main: "안경김서림 원인", sub1: "안경김서림 관리", sub2: "안경김서림 렌즈", title: "안경김서림 원인과 관리 방법" },
-    { main: "안경세척 방법", sub1: "안경세척 렌즈", sub2: "안경세척 코팅", title: "안경세척 방법을 바꿔야 할 때" },
-    { main: "안경수리 맡기기", sub1: "안경수리 나사", sub2: "안경수리 파손", title: "안경수리 맡기기 전 나사와 파손 확인" },
-    { main: "안경코받침 교체", sub1: "안경코받침 소재", sub2: "안경코받침 관리", title: "안경코받침 교체 시기와 소재 선택" },
-    { main: "안경닦이 소재", sub1: "안경닦이 관리", sub2: "안경닦이 교체", title: "안경닦이 소재 차이가 렌즈 코팅에 주는 영향" },
-    { main: "안경보관 방법", sub1: "안경보관 습관", sub2: "안경보관 케이스", title: "안경보관 방법이 렌즈 흠집을 줄이는 이유" },
-    { main: "안경스크래치 관리", sub1: "안경스크래치 원인", sub2: "안경스크래치 렌즈", title: "안경스크래치 생기는 습관과 관리 기준" },
-    { main: "안경착용감 조정", sub1: "안경착용감 피팅", sub2: "안경착용감 코패드", title: "안경착용감 달라질 때 먼저 보는 부분" },
-    { main: "안경흘러내림 원인", sub1: "안경흘러내림 피팅", sub2: "안경흘러내림 코패드", title: "안경흘러내림 원인 피팅과 코패드 먼저 확인" },
-    { main: "안경테 관리", sub1: "안경테 변형", sub2: "안경테 보관", title: "안경테 변형을 줄이는 보관 습관" },
-    { main: "코패드자국 원인", sub1: "코패드자국 피팅", sub2: "코패드자국 교체", title: "코패드자국 남을 때 피팅을 보는 이유" },
-    { main: "안경조정 방법", sub1: "안경조정 균형", sub2: "안경조정 착용감", title: "안경조정 방법 균형과 착용감 확인" },
-    { main: "안경렌즈 얼룩", sub1: "안경렌즈 세척", sub2: "안경렌즈 코팅", title: "안경렌즈 얼룩 남을 때 세척 습관" },
-    { main: "안경나사 풀림", sub1: "안경나사 조임", sub2: "안경나사 수리", title: "안경나사 풀림 조임과 수리 확인" },
-    { main: "안경테 변형", sub1: "안경테 피팅", sub2: "안경테 보관", title: "안경테 변형 피팅과 보관 확인" },
-    { main: "안경코패드 관리", sub1: "안경코패드 세척", sub2: "안경코패드 교체", title: "안경코패드 관리 세척과 교체 기준" },
-    { main: "안경렌즈 코팅", sub1: "안경렌즈 세척", sub2: "안경렌즈 보관", title: "안경렌즈 코팅 세척과 보관 습관" },
-    { main: "안경착용감 변화", sub1: "안경착용감 피팅", sub2: "안경착용감 균형", title: "안경착용감 변화 피팅과 균형 확인" },
-    { main: "안경관리 습관", sub1: "안경관리 세척", sub2: "안경관리 보관", title: "안경관리 습관 세척과 보관 기준" },
-    { main: "안경케이스 보관", sub1: "안경케이스 습관", sub2: "안경케이스 렌즈", title: "안경케이스 보관 습관과 렌즈 보호" },
-    { main: "안경닦이 관리", sub1: "안경닦이 세척", sub2: "안경닦이 교체", title: "안경닦이 관리 세척과 교체 기준" },
-    { main: "안경세척 습관", sub1: "안경세척 렌즈", sub2: "안경세척 얼룩", title: "안경세척 습관 렌즈와 얼룩 확인" },
-    { main: "안경렌즈 흠집", sub1: "안경렌즈 보관", sub2: "안경렌즈 세척", title: "안경렌즈 흠집 보관과 세척 습관" },
-    { main: "안경코패드 세척", sub1: "안경코패드 자국", sub2: "안경코패드 교체", title: "안경코패드 세척 자국과 교체 확인" },
-    { main: "안경피팅 변화", sub1: "안경피팅 균형", sub2: "안경피팅 착용감", title: "안경피팅 변화 균형과 착용감 확인" },
-    { main: "안경관리 방법", sub1: "안경관리 렌즈", sub2: "안경관리 테", title: "안경관리 방법 렌즈와 테 확인" },
-    { main: "안경테 세척", sub1: "안경테 변색", sub2: "안경테 보관", title: "안경테 세척 변색과 보관 기준" },
-    { main: "안경렌즈 보관", sub1: "안경렌즈 케이스", sub2: "안경렌즈 흠집", title: "안경렌즈 보관 케이스와 흠집 확인" },
-    { main: "안경착용 습관", sub1: "안경착용 균형", sub2: "안경착용 관리", title: "안경착용 습관 균형과 관리 기준" },
-    { main: "안경힌지 관리", sub1: "안경힌지 나사", sub2: "안경힌지 움직임", title: "안경힌지 관리 나사와 움직임 확인" },
-    { main: "안경고무팁 교체", sub1: "안경고무팁 착용감", sub2: "안경고무팁 귀통증", title: "안경고무팁 교체 착용감과 귀통증 확인" },
-    { main: "안경렌즈 물자국", sub1: "안경렌즈 세척", sub2: "안경렌즈 코팅", title: "안경렌즈 물자국 세척과 코팅 확인" },
-    { main: "안경테 뒤틀림", sub1: "안경테 균형", sub2: "안경테 피팅", title: "안경테 뒤틀림 균형과 피팅 확인" },
+    { main: "안경김서림 원인", sub1: "안경김서림 관리", sub2: "안경김서림 렌즈" },
+    { main: "안경세척 방법", sub1: "안경세척 렌즈", sub2: "안경세척 코팅" },
+    { main: "안경수리 맡기기", sub1: "안경수리 나사", sub2: "안경수리 파손" },
+    { main: "안경코받침 교체", sub1: "안경코받침 소재", sub2: "안경코받침 관리" },
+    { main: "안경닦이 소재", sub1: "안경닦이 관리", sub2: "안경닦이 교체" },
+    { main: "안경보관 방법", sub1: "안경보관 습관", sub2: "안경보관 케이스" },
+    { main: "안경스크래치 관리", sub1: "안경스크래치 원인", sub2: "안경스크래치 렌즈" },
+    { main: "안경착용감 조정", sub1: "안경착용감 피팅", sub2: "안경착용감 코패드" },
+    { main: "안경흘러내림 원인", sub1: "안경흘러내림 피팅", sub2: "안경흘러내림 코패드" },
+    { main: "안경테 관리", sub1: "안경테 변형", sub2: "안경테 보관" },
+    { main: "코패드자국 원인", sub1: "코패드자국 피팅", sub2: "코패드자국 교체" },
+    { main: "안경조정 방법", sub1: "안경조정 균형", sub2: "안경조정 착용감" },
+    { main: "안경렌즈 얼룩", sub1: "안경렌즈 세척", sub2: "안경렌즈 코팅" },
+    { main: "안경나사 풀림", sub1: "안경나사 조임", sub2: "안경나사 수리" },
+    { main: "안경테 변형", sub1: "안경테 피팅", sub2: "안경테 보관" },
+    { main: "안경코패드 관리", sub1: "안경코패드 세척", sub2: "안경코패드 교체" },
+    { main: "안경렌즈 코팅", sub1: "안경렌즈 세척", sub2: "안경렌즈 보관" },
+    { main: "안경착용감 변화", sub1: "안경착용감 피팅", sub2: "안경착용감 균형" },
+    { main: "안경관리 습관", sub1: "안경관리 세척", sub2: "안경관리 보관" },
+    { main: "안경케이스 보관", sub1: "안경케이스 습관", sub2: "안경케이스 렌즈" },
+    { main: "안경닦이 관리", sub1: "안경닦이 세척", sub2: "안경닦이 교체" },
+    { main: "안경세척 습관", sub1: "안경세척 렌즈", sub2: "안경세척 얼룩" },
+    { main: "안경렌즈 흠집", sub1: "안경렌즈 보관", sub2: "안경렌즈 세척" },
+    { main: "안경코패드 세척", sub1: "안경코패드 자국", sub2: "안경코패드 교체" },
+    { main: "안경피팅 변화", sub1: "안경피팅 균형", sub2: "안경피팅 착용감" },
+    { main: "안경관리 방법", sub1: "안경관리 렌즈", sub2: "안경관리 테" },
+    { main: "안경테 세척", sub1: "안경테 변색", sub2: "안경테 보관" },
+    { main: "안경렌즈 보관", sub1: "안경렌즈 케이스", sub2: "안경렌즈 흠집" },
+    { main: "안경착용 습관", sub1: "안경착용 균형", sub2: "안경착용 관리" },
+    { main: "안경힌지 관리", sub1: "안경힌지 나사", sub2: "안경힌지 움직임" },
+    { main: "안경고무팁 교체", sub1: "안경고무팁 착용감", sub2: "안경고무팁 귀통증" },
+    { main: "안경렌즈 물자국", sub1: "안경렌즈 세척", sub2: "안경렌즈 코팅" },
+    { main: "안경테 뒤틀림", sub1: "안경테 균형", sub2: "안경테 피팅" },
   ],
 };
 
@@ -1222,67 +1013,6 @@ const BROAD_KEYWORD_TAILS: Record<string, string[]> = {
   "glasses-story": ["원인", "방법", "관리", "교체", "세척", "보관", "피팅", "수리", "흠집", "얼룩", "코팅", "착용감", "습관"],
 };
 
-const TITLE_ANGLE_PHRASES = [
-  "불편이 오래 남을 때",
-  "생활에서 확인할 신호",
-  "먼저 확인할 신호",
-  "내 상황과 비교할 기준",
-  "방문 전 확인할 항목",
-  "착용 후 어색한 이유",
-  "선택 전에 구분할 점",
-  "습관에서 놓치기 쉬운 점",
-];
-
-function getSeasonalTailsForBroadCombinations(categoryId: string, month: number): string[] {
-  if (categoryId === "contacts") {
-    if (month >= 6 && month <= 8) return ["건조", "위생", "착용", "교체"];
-    if (month >= 9 && month <= 11) return ["건조", "착용", "검사", "충혈"];
-    if (month >= 12 || month <= 2) return ["건조", "착용", "보관", "이물감"];
-    return ["건조", "검사", "착용", "충혈"];
-  }
-  if (categoryId === "progressive") return ["부모님", "운전", "독서", "업무"];
-  if (categoryId === "lenses") return ["자외선", "눈피로", "운전", "어린이"];
-  if (categoryId === "frames") return ["착용감", "얼굴형", "무게", "피팅"];
-  if (categoryId === "eye-info") return ["눈피로", "시력검사", "스마트폰", "운전"];
-  if (categoryId === "glasses-story") return ["김서림", "세척", "보관", "착용감"];
-  return [];
-}
-
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function buildBroadCombinationOptions(params: {
-  region: string;
-  categoryId: string;
-  month: number;
-}): KeywordOption[] {
-  void params.region;
-  const heads = BROAD_KEYWORD_HEADS[params.categoryId] ?? [];
-  const tails = BROAD_KEYWORD_TAILS[params.categoryId] ?? [];
-  const seasonalTails = getSeasonalTailsForBroadCombinations(params.categoryId, params.month);
-  const expandedTails = Array.from(new Set([...tails, ...seasonalTails]));
-  const options: KeywordOption[] = [];
-  const seen = new Set<string>();
-
-  for (const head of heads) {
-    for (const tail of expandedTails) {
-      if (head.includes(tail)) continue;
-      const mainKeyword = `${head} ${tail}`;
-      if (seen.has(mainKeyword)) continue;
-      seen.add(mainKeyword);
-      const angle = TITLE_ANGLE_PHRASES[options.length % TITLE_ANGLE_PHRASES.length];
-      options.push({
-        title: `${mainKeyword} ${angle}`,
-        mainKeyword,
-        subKeyword1: `${head} ${expandedTails[(options.length + 3) % expandedTails.length]}`,
-        subKeyword2: `${head} ${expandedTails[(options.length + 7) % expandedTails.length]}`,
-      });
-      if (options.length >= 140) break;
-    }
-    if (options.length >= 140) break;
-  }
-
-  return options;
-}
-
 function isCategoryAppropriateCandidate(categoryId: string, option: KeywordOption): boolean {
   const source = `${option.title} ${option.mainKeyword} ${option.subKeyword1} ${option.subKeyword2}`;
   if (
@@ -1297,6 +1027,9 @@ function isCategoryAppropriateCandidate(categoryId: string, option: KeywordOptio
     hasMalformedCompoundAxis(option.subKeyword1) ||
     hasMalformedCompoundAxis(option.subKeyword2)
   ) {
+    return false;
+  }
+  if (/자연스러운 제목|2단어 키워드|main_keyword|sub_keyword/.test(source)) {
     return false;
   }
   if (
@@ -1436,17 +1169,17 @@ function buildFallbackKeywordOptions(params: {
       const [head, core] = inferred;
       const main = `${head} ${core}`;
       return {
-        title: `${main} 생활에서 확인할 신호`,
+        title: "",
         mainKeyword: main,
-        subKeyword1: `${head} 기준`,
-        subKeyword2: `${head} 관리`,
+        subKeyword1: main,
+        subKeyword2: main,
       };
     })
     .filter((option): option is KeywordOption => Boolean(option));
 
   const categoryOptions = (FALLBACK_KEYWORD_SETS[params.categoryId] ?? [])
     .map((item) => ({
-      title: item.title,
+      title: "",
       mainKeyword: item.main,
       subKeyword1: item.sub1,
       subKeyword2: item.sub2,
@@ -1468,7 +1201,7 @@ function buildFallbackKeywordOptions(params: {
 
 function isValidTwoWordKeyword(keyword: string): boolean {
   const parts = keyword.trim().split(/\s+/);
-  return parts.length === 2 && parts.every((part) => part.length >= 1);
+  return parts.length >= 2 && parts.length <= 3 && parts.every((part) => part.length >= 1);
 }
 
 function hasMalformedCompoundAxis(keyword: string): boolean {
@@ -1482,156 +1215,6 @@ function hasMalformedCompoundAxis(keyword: string): boolean {
     );
 }
 
-function selectKeywordAnchorWord(keyword: string): string {
-  const parts = keyword.trim().split(/\s+/);
-  const [first, second] = parts;
-  if (!second) return first ?? "";
-  if (
-    /^(10대|20대|30대|40대|50대|60대|여자|남자|학생|청소년|직장인|중년|부모님|어머니|아버지|어린이|운전자|초보|처음|출근|운동|장시간|야간운전|고도수|블루라이트차단|가벼운|튼튼한|편한|편안한|어지러운|큰사이즈|빅사이즈|오버사이즈|운전용|업무용|독서용|실내용)$/.test(first)
-  ) {
-    return second;
-  }
-  return first ?? "";
-}
-
-// LLM이 만든 제목은 그대로 신뢰한다. 여기서는 제목을 절대 다시 쓰지 않고,
-// 서브키워드가 비어 있거나 2단어 형태가 아닐 때만 메인 키워드 머리어 기준으로 채운다.
-function alignTitleWithKeywords(option: KeywordOption, index: number): KeywordOption {
-  void index;
-  const main = splitKeyword(option.mainKeyword);
-  if (!main) return option;
-
-  const [head, mainCore] = main;
-  const keywordHead = isRegionWord(head) ? mainCore : selectKeywordAnchorWord(option.mainKeyword);
-  const [core1, core2] = pickKeywordCores(option);
-  const sub1 = splitKeyword(option.subKeyword1);
-  const sub2 = splitKeyword(option.subKeyword2);
-  const needsSub1 = !sub1 || !option.subKeyword1.includes(keywordHead);
-  const needsSub2 = !sub2 || !option.subKeyword2.includes(keywordHead);
-  if (!needsSub1 && !needsSub2) return option;
-
-  return {
-    ...option,
-    subKeyword1: needsSub1 ? `${keywordHead} ${sub1?.[1] ?? core1}` : option.subKeyword1,
-    subKeyword2: needsSub2 ? `${keywordHead} ${sub2?.[1] ?? core2}` : option.subKeyword2,
-  };
-}
-
-/**
- * @deprecated 더 이상 호출되지 않는다. 100개가 넘는 정규식 .replace() 체인으로
- * 템플릿이 만든 어색한 제목을 땜질하던 함수다. 템플릿 조립을 제거했으므로 불필요.
- * 안전하게 삭제 가능.
- */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function polishGeneratedTitle(title: string): string {
-  return title
-    .replace(/원인 (.+)(?:과|와) (.+) 기준/g, (_match, first: string, second: string) =>
-      `원인 ${joinCores(first, second)} 먼저 확인`
-    )
-    .replace(/(.+)(?:과|와) (.+)으로 잡는 방법/g, (_match, first: string, second: string) =>
-      `${joinCores(first, second)} 먼저 확인`
-    )
-    .replace(/선택 전 (.+) 기준/g, "선택 전 $1 차이")
-    .replace(/관리 (.+) 기준/g, "관리할 때 $1")
-    .replace(/관리할 때 (.+) 기준/g, "관리할 때 $1")
-    .replace(/피팅 (.+) 기준/g, "피팅 후 $1 달라지는 이유")
-    .replace(/소재 착용감 기준/g, "소재에 따라 착용감이 다른 이유")
-    .replace(/코패드와 균형 기준/g, "코패드와 균형이 중요한 이유")
-    .replace(/피부톤과 인상 기준/g, "피부톤에 따라 인상이 달라지는 이유")
-    .replace(/변형과 착용감 기준/g, "변형되면 착용감이 달라지는 이유")
-    .replace(/균형과 귀통증 기준/g, "균형이 틀어지면 귀가 아픈 이유")
-    .replace(/얼굴형과 착용감 기준/g, "얼굴형에 따라 착용감이 다른 이유")
-    .replace(/나사 풀림과 렌즈 빠짐 주의점/g, "나사와 렌즈 확인")
-    .replace(/다리 피팅/g, "피팅")
-    .replace(/먼저$/g, "먼저 볼 부분")
-    .replace(/확인해야 할 때/g, "살펴봐야 할 때")
-    .replace(/확인할 때/g, "살펴볼 때")
-    .replace(/피로부터 봐야 하는 이유/g, "피로가 반복되는 이유")
-    .replace(/선택 전 코팅과 눈피로$/g, "선택 전 눈피로가 걱정될 때")
-    .replace(/눈피로 코팅 차이로 달라지는 점$/g, "눈피로 코팅 때문에 달라질 때")
-    .replace(/눈피로가 쌓일 때 살펴야 할 코팅$/g, "눈피로가 오래 남을 때")
-    .replace(/화면을 오래 봤을 때 달라지는 것$/g, "화면을 오래 볼 때 눈피로가 남는 이유")
-    .replace(/선택 전 자외선과 실내$/g, "선택 전 자외선이 걱정될 때")
-    .replace(/검사 전 어린이와 도수$/g, "검사 전 도수 변화가 걱정될 때")
-    .replace(/어린이 도수 진행이 빠를 때/g, "어린이 검사 전 근시가 걱정될 때")
-    .replace(/운전 중 시야와 적응$/g, "운전 시야 적응이 어려울 때")
-    .replace(/기준 어린이와 검사 차이$/g, "검사 전 알아둘 부분")
-    .replace(/기준 검사까지 봐야 하는 이유$/g, "검사 전 알아둘 부분")
-    .replace(/검사와 관리 차이/g, "검사 후 관리가 필요한 경우")
-    .replace(/검사 후 관리가 필요한 경우/g, "근시가 걱정될 때")
-    .replace(/습관과 검사 기준/g, "습관을 돌아봐야 할 때")
-    .replace(/때 관리 습관$/g, "때")
-    .replace(/야간과 검사 기준/g, "야간에 더 불편한 이유")
-    .replace(/습관과 조명 기준/g, "조명에 따라 달라지는 이유")
-    .replace(/교체 전 자국과 소재$/g, "교체 전 자국부터 살펴볼 때")
-    .replace(/자국과 소재 살펴볼 점/g, "자국이 남는 이유")
-    .replace(/얼굴형을 먼저 보는 게 맞는 이유$/g, "얼굴형마다 달라지는 부분")
-    .replace(/탄성과 무게 차이$/g, "가벼운데 탄성이 다른 이유")
-    .replace(/착용감 코패드 때문에 달라지는 점$/g, "착용감 코패드 위치가 맞지 않을 때")
-    .replace(/나사부터 볼 부분$/g, "나사 풀림이 생겼을 때")
-    .replace(/착용감부터 볼 부분$/g, "착용감이 달라졌을 때")
-    .replace(/관리부터 볼 부분$/g, "관리 습관이 흔들릴 때")
-    .replace(/검사부터 볼 부분$/g, "검사 시기를 놓치기 쉬울 때")
-    .replace(/얼굴형 때문에 불편할 때$/g, "얼굴형마다 달라지는 부분")
-    .replace(/변형이 착용감을 망치는 순서$/g, "변형되면 착용감이 달라지는 이유")
-    .replace(/시야 때문에 불편할 때$/g, "시야가 좁게 느껴질 때")
-    .replace(/건조 때문에 불편할 때$/g, "건조감이 오래 남을 때")
-    .replace(/파손 때문에 불편할 때$/g, "파손 상태를 먼저 봐야 할 때")
-    .replace(/실내 때문에 불편할 때$/g, "실내에서 초점이 흐릴 때")
-    .replace(/때문에 불편할 때$/g, "상태가 반복될 때")
-    .replace(/에서 놓치기 쉬운 부분$/g, "에서 자주 놓치는 습관")
-    .replace(/전 실내 차이$/g, "전 실내 사용감 차이")
-    .replace(/전 실내 사용감 차이$/g, "실내 초점이 낯설 때")
-    .replace(/전 업무 차이$/g, "전 업무 시야가 답답할 때")
-    .replace(/전 착용 차이$/g, "전 착용감이 달라질 때")
-    .replace(/전 시야 차이$/g, "전 시야가 답답할 때")
-    .replace(/전 도수 차이$/g, "전 도수가 높아졌을 때")
-    .replace(/맞는지 보는 법$/g, "맞지 않을 때")
-    .replace(/확인할 것$/g, "확인할 때")
-    .replace(/먼저 살펴야 할 것$/g, "반복될 때")
-    .replace(/적응 때문에 불편할 때$/g, "적응이 어려울 때")
-    .replace(/점검 항목$/g, "확인할 때")
-    .replace(/원인 찾는 법$/g, "원인이 반복될 때")
-    .replace(/영향을 주는 이유$/g, "달라지는 이유")
-    .replace(/관리 흐름$/g, "관리 습관")
-    .replace(/관리까지 살펴봐야 할 때$/g, "진행 신호를 놓치기 쉬울 때")
-    .replace(/맡기기까지 살펴봐야 할 때$/g, "맡기기 전 상태를 봐야 할 때")
-    .replace(/습관부터 보는 이유$/g, "습관이 반복될 때")
-    .replace(/착용감이 달라졌을 때$/g, "귀 눌림이 반복될 때")
-    .replace(/가 달라졌을 때$/g, "변화가 느껴질 때")
-    .replace(/확인할 관리 원인$/g, "관리 습관이 흔들릴 때")
-    .replace(/파손 상태에 따라 달라지는 판단$/g, "파손 상태를 먼저 봐야 할 때")
-    .replace(/나사 풀림이 반복될 때 달라지는 점$/g, "나사 풀림이 반복될 때")
-    .replace(/세척 순서가 틀리면 달라지는 것들$/g, "세척 순서가 맞지 않을 때")
-    .replace(/어린이 도수가 오를 때 먼저 할 것$/g, "어린이 도수 변화가 빠를 때")
-    .replace(/나사부터 파손 상태를 봐야 할 때$/g, "나사 풀림이 반복될 때")
-    .replace(/착용 습관 균형이 중요한 이유$/g, "착용 균형이 자주 틀어질 때")
-    .replace(/전 피부톤 차이$/g, "피부톤에 따라 인상이 달라질 때")
-    .replace(/얼굴형마다 달라지는 부분$/g, "얼굴형에 따라 착용감이 달라질 때")
-    .replace(/스마트폰이 반복되는 이유$/g, "스마트폰을 오래 볼 때")
-    .replace(/검사 상태가 반복될 때$/g, "검사 시기를 놓치기 쉬울 때")
-    .replace(/습관이 원인일 때 검사 전에 볼 신호$/g, "습관이 반복될 때")
-    .replace(/도수 후 검사 변화가 남을 때$/g, "도수 변화 후 시야가 낯설 때")
-    .replace(/피팅 변화 균형 상태가 반복될 때$/g, "피팅 균형이 자주 틀어질 때")
-    .replace(/소재가 달라지면 착용감도 달라지는 이유$/g, "소재에 따라 착용감이 달라질 때")
-    .replace(/달라지는 판단$/g, "먼저 봐야 할 때")
-    .replace(/달라지는 점$/g, "변화가 생길 때")
-    .replace(/달라지는 것$/g, "차이가 느껴질 때")
-    .replace(/달라지는 것들$/g, "차이가 느껴질 때")
-    .replace(/먼저 할 것$/g, "먼저 볼 때")
-    .replace(/코패드부터 봐야 하는 이유$/g, "코패드 높이가 맞지 않을 때")
-    .replace(/피팅부터 봐야 하는 이유$/g, "피팅 균형이 맞지 않을 때")
-    .replace(/때문에 달라지는 점$/g, "때문에 불편할 때")
-    .replace(/맞는 이유$/g, "달라지는 부분")
-    .replace(/기준(.+)기준/g, "기준$1확인")
-    .replace(/확인(.+)확인/g, "확인$1점검")
-    .replace(/관리(.+)관리/g, "관리$1습관")
-    .replace(/검사(.+)검사/g, "검사$1확인")
-    .replace(/차이(.+)차이/g, "차이$1구분")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
 // 진짜로 망가진 제목만 떨어뜨린다(템플릿으로 다시 쓰지 않는다).
 // 후보는 LLM이 넉넉히 생성하고 재시도/폴백 경로가 있으므로, 의심스러운 건
 // 억지로 고치기보다 드롭하는 편이 결과 품질에 유리하다.
@@ -1639,106 +1222,28 @@ function isUsableLlmTitle(option: KeywordOption): boolean {
   const title = option.title.trim();
   if (!title) return false;
   // 메인 키워드는 제목에 원형 그대로 들어가야 한다(검색 노출의 전제).
-  if (!title.includes(option.mainKeyword.trim())) return false;
   // 길이 안전장치(노출에서 잘리거나 너무 짧아 정보 기대감이 없는 제목 차단).
   const len = title.length;
-  if (len < 12 || len > 40) return false;
+  if (len < 8 || len > 70) return false;
   // 기계적/스팸성 패턴은 고치지 말고 버린다.
   if (isAwkwardGeneratedTitle(title)) return false;
   return true;
 }
 
-function getKeywordCore(keyword: string): string {
-  return splitKeyword(keyword)?.[1] ?? "";
-}
-
-function hasVisibleSubKeywordCore(option: KeywordOption): boolean {
-  const title = option.title;
-  const subCores = [getKeywordCore(option.subKeyword1), getKeywordCore(option.subKeyword2)]
-    .filter(Boolean);
-  return subCores.some((core) => title.includes(core));
-}
-
-function buildTitleWithSupportCore(option: KeywordOption, supportCore: string): string {
-  const mainCore = getKeywordCore(option.mainKeyword);
-  const mainKeyword = option.mainKeyword;
-  const titleSupportCore = /처음/.test(supportCore) ? "사용감" : supportCore;
-
-  if (/원인/.test(mainCore)) {
-    return `${mainKeyword} ${titleSupportCore} 먼저 확인할 때`;
-  }
-  if (/울렁임|어지러움|불편|건조|충혈|흐림|통증|이물감|흘러내림/.test(mainCore)) {
-    if (/시야/.test(titleSupportCore)) return `${mainKeyword} ${titleSupportCore}가 흔들릴 때`;
-    if (/선택/.test(titleSupportCore)) return `${mainKeyword} 반복될 때`;
-    if (/어린이|부모님|학생|직장인|운전자|초보/.test(titleSupportCore)) return `${mainKeyword} ${titleSupportCore} 기준`;
-    return `${mainKeyword} ${titleSupportCore} 기준`;
-  }
-  if (/착용감/.test(mainCore)) {
-    return `${mainKeyword} ${titleSupportCore} 기준`;
-  }
-  if (/처음|적응/.test(mainCore)) {
-    return `${mainKeyword} ${titleSupportCore} 기준`;
-  }
-  if (/도수/.test(mainCore)) {
-    return `${mainKeyword} ${titleSupportCore} 기준`;
-  }
-  if (/선택|차이|소재|두께|압축|코팅|사이즈|얼굴형|무게/.test(mainCore)) {
-    if (/돋보기|안경테|소재/.test(titleSupportCore)) return `${mainKeyword} ${titleSupportCore}와 비교할 때`;
-    return `${mainKeyword} ${titleSupportCore} 기준`;
-  }
-  if (/검사|시기|근시|난시|노안/.test(mainCore)) {
-    return `${mainKeyword} ${titleSupportCore} 기준`;
-  }
-  if (/어린이|부모님|학생|직장인|운전자|초보/.test(titleSupportCore)) {
-    return `${mainKeyword} ${titleSupportCore} 기준`;
-  }
-  return `${mainKeyword} ${titleSupportCore} 기준`;
-}
-
-function chooseSupportCoreForTitle(option: KeywordOption): string {
-  const mainCore = getKeywordCore(option.mainKeyword);
-  const cores = [getKeywordCore(option.subKeyword1), getKeywordCore(option.subKeyword2)]
-    .filter((core) => core && core !== mainCore);
-  if (/착용감|불편|울렁임|어지러움|적응|도수/.test(mainCore)) {
-    return cores.find((core) => !/돋보기|선택|차이|디자인|렌즈교체|안경테|선글라스/.test(core)) ?? cores[0] ?? "";
-  }
-  return cores[0] ?? "";
-}
-
-function repairTitleForValidationShape(option: KeywordOption): KeywordOption {
-  if (!option.title.includes(option.mainKeyword)) return option;
-
-  const supportCore = chooseSupportCoreForTitle(option);
-
-  let title = option.title;
-  if (supportCore && !hasVisibleSubKeywordCore(option)) {
-    title = buildTitleWithSupportCore(option, supportCore);
-  }
-
-  if (title.length < 15 && supportCore) {
-    title = buildTitleWithSupportCore({ ...option, title }, supportCore);
-  }
-
-  if (title.length > 30 && supportCore) {
-    const compact = `${option.mainKeyword} ${supportCore} 확인할 때`;
-    title = compact.length <= 30 ? compact : title;
-  }
-
-  return { ...option, title };
-}
-
 function normalizeGeneratedOptions(options: KeywordOption[]): KeywordOption[] {
   return options
     .map((option) => ({
-      title: option.title.trim().replace(/\s+/g, " "),
+      // 제목 쉼표 금지(프로젝트 규칙). LLM이 쉼표를 넣어도 결정론적으로 공백 치환한다.
+      title: option.title
+        .trim()
+        .replace(/[,，、]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim(),
       mainKeyword: option.mainKeyword.trim().replace(/\s+/g, " "),
       subKeyword1: option.subKeyword1.trim().replace(/\s+/g, " "),
       subKeyword2: option.subKeyword2.trim().replace(/\s+/g, " "),
     }))
-    // 제목은 LLM 출력을 그대로 유지하고, 서브키워드만 보정한다.
-    .map((option, index) => alignTitleWithKeywords(option, index))
-    // 명확한 검증 실패(서브핵심어 누락/길이 부족)만 최소 보정한다.
-    .map((option) => repairTitleForValidationShape(option))
+    // 제목과 키워드는 LLM 출력을 그대로 유지한다.
     // 망가진 제목은 템플릿으로 덮어쓰지 않고 드롭한다.
     .filter((option) => isUsableLlmTitle(option))
     .filter(
@@ -1748,6 +1253,133 @@ function normalizeGeneratedOptions(options: KeywordOption[]): KeywordOption[] {
         option.subKeyword1.trim().length > 0 &&
         option.subKeyword2.trim().length > 0
     );
+}
+
+function isStructurallyUsableLlmCandidate(option: KeywordOption): boolean {
+  const source = `${option.title} ${option.mainKeyword} ${option.subKeyword1} ${option.subKeyword2}`;
+  if (
+    !isValidTwoWordKeyword(option.mainKeyword) ||
+    !isValidTwoWordKeyword(option.subKeyword1) ||
+    !isValidTwoWordKeyword(option.subKeyword2)
+  ) {
+    return false;
+  }
+  if (/자연스러운 제목|2단어 키워드|main_keyword|sub_keyword/.test(source)) {
+    return false;
+  }
+  return true;
+}
+
+const GPT_KEYWORD_BATCH_FOCUSES = [
+  "검색광고 조회 신호가 있거나 seed에 포함된 기능렌즈, 브랜드, 상품명 중심으로 확장",
+  "사용자가 실제로 겪는 불편, 증상, 사용 장면, 생활 상황 중심으로 확장",
+  "방문 전 확인 행동, 검사, 교체, 피팅 같은 전환 의도 중심으로 확장",
+  "롱테일 질문 의도, 비교/선택 맥락, 새로 들어온 관심사 중심으로 확장",
+];
+
+function pickKeywordSeedWindow(
+  fallbackCandidates: KeywordOption[],
+  batchIndex: number,
+  batchCount: number
+): KeywordOption[] {
+  if (fallbackCandidates.length === 0) return [];
+  const windowSize = Math.min(
+    36,
+    Math.max(18, Math.ceil(fallbackCandidates.length / Math.max(1, batchCount)))
+  );
+  const start = (batchIndex * windowSize) % fallbackCandidates.length;
+  const doubled = [...fallbackCandidates, ...fallbackCandidates];
+  return doubled.slice(start, start + windowSize);
+}
+
+// 하드코딩 제목으로 부족분을 채우지 않는다. 대신 LLM을 부족분만큼 다시 호출해
+// 후보 풀을 TARGET_RESULT_COUNT 이상으로 끌어올린다. CLI 프로세스 동시 spawn 수는
+// KEYWORD_GPT_CONCURRENCY로 제한해 리소스 고갈(os error 1453)을 막고,
+// 진전이 없는 라운드가 나오면(서비스 다운/전부 중복) 즉시 중단한다.
+async function generateGptKeywordCandidatePool(params: {
+  shopName: string;
+  region: string;
+  categoryName: string;
+  topic?: string;
+  demandSignals: SearchVolumeSignal[];
+  strategyGuide: string;
+  fallbackCandidates: KeywordOption[];
+}): Promise<KeywordOption[]> {
+  const seen = new Set<string>();
+  const pool: KeywordOption[] = [];
+  const focusCount = KEYWORD_GPT_MAX_ROUNDS * KEYWORD_GPT_CONCURRENCY;
+
+  const addCandidates = (candidates: KeywordOption[]): void => {
+    const usable = normalizeGeneratedOptions(candidates).filter(
+      isStructurallyUsableLlmCandidate
+    );
+    for (const candidate of usable) {
+      const key = `${normalizeTitleForComparison(candidate.title)}|${normalizeKeywordKey(candidate.mainKeyword)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      pool.push(candidate);
+    }
+  };
+
+  const targetPool = TARGET_RESULT_COUNT * 2;
+  for (
+    let round = 0;
+    round < KEYWORD_GPT_MAX_ROUNDS && pool.length < targetPool;
+    round += 1
+  ) {
+    const remaining = targetPool - pool.length;
+    const callsThisRound = Math.min(
+      KEYWORD_GPT_CONCURRENCY,
+      Math.max(1, Math.ceil(remaining / KEYWORD_GPT_PER_CALL))
+    );
+    const before = pool.length;
+
+    const results = await Promise.all(
+      Array.from({ length: callsThisRound }, async (_, callIndex) => {
+        const focusIndex = (round * KEYWORD_GPT_CONCURRENCY + callIndex) % focusCount;
+        try {
+          const candidates = await generateKeywordCandidatesWithGpt({
+            shopName: params.shopName,
+            region: params.region,
+            categoryName: params.categoryName,
+            topic: params.topic,
+            demandSignals: params.demandSignals,
+            strategyGuide: params.strategyGuide,
+            fallbackCandidates: pickKeywordSeedWindow(
+              params.fallbackCandidates,
+              focusIndex,
+              focusCount
+            ),
+            targetCount: KEYWORD_GPT_PER_CALL,
+            batchFocus:
+              GPT_KEYWORD_BATCH_FOCUSES[focusIndex % GPT_KEYWORD_BATCH_FOCUSES.length],
+          });
+          return candidates ?? [];
+        } catch {
+          return [] as KeywordOption[];
+        }
+      })
+    );
+
+    results.forEach(addCandidates);
+
+    // 이번 라운드에서 새 후보가 하나도 늘지 않으면(전부 실패하거나 전부 중복)
+    // 더 호출해도 같은 결과일 가능성이 높으므로 자원 보호를 위해 중단한다.
+    if (pool.length === before) break;
+  }
+
+  return pool.slice(0, TARGET_RESULT_COUNT * 8);
+}
+
+function stripSeedTitle(candidate: KeywordOption): KeywordOption {
+  return { ...candidate, title: "" };
+}
+
+function formatPromptCandidate(candidate: KeywordOption, index: number): string {
+  const titlePart = candidate.title.trim()
+    ? `title=${candidate.title} / `
+    : "";
+  return `${index + 1}. ${titlePart}main=${candidate.mainKeyword} / sub1=${candidate.subKeyword1} / sub2=${candidate.subKeyword2}`;
 }
 
 function buildCandidateEditingPrompt(params: {
@@ -1760,209 +1392,53 @@ function buildCandidateEditingPrompt(params: {
   strategyGuide: string;
 }): string {
   const candidateLines = params.candidates
-    .map(
-      (candidate, index) =>
-        `${index + 1}. title=${candidate.title} / main=${candidate.mainKeyword} / sub1=${candidate.subKeyword1} / sub2=${candidate.subKeyword2}`
-    )
+    .map(formatPromptCandidate)
     .join("\n");
-  const forbidden = params.forbiddenList.slice(0, 20).join("\n") || "(없음)";
-  const references = params.referenceList.slice(0, 20).join("\n") || "(없음)";
-  const competitors = params.competitorList.slice(0, 15).join("\n") || "(없음)";
+  const forbidden = params.forbiddenList.slice(0, 10).join("\n") || "(없음)";
+  const references = params.referenceList.slice(0, 8).join("\n") || "(없음)";
+  const competitors = params.competitorList.slice(0, 8).join("\n") || "(없음)";
 
-  return `당신은 네이버 블로그 제목/키워드 편집장입니다.
-아래 후보는 이미 네이버 검색량과 카테고리 적합성을 기준으로 코드가 압축한 후보입니다.
-후보를 바탕으로 하되, 키워드 풀이 좁으면 핵심어×문제어×상황어 조합을 추가해 10개를 선별·정리하세요.
+  return `당신은 네이버 블로그 제목/키워드 생성 에디터입니다.
+아래 키워드 seed는 제목 문장이 아니라 검색 축입니다. seed 문장을 따라 쓰지 말고, 직접 자연스러운 제목을 작성하세요.
 
 [대상]
 - 매장: ${params.targetStore}
 - 카테고리: ${params.category}
 
-[후보]
+[키워드 seed]
 ${candidateLines}
 
-[같은 매장 기존 제목]
+[피해야 할 같은 매장 기존 제목]
 ${forbidden}
 
-[다른 매장 참고 제목]
+[참고용 다른 매장 제목]
 ${references}
 
-[경쟁 제목]
+[네이버 상위 경쟁 제목]
 ${competitors}
 
 ${params.strategyGuide}
 
-[네이버 제목 편집 스킬]
-${NAVER_TITLE_SKILL_RULES}
-
-[중복/금지 규칙]
-- 메인/서브 키워드는 정확히 2단어 조합.
-- 기본 후보에 없는 키워드도 실제 검색어처럼 자연스러우면 허용.
-- 지역명 + 핵심키워드는 등록 블로그 간 중복을 나누는 용도로 허용.
-- 예: title="누진렌즈 울렁임 적응이 어려운 이유" / main="누진렌즈 울렁임" / sub1="누진렌즈 원인" / sub2="누진렌즈 적응"
-- 같은 소재 반복 금지.
-- 같은 관리형 글을 단어만 바꿔 반복 금지. 예: 렌즈세척/렌즈보관/렌즈관리/하드렌즈 관리/렌즈 케이스는 모두 같은 관리형 축으로 본다.
-- 10개 결과 안에서 같은 축은 최대 1개만 둔다. 부득이하면 2개까지 허용하되 제목 각도와 본문 전개가 완전히 달라야 한다.
-- 콘택트렌즈 카테고리는 관리형만 채우지 말고 건조, 충혈/이물감, 난시검사, 컬러렌즈, 멀티포컬, 착용시간, 원데이 교체처럼 서로 다른 문제를 섞는다.
-- 같은 매장 기존 글에 같은 메인 키워드 또는 같은 소재가 있으면 금지.
-- 다른 등록 매장은 제목 동일, 관점 동일, 메인+서브 조합 동일만 금지. 메인 키워드만 같고 관점이 다르면 허용.
-- 네이버 상위 노출 경쟁 제목과 비슷하면 탈락보다 제목 각도·상황어·어미를 바꿔 구분.
-- 금지어 사용 금지: 추천, 가격, 비용, 후기, 꼭, 필독, 후회, 상담, 문의, 예약, 할인, 무료, 최고, 완벽, 보장.
-- 의료 단정 금지. 근시억제/근시완화는 정보형 기준 문장으로만 다룰 것.
-- 시즌 키워드는 현재 월과 카테고리가 맞을 때만 제목 각도로 반영할 것. 억지로 계절어를 붙이지 말 것.
-- 실제 검색어로 어색한 조합 금지: 주방, 가입도, 수치, 재방문 같은 단어를 억지로 붙이지 말 것.
-- 제목에 넣기 어려운 서브 키워드는 만들지 말고, 제목에 자연스럽게 들어갈 수 있는 서브 키워드로 바꿀 것.
-- 결과는 JSON만 출력.
-
-{
-  "results": [
-    {
-      "title": "제목",
-      "main_keyword": "2단어 키워드",
-      "sub_keyword_1": "2단어 키워드",
-      "sub_keyword_2": "2단어 키워드"
-    }
-  ]
-}`;
+[출력 규칙]
+- results 배열은 정확히 10개입니다. 10개보다 적게 반환하지 마세요.
+- 가장 좋은 후보 1개만 고르지 마세요. 서로 다른 10개 독립 항목을 모두 생성하세요.
+- If the results array has fewer than 10 objects, the response is invalid.
+- title은 15~60자 자연문입니다.
+- title에는 main_keyword를 공백 차이와 무관하게 원형 의미로 포함하세요.
+- main_keyword, sub_keyword_1, sub_keyword_2는 모두 실제 검색 가능한 2~3단어 조합입니다.
+- seed의 title이 비어 있으면 제목을 새로 창작하세요.
+- 같은 어미, 같은 문장 구조, 같은 소재를 반복하지 마세요.
+- 제목에 쉼표(,)를 쓰지 마세요. 접속 어미로 자연스럽게 이으세요.
+- 같은 끝맺음("확인할 점/부분", "기준", "차이", "이유")은 10개 중 최대 2개까지만 쓰세요.
+- 기존 제목과 같은 제목, 같은 관점, 같은 메인+서브 조합은 피하세요.
+- 금지어: 추천, 가격, 비용, 후기, 꼭, 필독, 후회, 상담, 문의, 예약, 할인, 무료, 최고, 완벽, 보장.
+- JSON 외 텍스트를 쓰지 마세요.
+출력 JSON 형식:
+- 최상위 객체는 results 배열만 가집니다.
+- results 배열 길이는 정확히 10입니다.
+- 각 항목 키는 title, main_keyword, sub_keyword_1, sub_keyword_2 입니다.
+- placeholder나 설명 문장을 넣지 말고 실제 후보 10개만 작성하세요.`;
 }
-
-function buildHumanTitleRepairPrompt(params: {
-  category: string;
-  candidates: KeywordOption[];
-  forbiddenList: string[];
-  referenceList: string[];
-  competitorList: string[];
-}): string {
-  const candidateLines = params.candidates
-    .map(
-      (candidate, index) =>
-        `${index + 1}. title=${candidate.title} / main=${candidate.mainKeyword} / sub1=${candidate.subKeyword1} / sub2=${candidate.subKeyword2}`
-    )
-    .join("\n");
-  const forbidden = params.forbiddenList.slice(0, 20).join("\n") || "(없음)";
-  const references = params.referenceList.slice(0, 20).join("\n") || "(없음)";
-  const competitors = params.competitorList.slice(0, 30).join("\n") || "(없음)";
-
-  return `당신은 네이버 블로그 제목을 사람이 읽는 제목으로 최종 편집하는 에디터입니다.
-
-[카테고리]
-${params.category}
-
-[편집할 후보]
-${candidateLines}
-
-[같은 매장 기존 제목 - 같은 메인 키워드/같은 제목 금지]
-${forbidden}
-
-[다른 등록 매장 제목 - 완전 동일 제목 금지, 관점 과도 중복 피하기]
-${references}
-
-[현재 네이버 상위 제목 - 같은 제목 구조/각도 피하기]
-${competitors}
-
-[편집 원칙]
-- 후보를 단순 탈락시키지 말고 먼저 자연스러운 제목으로 고치세요.
-- 후보 풀이 좁으면 같은 카테고리 안의 다른 핵심어와 문제어를 조합해 새 후보를 추가하세요.
-- 지역명 + 핵심키워드는 등록 블로그 간 중복을 줄이는 용도로 허용합니다.
-- title에는 main_keyword를 원형 그대로 포함하세요.
-- main_keyword는 2단어 조합을 유지하세요.
-- sub_keyword_1, sub_keyword_2도 2단어 조합을 유지하되, 어색하면 자연스러운 본문 소재 키워드로 바꾸세요.
-- 지역명은 title/main/sub에 자동으로 넣지 마세요.
-- 제목은 사람이 클릭할 만한 블로그 제목이어야 합니다. 키워드 나열, 문장 조각, 조사 붙은 키워드는 금지입니다.
-- "확인", "기준", "때문에 달라지는 점", "부터 보는 부분", "봐야 하는 이유", "걱정될 때" 같은 어미를 반복하지 마세요.
-- "차이"는 제품 비교가 명확할 때만 쓰고, "A와 B 차이"처럼 키워드를 붙인 제목은 피하세요.
-- "맞는 이유", "때문에 달라지는 점"은 기계적으로 보이므로 결과가 드러나는 문장으로 바꾸세요.
-- 같은 후보 묶음 안에서 제목 구조가 반복되면 안 됩니다.
-- 같은 관리형 축을 단어만 바꿔 반복하지 마세요. 렌즈세척/렌즈보관/렌즈관리/하드렌즈 관리/렌즈 케이스는 모두 같은 축입니다.
-- 콘택트렌즈 후보는 관리형만 만들지 말고 건조, 충혈/이물감, 난시검사, 컬러렌즈, 멀티포컬, 착용시간, 원데이 교체처럼 문제 축을 분산하세요.
-- 네이버 상위 제목과 비슷하면 메인 키워드는 유지하되 증상, 사용 장면, 비교 관점, 관리 순서를 바꿔 다른 각도로 만드세요.
-- 기계적인 제목은 반드시 고쳐서 반환하세요.
-- 후보는 최소 20개 이상 반환하세요. 원 후보가 부족하면 같은 메인 키워드의 각도를 바꿔 추가 후보를 만드세요.
-- "보기", "정리", "볼 것", "살펴볼 것"처럼 보고서식 어미로 끝내지 마세요.
-- "부터 볼 부분", "때문에 불편할 때", "망치는 순서"처럼 어색하거나 과한 표현은 쓰지 마세요.
-- "놓치기 쉬운 부분", "관리 흐름", "전 A 차이"처럼 추상적인 제목은 구체적인 증상/상황으로 바꾸세요.
-- "습관부터 보는 이유", "맡기기까지 살펴봐야 할 때", "전 착용 차이"처럼 어색한 조합은 쓰지 마세요.
-- "전 도수 차이", "살펴야 할 코팅", "확인할 관리 원인", "달라지는 판단"처럼 키워드 조각만 붙은 제목은 쓰지 마세요.
-- "달라지는 것", "먼저 할 것"처럼 의미가 비어 있는 끝맺음은 쓰지 마세요.
-- "관리부터 볼 부분", "검사부터 볼 부분"처럼 부자연스러운 조사 조합을 쓰지 마세요.
-- "때 관리 습관", "도수 후 검사 변화"처럼 조사와 명사가 끊어진 제목은 쓰지 마세요.
-
-[좋은 예]
-- 안경흘러내림 원인 코패드 위치가 달라졌을 때
-- 블루라이트렌즈 선택 전 눈피로가 문제될 때
-- 어린이시력 검사 근시 진행을 놓치기 쉬운 때
-- 안경보관 방법 렌즈 흠집을 줄이는 습관
-- 누진렌즈 운전 야간 시야가 답답할 때
-- 울템안경 특징 가벼운데 탄성이 다른 이유
-- 안경피팅 착용감 코패드 위치가 맞지 않을 때
-- 안경사이즈 선택 얼굴형에 맞지 않을 때
-- 무테안경 관리 나사 풀림이 생겼을 때
-- 메탈안경 관리 변형되면 착용감이 달라지는 이유
-- 렌즈착용 시간 건조감이 오래 남을 때
-- 중근용렌즈 선택 전 실내 사용감 차이
-- 안경고무팁 교체할 때 착용감이 달라졌을 때
-- 난시렌즈 선택 전 착용감이 달라질 때
-- 안경수리 나사 맡기기 전 상태를 봐야 할 때
-- 어린이눈 피로 습관이 반복될 때
-- 렌즈두께 선택 도수가 높아졌을 때
-- 소프트렌즈 착용감 건조감이 오래 남을 때
-- 안경수리 나사 파손 상태를 먼저 봐야 할 때
-- 블루라이트렌즈 눈피로 화면을 오래 볼 때 남는 이유
-- 근시억제렌즈 검사 어린이 도수 변화가 빠를 때
-- 하드렌즈 관리 세척 순서가 맞지 않을 때
-- 청소년시력 관리 검사 시기를 놓치기 쉬울 때
-- 누진렌즈 도수 변화 후 시야가 낯설 때
-- 눈피로 습관 스마트폰을 오래 볼 때
-
-[나쁜 예]
-- 안경흘러내림 원인 피팅부터 봐야 하는 이유
-- 중근용렌즈 실내 업무 때문에 달라지는 점
-- 어린이시력 검사 근시가 걱정될 때 보는 기준
-- 렌즈건조 관리할 때 착용부터 볼 부분
-- 울템안경 특징 탄성과 무게 차이
-- 안경피팅 착용감 코패드 때문에 달라지는 점
-- 안경사이즈 선택 얼굴형을 먼저 보는 게 맞는 이유
-- 무테안경 관리할 때 나사부터 볼 부분
-- 하금테안경 인상 얼굴형 때문에 불편할 때
-- 메탈안경 관리할 때 변형이 착용감을 망치는 순서
-- 렌즈보관 방법에서 놓치기 쉬운 부분
-- 렌즈착용 시간 건조감이 누적될 때 관리 흐름
-- 중근용렌즈 선택 전 실내 차이
-- 안경고무팁 교체할 때 착용감부터 볼 부분
-- 난시렌즈 선택 전 착용 차이
-- 안경수리 나사 맡기기까지 살펴봐야 할 때
-- 어린이눈 피로 습관부터 보는 이유
-- 블루라이트렌즈 눈피로가 쌓이는 패턴 보기
-- 렌즈코팅 손상 얼룩이 잘 지워지지 않는 원인 정리
-- 근시완화렌즈 검사 도수가 계속 올라갈 때 살펴볼 것
-- 렌즈두께 선택 전 도수 차이
-- 블루라이트렌즈 선택 눈피로가 쌓일 때 살펴야 할 코팅
-- 소프트렌즈 착용감 달라졌을 때 확인할 관리 원인
-- 안경수리 맡기기 파손 상태에 따라 달라지는 판단
-- 안경힌지 관리 나사 풀림이 반복될 때 달라지는 점
-- 블루라이트렌즈 눈피로 화면을 오래 봤을 때 달라지는 것
-- 근시억제렌즈 검사 어린이 도수가 오를 때 먼저 할 것
-- 하드렌즈 세척할 때 관리부터 볼 부분
-- 하드렌즈 관리 세척 순서가 틀리면 달라지는 것들
-- 청소년시력 관리할 때 검사부터 볼 부분
-- 렌즈착용 시간 건조감이 오래 남을 때 관리 습관
-- 눈피로 습관 스마트폰이 반복되는 이유
-- 어린이근시 확인 검사 상태가 반복될 때
-- 누진렌즈 도수 후 검사 변화가 남을 때
-- A와 B 확인, A와 B 기준
-
-JSON만 출력하세요. 최소 20개 후보를 반환하세요.
-{
-  "results": [
-    {
-      "title": "15~30자 자연스러운 제목",
-      "main_keyword": "2단어",
-      "sub_keyword_1": "2단어",
-      "sub_keyword_2": "2단어"
-    }
-  ]
-}`;
-}
-
 function canAddIntentBalancedCandidate<T extends KeywordOption>(
   candidate: T,
   selected: T[],
@@ -2316,6 +1792,86 @@ function appendEmergencyDiverseBackfill<T extends AnalyzedKeyword>(
   return interleaveIntentBuckets(filled).slice(0, TARGET_RESULT_COUNT);
 }
 
+function appendLooseLlmBackfill<T extends AnalyzedKeyword>(
+  selected: T[],
+  candidates: T[]
+): T[] {
+  const filled = [...selected];
+
+  for (const candidate of candidates) {
+    if (filled.length >= TARGET_RESULT_COUNT) break;
+    if (
+      !isValidTwoWordKeyword(candidate.mainKeyword) ||
+      !isValidTwoWordKeyword(candidate.subKeyword1) ||
+      !isValidTwoWordKeyword(candidate.subKeyword2)
+    ) {
+      continue;
+    }
+    if (!isStructurallyUsableLlmCandidate(candidate)) continue;
+    if (isAwkwardGeneratedTitle(candidate.title)) continue;
+    if (hasRegisteredStoreOverlap(candidate)) continue;
+
+    const hasExactDuplicate = filled.some(
+      (picked) =>
+        normalizeTitleForComparison(picked.mainKeyword) === normalizeTitleForComparison(candidate.mainKeyword) ||
+        normalizeTitleForComparison(picked.title) === normalizeTitleForComparison(candidate.title) ||
+        hasSameKeywordCombination(picked, candidate)
+    );
+    if (hasExactDuplicate) continue;
+
+    filled.push(candidate);
+  }
+
+  return filled.slice(0, TARGET_RESULT_COUNT);
+}
+
+// 제목의 끝 어절(명사형 끝맺음)을 키로 본다. 예: "...적응 문제"→"문제", "...살펴볼 원인"→"원인".
+function getTitleEndingKey(title: string): string {
+  const tokens = title.trim().split(/\s+/);
+  return tokens[tokens.length - 1] ?? "";
+}
+
+// 같은 끝맺음이 maxPerEnding(기본 2)을 넘으면, 풀에서 다른 끝맺음 후보로 교체한다.
+// 교체 후보가 없으면 원본을 유지한다(절대 개수를 줄이지 않는다).
+function diversifyTitleEndings<T extends AnalyzedKeyword>(
+  results: T[],
+  pool: T[],
+  maxPerEnding = 2
+): T[] {
+  const out: T[] = [];
+  const endingCount = new Map<string, number>();
+  const usedKeys = new Set(results.map((item) => `${item.title}|${item.mainKeyword}`));
+  const replacementPool = pool.filter(
+    (cand) => !hasRegisteredStoreOverlap(cand) && isBroadlyUsableCandidate(cand)
+  );
+
+  const bump = (ending: string) =>
+    endingCount.set(ending, (endingCount.get(ending) ?? 0) + 1);
+
+  for (const item of results) {
+    const ending = getTitleEndingKey(item.title);
+    if ((endingCount.get(ending) ?? 0) < maxPerEnding) {
+      out.push(item);
+      bump(ending);
+      continue;
+    }
+    const replacement = replacementPool.find((cand) => {
+      const key = `${cand.title}|${cand.mainKeyword}`;
+      if (usedKeys.has(key)) return false;
+      return (endingCount.get(getTitleEndingKey(cand.title)) ?? 0) < maxPerEnding;
+    });
+    if (replacement) {
+      out.push(replacement);
+      usedKeys.add(`${replacement.title}|${replacement.mainKeyword}`);
+      bump(getTitleEndingKey(replacement.title));
+    } else {
+      out.push(item);
+      bump(ending);
+    }
+  }
+  return out;
+}
+
 function matchesAnyProductHead(option: KeywordOption, productHeads: string[]): boolean {
   if (productHeads.length === 0) return false;
   const source = `${option.mainKeyword} ${option.subKeyword1} ${option.subKeyword2}`
@@ -2645,15 +2201,8 @@ function getSearcherConversionQualityScore(option: KeywordOption): number {
   if (/검사|도수|피팅|코패드|착용감|시야|얼굴형|거리|두께|압축|코팅/.test(source)) {
     score += 12;
   }
-  if (/확인할 점|비교할 기준|어색한 이유|불편할 때|생활거리|놓치기 쉬운 점/.test(option.title)) {
-    score += 10;
-  }
-
   if (/선택|관리|방법|기준|업무|운전|생활/.test(mainTail) && !/불편|검사|도수|시야|착용감|눈부심|건조|울렁임|흘러내림/.test(source)) {
     score -= 18;
-  }
-  if (/달라지는 부분|반복될 때|사용감이 달라질 때|사용감이 달라지는 이유|생활에서 자주 생기는 이유|방문 전 살펴볼 기준|관리 습관이 흔들릴 때|알아볼 때 확인할 부분/.test(option.title)) {
-    score -= 24;
   }
   if (/운전렌즈 업무|운전렌즈 독서|실내렌즈 운전|사무용렌즈 운전|중근용렌즈 운전/.test(source)) {
     score -= 35;
@@ -2830,26 +2379,6 @@ function getExternalDemandScore(
   );
 }
 
-function isCleanCandidate(option: AnalyzedKeyword): boolean {
-  const issues = option.analysis.duplicateRisk?.issues ?? [];
-  const competitorHit = issues.some(
-    (issue) =>
-      issue.code === "competitor-top-title-overlap" ||
-      issue.code === "competitor-keyword-combination-overlap"
-  );
-  const sameStoreHit = issues.some(
-    (issue) =>
-      issue.code === "same-store-title-overlap" ||
-      issue.code === "same-store-keyword-combination-overlap"
-  );
-  const crossBlogHit = issues.some(
-    (issue) =>
-      issue.code === "cross-blog-title-overlap" ||
-      issue.code === "cross-blog-keyword-combination-overlap"
-  );
-  return !competitorHit && !sameStoreHit && !crossBlogHit;
-}
-
 function isDuplicateSignalFree(option: AnalyzedKeyword): boolean {
   return !hasRegisteredStoreOverlap(option);
 }
@@ -2857,7 +2386,6 @@ function isDuplicateSignalFree(option: AnalyzedKeyword): boolean {
 function isBroadlyUsableCandidate(option: AnalyzedKeyword): boolean {
   return (
     option.validation.isValid &&
-    option.title.includes(option.mainKeyword) &&
     !isAwkwardGeneratedTitle(option.title)
   );
 }
@@ -3126,31 +2654,25 @@ export async function POST(request: NextRequest) {
       }),
     ]);
 
-    let baseCandidates = fallbackBatch;
-    if (KEYWORD_AI_EXPANSION_ENABLED) {
+    const fallbackKeywordSeeds = fallbackBatch.map(stripSeedTitle);
+    let baseCandidates = fallbackKeywordSeeds;
+    let aiSeedCandidates: KeywordOption[] = [];
+    if (KEYWORD_AI_EXPANSION_ENABLED && KEYWORD_GPT_EXPANSION_ENABLED) {
       try {
-        const gptCandidates = await generateKeywordCandidatesWithGpt({
+        aiSeedCandidates = await generateGptKeywordCandidatePool({
           shopName: shop.name,
           region,
           categoryName: category.name,
           topic: effectiveTopic,
           demandSignals,
           strategyGuide,
-          fallbackCandidates: fallbackBatch,
+          fallbackCandidates: fallbackKeywordSeeds,
         });
-        if (gptCandidates && gptCandidates.length > 0) {
-          const seen = new Set<string>();
-          baseCandidates = normalizeGeneratedOptions([...gptCandidates, ...fallbackBatch])
-            .filter((candidate) => isCategoryAppropriateCandidate(category.id, candidate))
-            .filter((candidate) => {
-              const key = `${candidate.title}|${candidate.mainKeyword}`.trim();
-              if (seen.has(key)) return false;
-              seen.add(key);
-              return true;
-            });
+        if (aiSeedCandidates.length > 0) {
+          baseCandidates = [...aiSeedCandidates, ...fallbackKeywordSeeds];
         }
       } catch {
-        // GPT 후보 확장 실패 시 로컬 후보만 사용한다.
+        // GPT 후보 확장 실패 시 Claude 편집 단계로 계속 진행한다.
       }
     }
 
@@ -3165,28 +2687,25 @@ export async function POST(request: NextRequest) {
     });
 
     let firstBatch: KeywordOption[] = [];
-    let usedFallbackBatch = false;
     if (KEYWORD_AI_EXPANSION_ENABLED) {
-      try {
-        firstBatch = normalizeGeneratedOptions(
-          await generateKeywords(firstPrompt, KEYWORD_FIRST_EDIT_TIMEOUT_MS)
-        ).filter((candidate) => isCategoryAppropriateCandidate(category.id, candidate));
-      } catch {
-        firstBatch = normalizeGeneratedOptions(baseCandidates).filter((candidate) =>
-          isCategoryAppropriateCandidate(category.id, candidate)
-        );
-        usedFallbackBatch = true;
+      if (aiSeedCandidates.length > 0) {
+        firstBatch = aiSeedCandidates;
+      } else {
+        try {
+          firstBatch = normalizeGeneratedOptions(
+            await generateKeywords(firstPrompt, KEYWORD_FIRST_EDIT_TIMEOUT_MS)
+          ).filter(isStructurallyUsableLlmCandidate);
+        } catch {
+          firstBatch = aiSeedCandidates;
+        }
       }
     } else {
-      firstBatch = normalizeGeneratedOptions(baseCandidates).filter((candidate) =>
-        isCategoryAppropriateCandidate(category.id, candidate)
-      );
-      usedFallbackBatch = true;
+      firstBatch = [];
     }
 
     const firstBatchSeen = new Set<string>();
-    firstBatch = [...firstBatch, ...normalizeGeneratedOptions(baseCandidates)]
-      .filter((candidate) => isCategoryAppropriateCandidate(category.id, candidate))
+    firstBatch = [...firstBatch, ...aiSeedCandidates]
+      .filter(isStructurallyUsableLlmCandidate)
       .filter((candidate) => {
         const key = `${candidate.title}|${candidate.mainKeyword}`;
         if (firstBatchSeen.has(key)) return false;
@@ -3197,13 +2716,17 @@ export async function POST(request: NextRequest) {
 
     if (!Array.isArray(firstBatch) || firstBatch.length === 0) {
       return NextResponse.json(
-        { success: false, error: "키워드 후보를 생성하지 못했습니다. 입력 조건을 다시 확인해주세요." },
+        {
+          success: false,
+          error:
+            "LLM 제목 생성에 실패했습니다. 규칙형 조합 제목을 추천으로 표시하지 않도록 차단했습니다. KEYWORD_AI_EXPANSION=1 상태와 Claude/Codex 인증을 확인해주세요.",
+        },
         { status: 500 }
       );
     }
 
     try {
-      const candidateSeeds = collectCandidateSearchSeeds([...fallbackBatch, ...firstBatch]);
+      const candidateSeeds = collectCandidateSearchSeeds([...fallbackKeywordSeeds, ...firstBatch]);
       const candidateDemandSignals = await fetchKeywordOpportunitySignals(candidateSeeds).catch(
         () => [] as SearchVolumeSignal[]
       );
@@ -3214,40 +2737,6 @@ export async function POST(request: NextRequest) {
       demandSignals = mergeDemandSignals(demandSignals, candidateDemandSignals);
     } catch {
       // 후보 키워드별 상위 제목/검색량 조회 실패 시 기존 카테고리 기반 신호만 사용한다.
-    }
-
-    const needsTitleRepair =
-      KEYWORD_AI_EXPANSION_ENABLED &&
-      firstBatch.length < TARGET_RESULT_COUNT * 2 ||
-      (KEYWORD_AI_EXPANSION_ENABLED &&
-        firstBatch.some((candidate) => isAwkwardGeneratedTitle(candidate.title)));
-
-    if (needsTitleRepair) {
-      try {
-        const repairPrompt = buildHumanTitleRepairPrompt({
-          category: category.name,
-          candidates: firstBatch.slice(0, TARGET_RESULT_COUNT * 4),
-          forbiddenList,
-          referenceList,
-          competitorList,
-        });
-        const repairedBatch = normalizeGeneratedOptions(
-          await generateKeywords(repairPrompt, KEYWORD_REPAIR_TIMEOUT_MS)
-        ).filter((candidate) => isCategoryAppropriateCandidate(category.id, candidate));
-        if (repairedBatch.length >= Math.min(TARGET_RESULT_COUNT, firstBatch.length)) {
-          const repairedSeen = new Set<string>();
-          firstBatch = [...repairedBatch, ...firstBatch]
-            .filter((candidate) => {
-              const key = `${candidate.title}|${candidate.mainKeyword}|${candidate.subKeyword1}|${candidate.subKeyword2}`;
-              if (repairedSeen.has(key)) return false;
-              repairedSeen.add(key);
-              return true;
-            })
-            .slice(0, TARGET_RESULT_COUNT * 8);
-        }
-      } catch {
-        // 제목 보정 실패 시 1차 편집 후보로 계속 진행한다.
-      }
     }
 
     const firstVolumeGate = applyVolumeGate(firstBatch, demandSignals);
@@ -3264,66 +2753,6 @@ export async function POST(request: NextRequest) {
       productHeads,
       meshKeywordKeys,
     });
-
-    let cleanCandidates = analyzed.filter(isCleanCandidate);
-
-    const broadlyUsableCount = analyzed.filter(isBroadlyUsableCandidate).length;
-
-    if (
-      KEYWORD_AI_EXPANSION_ENABLED &&
-      !usedFallbackBatch &&
-      cleanCandidates.length < 4 &&
-      broadlyUsableCount < TARGET_RESULT_COUNT
-    ) {
-      const overlapTitles = Array.from(
-        new Set(
-          analyzed
-            .filter((item) => !isCleanCandidate(item))
-            .map((item) => item.title.trim())
-            .filter(Boolean)
-        )
-      );
-
-      const strengthenedCompetitorList = Array.from(
-        new Set([...competitorList, ...overlapTitles])
-      );
-
-      try {
-        const retryPrompt = buildTitleGenerationPrompt({
-          targetStore: shop.name,
-          category: category.name,
-          categorySubtopics: category.subcategories,
-          forbiddenList,
-          referenceList,
-          competitorList: strengthenedCompetitorList,
-          strategyGuide,
-        });
-        const retryBatch = await generateKeywords(retryPrompt, KEYWORD_RETRY_TIMEOUT_MS);
-        if (Array.isArray(retryBatch) && retryBatch.length > 0) {
-          const retryGate = applyVolumeGate(retryBatch, demandSignals);
-          const retryAnalyzed = await analyzeOptions({
-            rawOptions: retryGate.candidates,
-            forbiddenList,
-            referenceList,
-            competitorList,
-            demandSignals,
-            topic: effectiveTopic,
-            productHeads,
-            meshKeywordKeys,
-          });
-          const titleSeen = new Set(analyzed.map((item) => item.title.trim()));
-          for (const candidate of retryAnalyzed) {
-            if (!titleSeen.has(candidate.title.trim())) {
-              analyzed.push(candidate);
-              titleSeen.add(candidate.title.trim());
-            }
-          }
-          cleanCandidates = analyzed.filter(isCleanCandidate);
-        }
-      } catch {
-        // 재생성 실패는 1차 결과 사용
-      }
-    }
 
     // 등록된 매장끼리 제목/관점이 겹치는 후보는 부족분 채우기에서도 제외한다.
     // 경쟁 제목 중복은 경고 후보가 될 수 있지만, 같은 네트워크 매장 중복은 결과에 넣지 않는다.
@@ -3365,21 +2794,7 @@ export async function POST(request: NextRequest) {
       rankedPool = [...rankedPool, ...emergencyBackfill];
     }
 
-    const analyzedFallback = await analyzeOptions({
-      rawOptions: applyVolumeGate(
-        normalizeGeneratedOptions(fallbackBatch).filter((candidate) =>
-          isCategoryAppropriateCandidate(category.id, candidate)
-        ),
-        demandSignals
-      ).candidates,
-      forbiddenList,
-      referenceList,
-      competitorList,
-      demandSignals,
-      topic: effectiveTopic,
-      productHeads,
-      meshKeywordKeys,
-    });
+    const analyzedFallback: AnalyzedKeyword[] = [];
     const safeFallback = [...analyzedFallback, ...noStoreOverlapCandidates]
       .filter((item) => !hasRegisteredStoreOverlap(item))
       .filter(isBroadlyUsableCandidate)
@@ -3410,6 +2825,9 @@ export async function POST(request: NextRequest) {
       category.id === "eye-info" || category.id === "glasses-story" ? 2 : 3
     );
     diverseRankedResults = dedupeFinalKeywordResults(diverseRankedResults, representationPool, productHeads);
+    diverseRankedResults = appendLooseLlmBackfill(diverseRankedResults, representationPool);
+    // 같은 명사형 끝맺음(원인/요소/문제 등)이 3개 이상 몰리면 다른 끝맺음 후보로 교체(개수 유지).
+    diverseRankedResults = diversifyTitleEndings(diverseRankedResults, representationPool);
     const topForExternalSignals = diverseRankedResults.slice(0, EXTERNAL_SIGNAL_TOP_K);
 
     // 후보별 외부 검색 신호 조회를 병렬로 수행한다. (이전에는 직렬 for 루프라

@@ -145,6 +145,11 @@ export function buildArticleBrief(params: {
     contentBlocks?: string[];
     cautionPoints?: string[];
   };
+  smartBlock?: {
+    recommendedTitleKeyword: string;
+    subKeywordCandidates: string[];
+    blockTypeHint: "high-volume" | "mid-volume" | "long-tail" | "unknown";
+  };
 }): ArticleBrief {
   const {
     keyword,
@@ -159,6 +164,7 @@ export function buildArticleBrief(params: {
     sameStoreHistory,
     crossBlogTitles,
     competitorMorphology,
+    smartBlock,
   } = params;
 
   return {
@@ -191,6 +197,7 @@ export function buildArticleBrief(params: {
       crossBlogStoreAngles: crossBlogTitles.slice(0, 5),
     },
     competitorMorphology,
+    smartBlock,
     sources:
       competitorMorphology?.status === "available"
         ? ["perplexity", "rss-history", "local-content", "document-rule", "naver-search"]

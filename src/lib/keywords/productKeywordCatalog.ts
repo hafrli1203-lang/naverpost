@@ -251,22 +251,6 @@ export function getProductModifiersByHead(params: {
   );
 }
 
-function buildProductTitle(head: string, modifier: string): string {
-  if (/건조|흐림|불편|울렁임/.test(modifier)) {
-    return `${head} ${modifier}이 오래 갈 때`;
-  }
-  if (/착용감|시야/.test(modifier)) {
-    return `${head} ${modifier}이 달라지는 이유`;
-  }
-  if (/검사|도수|근시|난시/.test(modifier)) {
-    return `${head} ${modifier} 전에 확인할 부분`;
-  }
-  if (/선택|안경렌즈|안경테|원데이|누진렌즈|렌즈교체|코팅|두께|얼굴형|무게/.test(modifier)) {
-    return `${head} ${modifier} 기준`;
-  }
-  return `${head} ${modifier} 살펴볼 때`;
-}
-
 function pickProductSubModifiers(params: {
   categoryId: string;
   mainModifier: string;
@@ -312,7 +296,7 @@ export function buildProductKeywordOptions(params: {
         modifiers,
       });
       options.push({
-        title: buildProductTitle(head, modifier),
+        title: "",
         mainKeyword,
         subKeyword1: `${head} ${sub1}`,
         subKeyword2: `${head} ${sub2}`,

@@ -2,9 +2,9 @@ import type { KeywordOption } from "@/types";
 import { runClaude } from "./cli/claudeCli";
 import { runCodex } from "./cli/codexCli";
 
-const ARTICLE_MODEL = "claude-sonnet-4-6";
-const EDIT_MODEL = "claude-sonnet-4-6";
-const PROMPT_MODEL = "claude-sonnet-4-6";
+const ARTICLE_MODEL = "claude-opus-4-8";
+const EDIT_MODEL = "claude-opus-4-8";
+const PROMPT_MODEL = "claude-opus-4-8";
 const CODEX_ARTICLE_MODEL = "gpt-5.5";
 
 export async function generateKeywords(

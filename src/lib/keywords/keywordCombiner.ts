@@ -163,62 +163,6 @@ function isWeakHeadModifierPair(head: string, modifier: string): boolean {
   return false;
 }
 
-function buildTitle(head: string, modifier: string, index: number, supportModifier?: string): string {
-  const mainKeyword = `${head} ${modifier}`;
-  const rawSupport = supportModifier && supportModifier !== modifier ? supportModifier : "";
-  const support = /처음/.test(rawSupport) ? "사용감" : rawSupport;
-  if (/울렁임|어지러움|불편|건조|충혈|흐림|통증|이물감|흘러내림|빠짐|찢어짐|증상/.test(modifier)) {
-    if (support && /처음|선택/.test(support)) return `${mainKeyword} 반복될 때`;
-    if (support && /어린이|부모님|학생|직장인|운전자|초보/.test(support)) return `${mainKeyword} ${support} 기준`;
-    return support
-      ? `${mainKeyword} ${support} 기준`
-      : `${mainKeyword} 오래 남을 때 확인할 점`;
-  }
-  if (/착용감/.test(modifier)) {
-    return support
-      ? `${mainKeyword} ${support} 기준`
-      : `${mainKeyword} 맞지 않을 때 확인할 점`;
-  }
-  if (/처음|적응/.test(modifier)) {
-    return support
-      ? `${mainKeyword} ${support} 기준`
-      : `${mainKeyword} 처음 맞춘 뒤 어색한 이유`;
-  }
-  if (/도수/.test(modifier)) {
-    return support
-      ? `${mainKeyword} ${support} 기준`
-      : `${mainKeyword} 생활거리가 안 맞을 때`;
-  }
-  if (/검사|시기|근시|난시|노안/.test(modifier)) {
-    return support
-      ? `${mainKeyword} ${support} 기준`
-      : `${mainKeyword} 전 확인할 생활거리`;
-  }
-  if (/시야|야간|눈부심|업무|독서|거리|피로/.test(modifier)) {
-    return support
-      ? `${mainKeyword} ${support} 기준`
-      : `${mainKeyword} 생활에서 불편할 때`;
-  }
-  if (/선택|소재|두께|압축|코팅|직경|베이스커브|함수율|사이즈|얼굴형|무게/.test(modifier)) {
-    return support
-      ? `${mainKeyword} ${/돋보기|안경테|소재/.test(support) ? `${support}와 비교할 때` : `${support} 기준`}`
-      : `${mainKeyword} 전에 비교할 기준`;
-  }
-  if (/관리|세척|보관|교체|위생|착용시간|방법/.test(modifier)) {
-    if (support && /어린이|부모님|학생|직장인|운전자|초보/.test(support)) return `${mainKeyword} ${support} 기준`;
-    return support
-      ? `${mainKeyword} ${support} 기준`
-      : `${mainKeyword} 습관에서 놓치기 쉬운 점`;
-  }
-
-  const suffixes = [
-    "사용감이 달라지는 이유",
-    "생활에서 불편할 때",
-    "방문 전 확인할 항목",
-  ];
-  return `${mainKeyword} ${suffixes[index % suffixes.length]}`;
-}
-
 function pickSubKeywordModifiers(
   head: string,
   modifierPool: string[],
@@ -235,19 +179,6 @@ function pickSubKeywordModifiers(
     }
   );
   return [pool[0] ?? "관리", pool[1] ?? "검사"];
-}
-
-function chooseTitleSupportModifier(
-  mainModifier: string,
-  sub1Modifier: string,
-  sub2Modifier: string
-): string {
-  if (/착용감|불편|울렁임|어지러움|적응|도수|시야|업무|독서|거리/.test(mainModifier)) {
-    return !/돋보기|선택|차이|디자인|렌즈교체|안경테|선글라스/.test(sub1Modifier)
-      ? sub1Modifier
-      : sub2Modifier;
-  }
-  return sub1Modifier;
 }
 
 export function combineKeywords(params: KeywordCombinerParams): KeywordOption[] {
@@ -295,12 +226,7 @@ export function combineKeywords(params: KeywordCombinerParams): KeywordOption[] 
       if (!isValidTwoWordKeyword(subKeyword1) || !isValidTwoWordKeyword(subKeyword2)) continue;
 
       options.push({
-        title: buildTitle(
-          head,
-          modifier,
-          options.length,
-          chooseTitleSupportModifier(modifier, sub1Modifier, sub2Modifier)
-        ),
+        title: "",
         mainKeyword,
         subKeyword1,
         subKeyword2,

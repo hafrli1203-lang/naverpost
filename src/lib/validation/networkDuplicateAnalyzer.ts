@@ -133,25 +133,32 @@ function detectSharedTitlePattern(title: string, history: string[]): string[] {
   });
 }
 
+// 조합 중복 판정.
+// - "main-only": 같은 매장 보호. 과거 제목이 메인 키워드 핵심 토큰을 모두 포함하면 중복.
+//   (같은 매장은 같은 메인 키워드/소재를 재발행하지 않는다.)
+// - "main-and-sub": 다른 매장/경쟁 보호. 메인이 같아도 관점(서브)이 다르면 허용하고,
+//   메인 핵심 토큰을 모두 포함하면서 서브의 변별 토큰까지 겹칠 때만 "조합 동일"로 본다.
+//   (예전에는 토큰 2개만 겹쳐도 중복 처리해 흔한 키워드가 전부 탈락했다.)
 function detectKeywordCombinationOverlap(
   option: KeywordOption,
-  history: string[]
+  history: string[],
+  mode: "main-only" | "main-and-sub"
 ): string[] {
-  const keywordTokens = [
-    option.mainKeyword,
-    option.subKeyword1,
-    option.subKeyword2,
-  ]
-    .flatMap(meaningfulTokens)
-    .filter(Boolean);
-  if (keywordTokens.length === 0) return [];
+  const mainTokens = meaningfulTokens(option.mainKeyword);
+  if (mainTokens.length === 0) return [];
+  const subTokens = new Set(
+    [
+      ...meaningfulTokens(option.subKeyword1),
+      ...meaningfulTokens(option.subKeyword2),
+    ].filter((token) => !mainTokens.includes(token))
+  );
 
   return history.filter((item) => {
-    const itemTokens = meaningfulTokens(item);
-    const sharedCount = itemTokens.filter((token) =>
-      keywordTokens.includes(token)
-    ).length;
-    return sharedCount >= 2;
+    const itemTokens = new Set(meaningfulTokens(item));
+    const mainHit = mainTokens.every((token) => itemTokens.has(token));
+    if (!mainHit) return false;
+    if (mode === "main-only") return true;
+    return Array.from(subTokens).some((token) => itemTokens.has(token));
   });
 }
 
@@ -167,15 +174,18 @@ export function analyzeNetworkDuplicateRisk(params: {
   const competitorMatches = detectSharedTitlePattern(option.title, competitorList);
   const sameStoreKeywordCombinationOverlap = detectKeywordCombinationOverlap(
     option,
-    forbiddenList
+    forbiddenList,
+    "main-only"
   );
   const keywordCombinationOverlap = detectKeywordCombinationOverlap(
     option,
-    referenceList
+    referenceList,
+    "main-and-sub"
   );
   const competitorKeywordCombinationOverlap = detectKeywordCombinationOverlap(
     option,
-    competitorList
+    competitorList,
+    "main-and-sub"
   );
   const sharedExpressionOverlap = overlapTokens(option.title, referenceList).slice(
     0,

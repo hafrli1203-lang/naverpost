@@ -108,7 +108,7 @@ ${subKeyword2 ? `서브 키워드2: "${subKeyword2}" — 반드시 원형 그대
 [수정 규칙]
 1. 위에 명시된 금지어와 주의 표현을 지정된 대체어로 반드시 교체 (누락 시 불합격)
 2. 키워드에 포함된 단어(예: 안경렌즈)는 절대 변경하지 마세요. 반복이 많더라도 키워드는 원형 유지.
-3. 글 길이 ${charCount}자 내외 유지
+3. 글 길이는 ${charCount}자 내외로 맞추세요. 현재 글이 ${Math.ceil(charCount * 1.1)}자를 넘으면 핵심은 남기고 군더더기·중복 설명을 줄여 압축하세요.
 4. 자연스러운 문장 흐름 유지
 5. 숫자 나열(1. 2. 3.) 대신 문장으로 풀어서 작성
 6. 쉼표(,) 사용 금지 — 접속사와 연결 어미로 이어지게 작성
@@ -121,5 +121,44 @@ ${subKeyword2 ? `서브 키워드2: "${subKeyword2}" — 반드시 원형 그대
 ${originalContent}
 
 위 규칙에 맞게 전체 글을 자연스럽게 다시 작성해주세요.
+제목 제외 본문만 출력하세요.`;
+}
+
+// G3: 자완 색인 보강. 검수를 통과한 본문을 새로 쓰지 않고, 본문에 빠진 조합형
+// 자동완성 검색어만 맥락에 맞게 1회씩 자연스럽게 녹인다(블라이 "자완 색인" 대응).
+export function buildAutocompleteAugmentPrompt(params: {
+  originalContent: string;
+  suggestions: string[];
+  mainKeyword: string;
+  subKeyword1?: string;
+  subKeyword2?: string;
+  charCount?: number;
+}): string {
+  const {
+    originalContent,
+    suggestions,
+    mainKeyword,
+    subKeyword1,
+    subKeyword2,
+    charCount = 2000,
+  } = params;
+
+  return `당신은 네이버 블로그 노출을 돕는 에디터입니다.
+아래 글은 이미 검수를 통과했습니다. 내용을 새로 쓰지 말고, 자연스럽게 들어갈 수 있는 검색 키워드만 살짝 보강하세요.
+
+[자완 색인 보강 — 자동완성에는 있으나 본문에 빠진 검색어]
+${suggestions.map((s) => `  • ${s}`).join("\n")}
+※ 위 키워드 중 글 맥락에 자연스럽게 맞는 것만 골라 본문에 1회씩 녹이세요. 억지로 다 넣지 말고 말이 되지 않으면 넣지 마세요.
+※ 키워드 나열처럼 보이지 않게 문장 흐름과 기존 의미를 유지하세요.
+
+[절대 규칙]
+- 메인 키워드 "${mainKeyword}"${subKeyword1 ? `, 서브 "${subKeyword1}"` : ""}${subKeyword2 ? `, "${subKeyword2}"` : ""}는 원형 그대로 유지하세요.
+- 쉼표(,) 사용 금지. 숫자 나열(1. 2. 3.) 금지.
+- 글 길이는 ${charCount}자 내외를 유지하세요.
+- 새 표나 새 섹션을 만들지 말고 기존 문장에 자연스럽게 스며들게 하세요.
+
+[원본 글]
+${originalContent}
+
 제목 제외 본문만 출력하세요.`;
 }

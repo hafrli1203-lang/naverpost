@@ -1,17 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
-import { writeArticle, writeArticleWithCodex, reviseArticle } from "@/lib/ai/claude";
+import { writeArticle, reviseArticle } from "@/lib/ai/claude";
 import { researchKeyword } from "@/lib/ai/perplexity";
 import { buildArticlePrompt } from "@/lib/prompts/articlePrompt";
 import { buildPromoPrompt } from "@/lib/prompts/promoPrompt";
-import { buildRevisionPrompt } from "@/lib/prompts/revisionPrompt";
+import {
+  buildRevisionPrompt,
+  buildAutocompleteAugmentPrompt,
+} from "@/lib/prompts/revisionPrompt";
 import { validateContent } from "@/lib/validation/contentValidator";
 import { fetchBlogTitles } from "@/lib/naver/rssParser";
 import { buildArticleBrief } from "@/lib/briefs/articleBrief";
 import { analyzeCompetitorMorphology } from "@/lib/analysis/competitorMorphology";
+import { inferSmartBlockSubKeywords } from "@/lib/analysis/smartBlock";
+import { analyzeAutocompleteIndex } from "@/lib/analysis/autocompleteIndex";
 import { CATEGORIES } from "@/lib/constants";
 import { getShopById } from "@/lib/data/shops";
 import { lookupGlossary, buildGlossaryHint } from "@/lib/domain/opticalGlossary";
-import type { KeywordOption, ArticleBrief, ArticleContent } from "@/types";
+import type { KeywordOption, ArticleContent } from "@/types";
 
 export const maxDuration = 360;
 
@@ -20,11 +25,21 @@ const MAX_REVISION_ATTEMPTS = 1;
 // a larger budget than the old 12s, which silently dropped research and forced
 // Claude to write from generic knowledge (the keyword-misinterpretation regression).
 const RESEARCH_TIMEOUT_MS = 40_000;
-const COMPETITOR_ANALYSIS_TIMEOUT_MS = 25_000;
-const ARTICLE_WRITE_TIMEOUT_MS = 150_000;
+// nounExtractor가 Haiku→Sonnet으로 느려져 25초로는 경쟁분석(G1)이 계속 실패했다. 45초로 상향.
+const COMPETITOR_ANALYSIS_TIMEOUT_MS = 45_000;
+// Opus 본문 작성 예산. maxDuration(360초) 안에서 앞단 병렬(~45초)+재수정(70초)까지
+// 들어가도록 220초로 잡는다. 성공경로 45+220+70≈335초, 실패경로 45+220+75≈340초.
+const ARTICLE_WRITE_TIMEOUT_MS = 220_000;
 const ARTICLE_RETRY_TIMEOUT_MS = 75_000;
-const ARTICLE_CODEX_FALLBACK_TIMEOUT_MS = 180_000;
-const ARTICLE_REVISION_TIMEOUT_MS = 60_000;
+// 2000자급 본문 전체 재작성은 60초로 빠듯해 자주 타임아웃됐다. 90초로 상향.
+const ARTICLE_REVISION_TIMEOUT_MS = 70_000;
+const SMARTBLOCK_TIMEOUT_MS = 12_000;
+const AUTOCOMPLETE_TIMEOUT_MS = 12_000;
+// G3 자완 보강은 "키워드만 살짝 녹이는" 가벼운 작업이라 본문 재작성보다 짧게 잡는다.
+const AUTOCOMPLETE_AUGMENT_TIMEOUT_MS = 50_000;
+// maxDuration(360초)에 근접하면 G3 보강은 건너뛴다(전체 응답이 잘리지 않게).
+const ARTICLE_MAX_DURATION_MS = maxDuration * 1000;
+const G3_MIN_REMAINING_MS = 70_000;
 
 function withTimeout<T>(
   promise: Promise<T>,
@@ -83,58 +98,6 @@ function summarizeGenerationError(error: unknown): string {
   return message || "Claude CLI 실패";
 }
 
-function buildCodexFallbackArticlePrompt(params: {
-  keyword: KeywordOption;
-  brief: ArticleBrief;
-  glossaryHint?: string;
-}): string {
-  const { keyword, brief, glossaryHint } = params;
-  const commonNouns = brief.competitorMorphology?.commonNouns?.slice(0, 12) ?? [];
-  const bodyNouns = brief.competitorMorphology?.bodyNouns?.slice(0, 10) ?? [];
-  const highlights = brief.competitorMorphology?.bodyHighlights?.slice(0, 4) ?? [];
-  const shopStrengths = brief.shop.serviceStrengths?.slice(0, 4) ?? [];
-  const visitChecklist = brief.shop.visitChecklist?.slice(0, 4) ?? [];
-  const avoidClaims = brief.shop.avoidClaims?.slice(0, 6) ?? [];
-
-  return `
-네이버 블로그 본문만 작성하세요. 제목, JSON, 코드블록, 해설은 출력하지 마세요.
-
-[글 정보]
-- 제목: ${keyword.title}
-- 메인 키워드: ${keyword.mainKeyword}
-- 서브 키워드: ${keyword.subKeyword1}, ${keyword.subKeyword2}
-- 전체 주제/논지: ${brief.topic}
-- 카테고리: ${brief.category.name}
-- 매장: ${brief.shop.name}
-- 목표 분량: ${brief.charCount}자 내외
-- 말투: ${brief.tone === "friendly" ? "친근하지만 과장 없는 설명체" : brief.tone}
-
-[검색 의도]
-- 검색자는 불편한 이유, 선택 기준, 방문 전 확인할 점을 알고 싶어 합니다.
-- 첫 문단은 실제 상황으로 시작하고, 바로 해결 기준을 제시하세요.
-- 글 전체가 "${brief.topic}" 논지에서 벗어나지 않게 쓰세요.
-
-[본문에 자연스럽게 분산할 보조 형태소]
-- 공통 명사: ${commonNouns.join(", ") || "없음"}
-- 본문 핵심어: ${bodyNouns.join(", ") || "없음"}
-- 반복 논점: ${highlights.join(" / ") || "없음"}
-
-[매장 정보]
-- 강점: ${shopStrengths.join(", ") || "과장 없이 검사와 상담 중심으로 표현"}
-- 방문 체크: ${visitChecklist.join(", ") || "현재 불편 원인을 확인"}
-- 피할 표현: ${avoidClaims.join(", ") || "최고, 완벽, 치료, 보장, 즉시 해결"}
-${glossaryHint ? `\n[용어 구분]\n${glossaryHint}` : ""}
-
-[작성 규칙]
-- 메인 키워드는 2회 이상, 서브 키워드는 각각 1회 이상 자연스럽게 포함하세요.
-- 같은 키워드를 몰아서 반복하지 말고 문단마다 의미를 바꿔 사용하세요.
-- 비교나 체크 기준이 필요한 경우에만 간단한 Markdown 표 1개를 쓰세요.
-- 쉼표는 남용하지 말고 문장은 짧게 끊으세요.
-- 과장 광고, 병원식 치료 표현, "문의해 주세요" 표현은 쓰지 마세요.
-- 마지막은 매장 방문을 강요하지 말고 "확인해 보면 좋다" 수준으로 마무리하세요.
-`.trim();
-}
-
 function needsHardRevision(
   validation: Awaited<ReturnType<typeof validateContent>>,
   charOutOfRange: boolean
@@ -150,6 +113,7 @@ function needsHardRevision(
 }
 
 export async function POST(request: NextRequest) {
+  const requestStartedAt = Date.now();
   try {
     const body = await request.json();
     const {
@@ -223,7 +187,7 @@ export async function POST(request: NextRequest) {
     // Research, RSS history, and competitor morphology are independent inputs to the
     // brief, so run them concurrently. Serial execution previously stacked their
     // timeouts (research + competitor alone could exceed the route budget).
-    const [researchResponse, rssOutcome, competitorMorphology] = await Promise.all([
+    const [researchResponse, rssOutcome, competitorMorphology, smartBlockSignal] = await Promise.all([
       // Research keyword via Perplexity using main + both sub keywords + category +
       // glossary context together, then re-search all follow-up questions.
       withTimeout(
@@ -281,11 +245,32 @@ export async function POST(request: NextRequest) {
           })
         )
         .catch((): CompetitorMorphology | undefined => undefined),
+      // 스마트블록 하위키워드 추론(블라이). 실패/타임아웃 시 unavailable로 graceful.
+      withTimeout(inferSmartBlockSubKeywords(keyword.mainKeyword), SMARTBLOCK_TIMEOUT_MS, {
+        status: "unavailable" as const,
+        mainKeyword: keyword.mainKeyword,
+        documentVolume: null,
+        blockTypeHint: "unknown" as const,
+        subKeywordCandidates: [],
+        recommendedTitleKeyword: keyword.mainKeyword,
+        notes: [],
+      }),
     ]);
 
     const researchData = researchResponse.text;
     const researchStatus = researchResponse.status;
     const { sameStoreHistory, crossBlogTitles } = rssOutcome;
+
+    const smartBlock =
+      smartBlockSignal && smartBlockSignal.status === "available"
+        ? {
+            recommendedTitleKeyword: smartBlockSignal.recommendedTitleKeyword,
+            subKeywordCandidates: smartBlockSignal.subKeywordCandidates
+              .map((candidate) => candidate.keyword)
+              .slice(0, 6),
+            blockTypeHint: smartBlockSignal.blockTypeHint,
+          }
+        : undefined;
 
     const brief = buildArticleBrief({
       keyword,
@@ -300,6 +285,7 @@ export async function POST(request: NextRequest) {
       sameStoreHistory,
       crossBlogTitles,
       competitorMorphology,
+      smartBlock,
     });
 
     // Build article prompt and generate via Claude
@@ -360,23 +346,10 @@ export async function POST(request: NextRequest) {
       }
 
       if (!rawContent) {
-        try {
-          rawContent = await writeArticleWithCodex(
-            buildCodexFallbackArticlePrompt({
-              keyword,
-              brief,
-              glossaryHint,
-            }),
-            ARTICLE_CODEX_FALLBACK_TIMEOUT_MS
-          );
-          generationFallbackNote = `Claude 작성 실패 후 Codex로 대체 생성했습니다: ${summarizeGenerationError(retryError ?? error)}`;
-        } catch (fallbackError) {
-          throw new Error(
-            `본문 생성 모델이 모두 실패했습니다. Claude: ${summarizeGenerationError(
-              retryError ?? error
-            )} / Codex: ${summarizeGenerationError(fallbackError)}`
-          );
-        }
+        // Codex 폴백 제거: 본문은 Claude(Opus) 전용. 실패 시 명확히 실패시킨다.
+        throw new Error(
+          `본문 생성에 실패했습니다(Claude Opus 전용, 외부 모델 폴백 없음): ${summarizeGenerationError(retryError ?? error)}`
+        );
       }
     }
 
@@ -436,6 +409,50 @@ export async function POST(request: NextRequest) {
         break;
       }
       revisionCount++;
+    }
+
+    // G3: 자완 색인 보강. 검수 통과 후에도 본문에 없는 조합형 자동완성어가 있으면
+    // 1회 보강 수정을 시도하고, 검수가 후퇴하지 않을 때만 채택한다(회귀 방지, graceful).
+    // maxDuration에 근접하면 보강은 건너뛴다(응답 잘림 방지).
+    const g3RemainingMs = ARTICLE_MAX_DURATION_MS - (Date.now() - requestStartedAt);
+    if (g3RemainingMs >= G3_MIN_REMAINING_MS) try {
+      const autoIndex = await withTimeout(
+        analyzeAutocompleteIndex({
+          title: keyword.title,
+          mainKeyword: keyword.mainKeyword,
+          subKeyword1: keyword.subKeyword1,
+          subKeyword2: keyword.subKeyword2,
+          body: content,
+        }),
+        AUTOCOMPLETE_TIMEOUT_MS,
+        { status: "unavailable" as const, inBody: [], suggestions: [], notes: [] }
+      );
+
+      if (autoIndex.status === "available" && autoIndex.suggestions.length > 0) {
+        const augmentPrompt = buildAutocompleteAugmentPrompt({
+          originalContent: content,
+          suggestions: autoIndex.suggestions.map((s) => s.keyword).slice(0, 8),
+          mainKeyword: keyword.mainKeyword,
+          subKeyword1: keyword.subKeyword1,
+          subKeyword2: keyword.subKeyword2,
+          charCount,
+        });
+        const augmented = stripLeadingTitleLine(
+          sanitizeArticleContent(
+            await reviseArticle(augmentPrompt, AUTOCOMPLETE_AUGMENT_TIMEOUT_MS)
+          ),
+          keyword.title
+        );
+        const augmentedValidation = await validateContent(augmented, keywordsForValidation, {
+          fast: true,
+        });
+        if (!needsHardRevision(augmentedValidation, isCharCountOutOfRange(augmented, charCount))) {
+          content = augmented;
+          validation = augmentedValidation;
+        }
+      }
+    } catch {
+      // 자완 색인 보강 실패는 본문 결과에 영향을 주지 않는다.
     }
 
     const article: ArticleContent = {

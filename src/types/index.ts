@@ -324,6 +324,11 @@ export interface ArticleBrief {
     contentBlocks?: string[];
     cautionPoints?: string[];
   };
+  smartBlock?: {
+    recommendedTitleKeyword: string;
+    subKeywordCandidates: string[];
+    blockTypeHint: "high-volume" | "mid-volume" | "long-tail" | "unknown";
+  };
   sources: BlaiSignalSource[];
 }
 
