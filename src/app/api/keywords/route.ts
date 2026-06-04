@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import fs from "fs/promises";
 import path from "path";
-import { generateKeywords, reviseKeywordTitles } from "@/lib/ai/claude";
-import { buildTitlePolishPrompt } from "@/lib/prompts/titlePrompt";
+import { generateKeywords, reviseKeywordTitles, selectCategoryFitIndices } from "@/lib/ai/claude";
+import { buildTitlePolishPrompt, buildCategoryFitPrompt } from "@/lib/prompts/titlePrompt";
 import { generateKeywordCandidatesWithGpt } from "@/lib/ai/openaiKeywords";
 import { CATEGORIES } from "@/lib/constants";
 import { getShopById } from "@/lib/data/shops";
@@ -84,6 +84,7 @@ const SMART_BLOCK_TOP_K = Math.max(
 );
 const KEYWORD_FIRST_EDIT_TIMEOUT_MS = 70_000;
 const KEYWORD_TITLE_POLISH_TIMEOUT_MS = 90_000;
+const KEYWORD_CATEGORY_FIT_TIMEOUT_MS = 60_000;
 const KEYWORD_RESULT_CACHE_ENABLED = process.env.KEYWORD_RESULT_CACHE !== "0";
 const KEYWORD_RESULT_CACHE_VERSION = 9;
 const KEYWORD_RESULT_CACHE_FILE = path.join(process.cwd(), "data", "keyword-result-cache.json");
@@ -1049,7 +1050,7 @@ function isCategoryAppropriateCandidate(categoryId: string, option: KeywordOptio
     if (/부모님|가정의달|새학기|자외선|휴가|야외|연말/.test(source)) return false;
   }
   if (categoryId === "frames") {
-    if (/렌즈건조|렌즈충혈|원데이렌즈|콘택트렌즈|하드렌즈|소프트렌즈/.test(source)) return false;
+    if (/렌즈건조|렌즈충혈|원데이렌즈|콘택트렌즈|하드렌즈|소프트렌즈|선글라스|누진|다초점|변색렌즈/.test(source)) return false;
   }
   if (categoryId === "progressive") {
     if (/렌즈세척|렌즈보관|컬러렌즈|원데이렌즈|코패드|안경수리|김서림|여름|휴가|자외선/.test(source)) return false;
@@ -1068,6 +1069,8 @@ function isCategoryAppropriateCandidate(categoryId: string, option: KeywordOptio
     if (/안경케이스.*(원인|증상|시력|노안|근시|난시)/.test(source)) return false;
     if (/안경렌즈\s+원인|안경스크래치\s+처음/.test(source)) return false;
   }
+  // 카테고리 적합성(positive 매칭)은 하드코딩 정규식 대신 LLM 분류 단계에서 판정한다.
+  // (눈정보·안경이야기 같은 넓은 카테고리의 확장성을 위해.) 여기서는 구조/스팸/지역만 거른다.
   return !/산소투($|\s)/.test(source);
 }
 
@@ -2708,6 +2711,7 @@ export async function POST(request: NextRequest) {
     const firstBatchSeen = new Set<string>();
     firstBatch = [...firstBatch, ...aiSeedCandidates]
       .filter(isStructurallyUsableLlmCandidate)
+      .filter((candidate) => isCategoryAppropriateCandidate(category.id, candidate))
       .filter((candidate) => {
         const key = `${candidate.title}|${candidate.mainKeyword}`;
         if (firstBatchSeen.has(key)) return false;
@@ -2725,6 +2729,29 @@ export async function POST(request: NextRequest) {
         },
         { status: 500 }
       );
+    }
+
+    // LLM 카테고리 적합성 분류: 선택된 카테고리(${category.name})에 맞는 후보만 남긴다.
+    // 하드코딩 정규식 대신 LLM이 판정하므로 눈정보·안경이야기 같은 넓은 카테고리도 확장성 있게 본다.
+    // 실패하거나 결과가 비면 원본을 유지한다(graceful, 0개로 죽지 않게).
+    if (KEYWORD_AI_EXPANSION_ENABLED && firstBatch.length > 0) {
+      try {
+        const keepIndices = await selectCategoryFitIndices(
+          buildCategoryFitPrompt({
+            categoryName: category.name,
+            subcategories: category.subcategories,
+            candidates: firstBatch,
+          }),
+          KEYWORD_CATEGORY_FIT_TIMEOUT_MS
+        );
+        const keepSet = new Set(keepIndices);
+        const fitted = firstBatch.filter((_, index) => keepSet.has(index + 1));
+        if (fitted.length > 0) {
+          firstBatch = fitted;
+        }
+      } catch {
+        // 카테고리 분류 실패 시 firstBatch를 그대로 사용한다.
+      }
     }
 
     try {

@@ -49,6 +49,22 @@ export async function reviseKeywordTitles(
   }));
 }
 
+// 후보 중 선택된 카테고리에 맞는 항목의 1-based 번호 배열을 LLM이 판정해 돌려준다.
+export async function selectCategoryFitIndices(
+  prompt: string,
+  timeoutMs = 60_000
+): Promise<number[]> {
+  const text = await runClaude({ prompt, model: EDIT_MODEL, timeoutMs });
+  const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+  const jsonText = jsonMatch ? jsonMatch[1].trim() : text.trim();
+  const parsed = JSON.parse(jsonText);
+  const keep = Array.isArray(parsed) ? parsed : parsed.keep;
+  if (!Array.isArray(keep)) {
+    throw new Error("Category fit returned an unexpected response shape.");
+  }
+  return keep.map((n: unknown) => Number(n)).filter((n) => Number.isFinite(n));
+}
+
 export async function writeArticle(prompt: string, timeoutMs = 220_000): Promise<string> {
   return runClaude({ prompt, model: ARTICLE_MODEL, timeoutMs });
 }
