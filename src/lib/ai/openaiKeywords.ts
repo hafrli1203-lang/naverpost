@@ -45,8 +45,15 @@ export async function generateKeywordCandidatesWithGpt(params: {
   fallbackCandidates: KeywordOption[];
   targetCount?: number;
   batchFocus?: string;
+  depthDimensions?: string[];
 }): Promise<KeywordOption[] | null> {
   const targetCount = params.targetCount ?? 10;
+  const depthSection =
+    params.depthDimensions && params.depthDimensions.length > 0
+      ? `\n[이 카테고리의 전문 깊이 차원 — 서로 다른 차원으로 퍼뜨릴 것]\n${params.depthDimensions
+          .map((dimension) => `- ${dimension}`)
+          .join("\n")}\n`
+      : "";
   const countRule =
     targetCount === 1
       ? `- results 배열은 정확히 1개입니다. 기본 후보 중 가장 자연스럽고 검색 의도가 선명한 1개만 작성하세요.
@@ -84,6 +91,10 @@ ${fallbackLines}
 - 기본 후보에 없는 키워드도 검색 의도가 자연스러우면 적극적으로 추가하세요.
 - 단, 추가하는 키워드도 반드시 이 카테고리(${params.categoryName}) 제품·주제 범위 안이어야 합니다. 다른 카테고리 제품(안경테↔콘택트렌즈↔안경렌즈↔누진다초점↔선글라스 등)을 섞지 마세요.
 - 카테고리 안에서 세부 주제를 고르게 분산하세요. 같은 소재·같은 축(예: 안경테의 "얼굴형")에 후보를 3개 이상 몰지 말고 최대 2개까지만. 소재·무게·피팅·코받침·착용감·관리·브랜드·얼굴형처럼 서로 다른 각도로 골고루 만드세요.
+- 전문성 깊이: 아래 "전문 깊이 차원"에서 서로 다른 차원을 골라 다루세요. 한 차원에 2개를 넘기지 마세요.
+- 표면 반복 금지: "관리/세척/위생/생활 습관/사용감" 같은 범용 표면어만 반복하지 마세요. 각 키워드는 구체적 전문 포인트(스펙·기준 수치·메커니즘)가 드러나야 합니다.
+- 근접 중복 금지: 같은 메인 핵심어를 미세하게 바꿔 반복하지 마세요(예: "건조"와 "건조감"을 따로 만들지 말 것).
+${depthSection}
 - 브랜드명과 상품명은 기본 후보나 검색광고 조회에 근거가 있을 때만 사용하고, 모르는 브랜드를 지어내지 마세요.
 - 지역명(시/도/구/동/생활권/역세권/지하철역)을 키워드와 제목에 절대 넣지 마세요. 지역은 사용자가 최종 단계에서 직접 붙입니다.
 - 시즌형은 현재 월과 카테고리에 맞을 때만 넣고, 억지 계절어는 쓰지 마세요.

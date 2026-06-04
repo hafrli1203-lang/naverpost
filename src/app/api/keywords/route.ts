@@ -3,6 +3,7 @@ import fs from "fs/promises";
 import path from "path";
 import { generateKeywords, reviseKeywordTitles, selectCategoryFitIndices } from "@/lib/ai/claude";
 import { buildTitlePolishPrompt, buildCategoryFitPrompt } from "@/lib/prompts/titlePrompt";
+import { getCategoryDepthDimensions } from "@/lib/keywords/categoryDepth";
 import { generateKeywordCandidatesWithGpt } from "@/lib/ai/openaiKeywords";
 import { CATEGORIES } from "@/lib/constants";
 import { getShopById } from "@/lib/data/shops";
@@ -1309,10 +1310,17 @@ async function generateGptKeywordCandidatePool(params: {
   demandSignals: SearchVolumeSignal[];
   strategyGuide: string;
   fallbackCandidates: KeywordOption[];
+  depthDimensions?: string[];
 }): Promise<KeywordOption[]> {
   const seen = new Set<string>();
   const pool: KeywordOption[] = [];
   const focusCount = KEYWORD_GPT_MAX_ROUNDS * KEYWORD_GPT_CONCURRENCY;
+
+  // 풀이 한 전문 차원에 쏠리지 않도록 누적 단계에서 차원당 상한(3)을 둔다.
+  // 이렇게 해야 풀이 차원-다양해져, 최종 차원 캡(2)이 교체할 후보를 확보한다.
+  const dimLists = dimensionTokensFromList(params.depthDimensions ?? []);
+  const POOL_DIM_CAP = 3;
+  const poolDimCount = new Map<number, number>();
 
   const addCandidates = (candidates: KeywordOption[]): void => {
     const usable = normalizeGeneratedOptions(candidates).filter(
@@ -1321,6 +1329,16 @@ async function generateGptKeywordCandidatePool(params: {
     for (const candidate of usable) {
       const key = `${normalizeTitleForComparison(candidate.title)}|${normalizeKeywordKey(candidate.mainKeyword)}`;
       if (seen.has(key)) continue;
+      if (dimLists.length > 0) {
+        const dim = candidateDimensionIndex(
+          `${candidate.title} ${candidate.mainKeyword} ${candidate.subKeyword1} ${candidate.subKeyword2}`,
+          dimLists
+        );
+        if (dim !== -1) {
+          if ((poolDimCount.get(dim) ?? 0) >= POOL_DIM_CAP) continue;
+          poolDimCount.set(dim, (poolDimCount.get(dim) ?? 0) + 1);
+        }
+      }
       seen.add(key);
       pool.push(candidate);
     }
@@ -1356,8 +1374,13 @@ async function generateGptKeywordCandidatePool(params: {
               focusCount
             ),
             targetCount: KEYWORD_GPT_PER_CALL,
+            // 각 배치가 서로 다른 전문 깊이 차원을 맡게 해서 풀이 차원-다양하게 채워지도록 한다.
+            // (한 차원에 쏠리는 것을 생성 단계에서 막는다. depth 차원이 없으면 일반 관점 로테이션.)
             batchFocus:
-              GPT_KEYWORD_BATCH_FOCUSES[focusIndex % GPT_KEYWORD_BATCH_FOCUSES.length],
+              params.depthDimensions && params.depthDimensions.length > 0
+                ? `'${params.depthDimensions[focusIndex % params.depthDimensions.length]}' 전문 차원을 중심으로 다루세요. 다른 차원과 겹치지 않게.`
+                : GPT_KEYWORD_BATCH_FOCUSES[focusIndex % GPT_KEYWORD_BATCH_FOCUSES.length],
+            depthDimensions: params.depthDimensions,
           });
           return candidates ?? [];
         } catch {
@@ -1834,6 +1857,83 @@ function appendLooseLlmBackfill<T extends AnalyzedKeyword>(
 function getTitleEndingKey(title: string): string {
   const tokens = title.trim().split(/\s+/);
   return tokens[tokens.length - 1] ?? "";
+}
+
+// 카테고리 전문 깊이 차원별로 후보를 분류해, 한 차원에 maxPerDimension(기본 2)을 넘으면
+// 풀에서 다른 차원 후보로 교체한다(개수는 유지). "난시축"에 4개가 몰리는 쏠림을 막는다.
+const DIMENSION_STOPWORDS = new Set([
+  "관계", "안정성", "공급", "영향", "차이", "위험", "신호", "포인트", "항목", "흐름",
+  "요소", "과정", "장면", "정도", "순서", "방식", "이유", "원인", "부분", "관리", "확인",
+]);
+
+function dimensionTokensFromList(dimensions: string[]): string[][] {
+  return dimensions.map((dimension) =>
+    (dimension.match(/[가-힣A-Za-z0-9]{2,}/g) ?? []).filter(
+      (token) => !DIMENSION_STOPWORDS.has(token)
+    )
+  );
+}
+
+function getDimensionTokenLists(categoryId: string): string[][] {
+  return dimensionTokensFromList(getCategoryDepthDimensions(categoryId));
+}
+
+function candidateDimensionIndex(source: string, lists: string[][]): number {
+  let best = -1;
+  let bestScore = 0;
+  lists.forEach((tokens, index) => {
+    const score = tokens.reduce((sum, token) => (source.includes(token) ? sum + 1 : sum), 0);
+    if (score > bestScore) {
+      bestScore = score;
+      best = index;
+    }
+  });
+  return best;
+}
+
+function diversifyByDimension<T extends AnalyzedKeyword>(
+  results: T[],
+  pool: T[],
+  categoryId: string,
+  maxPerDimension = 2
+): T[] {
+  const lists = getDimensionTokenLists(categoryId);
+  if (lists.length === 0) return results;
+
+  const sourceOf = (option: KeywordOption) =>
+    `${option.title} ${option.mainKeyword} ${option.subKeyword1} ${option.subKeyword2}`;
+  const out: T[] = [];
+  const count = new Map<number, number>();
+  const usedKeys = new Set(results.map((item) => `${item.title}|${item.mainKeyword}`));
+  const replacementPool = pool.filter(
+    (cand) => !hasRegisteredStoreOverlap(cand) && isBroadlyUsableCandidate(cand)
+  );
+  const bump = (dim: number) => count.set(dim, (count.get(dim) ?? 0) + 1);
+
+  for (const item of results) {
+    const dim = candidateDimensionIndex(sourceOf(item), lists);
+    // 차원 미매칭(-1)은 캡하지 않는다(일반/다양 주제로 본다).
+    if (dim === -1 || (count.get(dim) ?? 0) < maxPerDimension) {
+      out.push(item);
+      bump(dim);
+      continue;
+    }
+    const replacement = replacementPool.find((cand) => {
+      const key = `${cand.title}|${cand.mainKeyword}`;
+      if (usedKeys.has(key)) return false;
+      const candDim = candidateDimensionIndex(sourceOf(cand), lists);
+      return candDim === -1 || (count.get(candDim) ?? 0) < maxPerDimension;
+    });
+    if (replacement) {
+      out.push(replacement);
+      usedKeys.add(`${replacement.title}|${replacement.mainKeyword}`);
+      bump(candidateDimensionIndex(sourceOf(replacement), lists));
+    } else {
+      out.push(item);
+      bump(dim);
+    }
+  }
+  return out;
 }
 
 // 같은 끝맺음이 maxPerEnding(기본 2)을 넘으면, 풀에서 다른 끝맺음 후보로 교체한다.
@@ -2672,6 +2772,7 @@ export async function POST(request: NextRequest) {
           demandSignals,
           strategyGuide,
           fallbackCandidates: fallbackKeywordSeeds,
+          depthDimensions: getCategoryDepthDimensions(category.id),
         });
         if (aiSeedCandidates.length > 0) {
           baseCandidates = [...aiSeedCandidates, ...fallbackKeywordSeeds];
@@ -2856,6 +2957,8 @@ export async function POST(request: NextRequest) {
     diverseRankedResults = dedupeFinalKeywordResults(diverseRankedResults, representationPool, productHeads);
     diverseRankedResults = appendLooseLlmBackfill(diverseRankedResults, representationPool);
     // 같은 명사형 끝맺음(원인/요소/문제 등)이 3개 이상 몰리면 다른 끝맺음 후보로 교체(개수 유지).
+    // 전문 깊이 차원이 한쪽에 쏠리지 않게(예: 난시축 4개) 분산 → 그 다음 끝맺음 분산.
+    diverseRankedResults = diversifyByDimension(diverseRankedResults, representationPool, category.id);
     diverseRankedResults = diversifyTitleEndings(diverseRankedResults, representationPool);
 
     // 최종 제목을 Opus로 자연스러움·오타·비문 교정. 키워드 토큰 보존 + 쉼표 금지 +
