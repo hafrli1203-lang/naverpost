@@ -12,6 +12,7 @@ import { fetchBlogTitles } from "@/lib/naver/rssParser";
 import { buildArticleBrief } from "@/lib/briefs/articleBrief";
 import { analyzeCompetitorMorphology } from "@/lib/analysis/competitorMorphology";
 import { inferSmartBlockSubKeywords } from "@/lib/analysis/smartBlock";
+import { getCategoryDepthDimensions } from "@/lib/keywords/categoryDepth";
 import { analyzeAutocompleteIndex } from "@/lib/analysis/autocompleteIndex";
 import { CATEGORIES } from "@/lib/constants";
 import { getShopById } from "@/lib/data/shops";
@@ -324,6 +325,7 @@ export async function POST(request: NextRequest) {
             externalReference,
             glossaryHint,
             brief,
+            depthDimensions: getCategoryDepthDimensions(category.id),
           });
 
     let rawContent: string | undefined;

@@ -88,6 +88,7 @@ export function buildArticlePrompt(params: {
   externalReference?: string;
   glossaryHint?: string;
   brief?: ArticleBrief;
+  depthDimensions?: string[];
 }): string {
   const {
     title,
@@ -103,6 +104,7 @@ export function buildArticlePrompt(params: {
     externalReference,
     glossaryHint,
     brief,
+    depthDimensions,
   } = params;
 
   const sectionCount = getSectionCount(charCount);
@@ -175,6 +177,14 @@ export function buildArticlePrompt(params: {
         }\n`
       : "";
 
+  // 전문 깊이: 카테고리 전문 차원을 본문에 풀어쓰게 하고 추상 라벨을 금지한다.
+  const depthSection =
+    depthDimensions && depthDimensions.length > 0
+      ? `\n[전문 깊이 — 추상 라벨 금지]\n- 이 카테고리의 전문 차원: ${depthDimensions.join(
+          ", "
+        )}\n- 본문은 "관리/사용감/생활 습관" 같은 추상 라벨만 나열하지 말고, 위 전문 차원의 구체적 스펙·기준 수치·작동 원리로 풀어 설명하세요(사실 기반).\n- 추측·일반론 대신 메커니즘과 구체 기준을 제시하세요. 단 안경원은 의료기관이 아니므로 진단·치료 단정은 피합니다.\n`
+      : "";
+
   const internalBriefSection = brief
     ? `\n[내부 작성 브리프]\n- 이번 글의 검색의도 축: ${brief.title}\n- 제목 활성화 규칙:\n${brief.titleMorphologyGuide
         .map((item) => `  - ${item}`)
@@ -200,7 +210,7 @@ ${glossarySection}${topicThesisSection}
 [조사 자료]
 ${researchData}
 ${externalRefSection}
-${internalBriefSection}${competitorStructureSection}${smartBlockSection}
+${internalBriefSection}${competitorStructureSection}${smartBlockSection}${depthSection}
 ────────────────────────────────────
 [작성 지침]
 ────────────────────────────────────
@@ -217,8 +227,10 @@ ${internalBriefSection}${competitorStructureSection}${smartBlockSection}
 
 문단 끊기: 모바일 가독성을 위해 한 문단은 최대 3~4줄을 넘기지 말고 줄바꿈(엔터)을 자주 사용하세요.
 
-2. 문체 및 톤앤매너
+2. 문체 및 톤앤매너 (어체 — 절대 규칙, 무조건 반영)
 
+※ 아래 말투를 본문 전체에 100% 적용하세요. 매장 안내 블록(주소·시간 등)을 제외한 모든 문장이 이 어미 계열로 끝나야 합니다.
+※ 다른 어미체를 절대 섞지 마세요(예: "해요체"를 골랐으면 "합니다체"를 한 문장도 쓰지 말 것, 반대도 동일).
 ${toneGuide}
 
 쉼표(,) 절대 금지: 문장의 호흡을 쉼표로 끊지 말고 적절한 접속사('그런데' '사실은' '그래서' '왜냐하면')와 연결 어미('~해서' '~하니까' '~한데')를 사용하여 물 흐르듯 이어지게 하세요.
