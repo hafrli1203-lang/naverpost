@@ -85,9 +85,19 @@ function stripLeadingTitleLine(content: string, title: string): string {
   return content.trim();
 }
 
+// Windows는 프로세스 초기화 실패(0xC0000142 STATUS_DLL_INIT_FAILED 등)를 큰 종료코드 +
+// 빈 stderr("no stderr")로 던진다. 이는 사용량/인증 문제가 아니라 일시적 spawn 실패이므로
+// 별도로 분류해 재시도·진단이 엉키지 않게 한다.
+function isProcessCrash(message: string): boolean {
+  return /exited with code -?\d+: no stderr/i.test(message);
+}
+
 function summarizeGenerationError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error ?? "");
-  if (/no stderr|quota|limit|usage|rate|credit|billing|exceeded/i.test(message)) {
+  if (isProcessCrash(message)) {
+    return "Claude CLI 프로세스 비정상 종료(시스템 자원/spawn 일시 오류)";
+  }
+  if (/quota|limit|usage|rate|credit|billing|exceeded/i.test(message)) {
     return "Claude CLI 사용량/인증 문제";
   }
   if (/timed out|timeout/i.test(message)) {
@@ -335,11 +345,20 @@ export async function POST(request: NextRequest) {
     } catch (error) {
       const message = error instanceof Error ? error.message : "";
       let retryError: unknown = error;
-      if (/timed out|timeout/i.test(message)) {
+      const timedOut = /timed out|timeout/i.test(message);
+      const crashed = isProcessCrash(message);
+      // 시간 초과는 압축 재시도, 프로세스 비정상 종료(0xC0000142 등)는 잠깐 쉬고 동일
+      // 프롬프트로 1회 재시도한다. 크래시는 즉시 실패하므로 예산이 거의 그대로 남아 있다.
+      if (timedOut || crashed) {
+        if (crashed) {
+          await new Promise((resolve) => setTimeout(resolve, 1500));
+        }
         try {
           rawContent = await writeArticle(
-            `${prompt}\n\n[재시도 지시]\n이전 시도가 시간 초과되었습니다. 위 조건은 유지하되 문단을 더 압축하고 표는 1개만 사용하세요. 본문만 출력하세요.`,
-            ARTICLE_RETRY_TIMEOUT_MS
+            timedOut
+              ? `${prompt}\n\n[재시도 지시]\n이전 시도가 시간 초과되었습니다. 위 조건은 유지하되 문단을 더 압축하고 표는 1개만 사용하세요. 본문만 출력하세요.`
+              : prompt,
+            timedOut ? ARTICLE_RETRY_TIMEOUT_MS : ARTICLE_WRITE_TIMEOUT_MS
           );
           retryError = undefined;
         } catch (secondError) {
