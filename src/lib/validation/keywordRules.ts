@@ -27,23 +27,12 @@ function findProhibitedTitleTerms(option: KeywordOption): string[] {
   return Array.from(new Set(terms.filter((term) => source.includes(term))));
 }
 
-function selectKeywordAnchor(mainWords: string[]): string {
-  const [first, second] = mainWords;
-  if (!second) return first ?? "";
-  if (
-    /^(10대|20대|30대|40대|50대|60대|여자|남자|학생|청소년|직장인|중년|부모님|어머니|아버지|어린이|운전자|초보|처음|출근|운동|장시간|야간운전|고도수|블루라이트차단|가벼운|튼튼한|편한|편안한|어지러운|큰사이즈|빅사이즈|오버사이즈|운전용|업무용|독서용|실내용)$/.test(first)
-  ) {
-    return second;
-  }
-  return first;
-}
-
 /**
- * Validates a keyword option against the 7 rules from the spec.
+ * Validates a keyword option against the rules from the spec.
  *
  * Rules:
  * 1. All keywords must be exactly 2-word combinations
- * 2. Main keyword's first word must appear in both sub keywords
+ * 2. (삭제) 서브 키워드의 메인 기준어 반복 요구 — 본문 확장 소재라 다양성 우선
  * 3. Main keyword must appear verbatim in the title
  * 4. Sub keywords are body expansion hints. At least one sub-keyword core
  *    should be visible in the title; forcing both makes titles read like
@@ -85,25 +74,11 @@ export function validateKeywordOption(
     });
   }
 
-  // Rule 2: Main keyword's anchor must appear in both sub keywords. In
-  // target/product forms such as "부모님 노안안경", the product word is the
-  // anchor, not the target word.
-  // Rule 2 (완화): 서브 키워드는 본문 확장 소재이므로 둘 다 메인 기준어를 강제하지
-  // 않는다. 자연스러운 키워드 다양성을 위해 서브 중 "최소 한 개"에만 메인 기준어가
-  // 들어가면 통과시킨다(주제 응집성 최소 보장).
-  if (mainWords.length >= 1) {
-    const mainAnchor = selectKeywordAnchor(mainWords);
-    if (
-      mainAnchor &&
-      !subKeyword1.includes(mainAnchor) &&
-      !subKeyword2.includes(mainAnchor)
-    ) {
-      failures.push({
-        rule: "rule2",
-        reason: `서브 키워드 중 적어도 하나에는 메인 키워드의 기준어 "${mainAnchor}"가 포함되어야 합니다`,
-      });
-    }
-  }
+  // Rule 2 (삭제): 서브 키워드는 본문 확장 소재이므로 메인 기준어 반복을 요구하지 않는다.
+  // 기존 "서브 중 최소 하나에 메인 기준어 포함" 규칙은 grounding으로 다양해진 전문 서브
+  // (예: 메인 "아큐브렌즈 산소투과율" + 서브 "렌즈 Dk/t" / "각막 산소공급")를 전부 탈락시키고,
+  // 단조로운 "메인+착용감" 반복만 통과시켜 키워드 품질을 떨어뜨렸다. 주제 응집성은 메인 키워드가
+  // 제목에 원형 포함(rule3)되는 것으로 충분히 보장되므로 앵커 반복 요구를 제거한다.
 
   // Rule 3: Main keyword must appear verbatim in the title
   if (!title.includes(mainKeyword)) {

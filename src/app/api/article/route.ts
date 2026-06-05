@@ -85,6 +85,28 @@ function stripLeadingTitleLine(content: string, title: string): string {
   return content.trim();
 }
 
+// 본문 논지축(thesis)은 사용자가 선택·편집한 후보가 진실의 원천이다. 워크플로우 전체가
+// 공유하는 단일 topic은 키워드 생성 시 한 번 정해진 뒤 제목/키워드를 수정해도 갱신되지
+// 않으므로, stale topic이 본문을 옛 주제로 끌고 가 "수정해도 기존 값으로 글이 써지는"
+// 문제가 있었다. 공유 topic이 후보의 메인 키워드를 (공백 차이 무관) 담고 있을 때만 더
+// 풍부한 논지로 채택하고, 그 외에는 편집된 후보 제목을 논지로 사용한다.
+function deriveArticleThesis(
+  sharedTopic: string | undefined,
+  keyword: KeywordOption
+): string {
+  const title = keyword.title?.trim() ?? "";
+  const topic = sharedTopic?.trim() ?? "";
+  if (!topic) return title;
+  if (!title) return topic;
+
+  const stripSpaces = (value: string) => value.replace(/\s+/g, "");
+  const mainCore = stripSpaces(keyword.mainKeyword ?? "");
+  if (mainCore && stripSpaces(topic).includes(mainCore)) {
+    return topic;
+  }
+  return title;
+}
+
 // Windows는 프로세스 초기화 실패(0xC0000142 STATUS_DLL_INIT_FAILED 등)를 큰 종료코드 +
 // 빈 stderr("no stderr")로 던진다. 이는 사용량/인증 문제가 아니라 일시적 spawn 실패이므로
 // 별도로 분류해 재시도·진단이 엉키지 않게 한다.
@@ -283,11 +305,15 @@ export async function POST(request: NextRequest) {
           }
         : undefined;
 
+    // 선택·편집된 후보를 진실의 원천으로 삼아 본문 논지축을 도출한다(공유 topic이 stale일
+    // 때 옛 주제로 본문이 써지는 문제 방지).
+    const effectiveThesis = deriveArticleThesis(topic, keyword);
+
     const brief = buildArticleBrief({
       keyword,
       shop,
       category,
-      topic: topic || keyword.title,
+      topic: effectiveThesis,
       articleType,
       charCount,
       tone: tone as "standard" | "friendly" | "casual",
@@ -309,7 +335,7 @@ export async function POST(request: NextRequest) {
             subKeyword2: keyword.subKeyword2,
             shop,
             category,
-            topic: topic || keyword.title,
+            topic: effectiveThesis,
             researchData,
             charCount,
             tone: tone as "business" | "friendly" | "expert" | undefined,
@@ -328,7 +354,7 @@ export async function POST(request: NextRequest) {
             subKeyword2: keyword.subKeyword2,
             shop,
             category,
-            topic: topic || keyword.title,
+            topic: effectiveThesis,
             researchData,
             charCount,
             tone: tone as "standard" | "friendly" | "casual" | undefined,

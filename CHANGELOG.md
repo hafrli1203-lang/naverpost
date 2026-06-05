@@ -5,6 +5,123 @@
 
 ---
 
+## v1.7 (2026-06-04)
+
+### 본문이 수정된 제목/키워드를 무시하고 옛 주제로 써지는 버그
+
+**버그(#7):** 사용자가 키워드 후보의 제목/키워드를 수정·저장해도 본문은 기존(원본) 주제로 써짐.
+
+**근본 원인:**
+- 본문 프롬프트(`articlePrompt.ts`)에서 `topic`이 "글 전체를 관통하는 논지축"으로 모든 소제목·문단을 지배함
+- 그런데 `topic`은 워크플로우 전체가 공유하는 단일 값(`WorkflowState.topic`)으로, 키워드 생성 시 한 번 정해진 뒤 사용자가 제목/키워드를 수정해도 갱신되지 않음 (`KeywordOption`에는 후보별 topic 필드 없음)
+- `app/api/article/route.ts`가 `topic: topic || keyword.title`로 stale한 공유 topic을 편집된 제목보다 우선 사용 → 편집값(`keyword.title`/`mainKeyword`)은 전달되지만 본문 논지는 옛 주제를 따라감
+- 부수 효과: 화면 제목(후보별 `keyword.title`)과 본문(공유 topic)이 따로 놀아 제목·키워드가 무관해 보임
+
+**변경사항:**
+- `app/api/article/route.ts`: `deriveArticleThesis(sharedTopic, keyword)` 헬퍼 신규. 본문 논지축을 선택·편집된 후보에서 도출하고, 공유 topic은 후보의 메인 키워드를 (공백 차이 무관) 담고 있을 때만 보조 논지로 채택. `brief`·`buildArticlePrompt`·`buildPromoPrompt` 3곳의 `topic` 인자를 `effectiveThesis`로 통일
+
+**검증:** `tsc --noEmit` 0 에러.
+
+**남은 작업:** 제목·키워드 의미 일관성 자체(생성 단계, BUG #8)는 키워드 생성 프롬프트 보강으로 별도 진행 예정.
+
+### 실제 상위 노출 제목을 키워드/제목 생성의 '방향 참고'로 활용 (경량)
+
+**문제(#8 일부):** 생성된 제목/키워드가 실제 네이버에 올라온 글들과 동떨어져 이상함.
+
+**근본 원인:**
+- 실제 상위 노출 제목(`fetchCompetitorTitles`)을 수집은 하지만 **"피하라(중복 회피)"용으로만** 사용. "독자가 실제로 찾는 소재·의도의 방향 참고"로는 미사용
+- 화면에 뜨는 최종 후보는 대부분 GPT 생성 경로(`generateKeywordCandidatesWithGpt`)에서 나오는데(`route.ts:2797` — GPT 성공 시 Claude 편집 프롬프트 건너뜀), **이 GPT 프롬프트에는 경쟁 제목이 전혀 주입되지 않음.** 하드코딩 키워드 조합 + 추상 규칙만으로 생성
+- 참고: `titlePrompt.ts:buildTitleGenerationPrompt`는 호출처 없는 죽은 코드(수정 대상 아님)
+
+**변경사항:**
+- `lib/ai/openaiKeywords.ts`: `generateKeywordCandidatesWithGpt`에 `competitorTitles` 인자 추가. 실제 상위 제목을 `[독자가 찾는 소재·의도의 지도]` 섹션으로 프롬프트에 주입 — "소재·의도는 겨냥하되 표현·각도·조합은 차별화" 프레이밍
+- `app/api/keywords/route.ts`: `generateGptKeywordCandidatePool`에 `competitorTitles` 전달 배선 + 호출처(`competitorList`) 연결. Claude 폴백 프롬프트(`buildCandidateEditingPrompt`)의 경쟁 제목 섹션도 "피하라"에서 "방향 참고 + 차별화"로 재프레이밍
+
+**검증:** `tsc --noEmit` 0 에러. (실제 생성 품질은 라이브 키워드 생성으로 추가 확인 필요 — Naver/Codex CLI 연동)
+
+### 상위 정보성 글 '본문 내용'을 Stage 1 키워드/제목 생성에 grounding (구조화 신호 + 병렬·폴백)
+
+**요청:** 실제 상위노출 정보성 글의 본문 내용을 가져와 키워드/제목 방향을 잡을 것. (지역명 등은 사용자가 최종에 직접 추가)
+
+**근거:** 상위글 본문을 실제로 스크래핑·분석하는 `analyzeCompetitorMorphology()`(상위 3글×1200자 → `bodyHighlights`/`contentBlocks`/`titleAngles` 추출)가 이미 있으나 Stage 2(본문)에서만 사용. Stage 1은 본문 내용 0이었음.
+
+**변경사항:**
+- `lib/ai/openaiKeywords.ts`: `generateKeywordCandidatesWithGpt`에 `topPostContent`(bodyHighlights/contentBlocks/titleAngles) 인자 추가. `[실제 상위 정보성 글이 다루는 소재·구조]` 섹션으로 GPT 프롬프트에 주입 — "이 소재 영역을 겨냥하되 표현·각도·조합은 차별화". 원문이 아니라 구조화 신호만 주입(광고·지역명 노이즈/베끼기 방지)
+- `app/api/keywords/route.ts`: `analyzeCompetitorMorphology` import. 시드 `effectiveTopic || category.name`로 기존 수집 Promise.all에 **병렬** 추가 + **48초 타임아웃 race** 폴백. `available`일 때만 `topPostContent` 도출 → `generateGptKeywordCandidatePool` 배선. 실패/초과/unavailable 시 null → 제목 방향참고만 남아 속도·생성 회귀 없음 (maxDuration 360s, 병렬이라 +최대 48s)
+  - **타임아웃 18→48초 (라이브 검증으로 수정)**: 18초로는 항상 timeout. 내부 Claude 형태소 분석만 35초 + 본문 fetch라 Stage 2와 동일한 ~45초 필요. 격리 측정 결과 `콘택트렌즈` 시드 24.7초/`available`.
+
+**설계 문서:** `docs/designs/stage1-top-post-content-grounding.md`
+
+**검증 (라이브, 매장 top50jn / 카테고리 contacts):**
+- 모폴로지 `status: available`, sampleSize 10, bodySampleSize 3, **grounded: true**. 본문 소재(건조·충혈·이물감·적응·착용시간 등 실제 상위글 부작용/착용감 각도) 추출 확인.
+- 생성 10개 전부 제목↔메인키워드 의미 연결됨(예: `알콘렌즈 충혈`→"알콘렌즈 충혈이 반복된다면 산소투과율부터 따져봐야 합니다"). 실제 렌즈 브랜드(아큐브·알콘·바슈롬·쿠퍼비전) grounding. 논지 topic도 후보 기반 도출.
+- 전체 응답 ~213초(maxDuration 360s 이내). `tsc --noEmit` 0 에러.
+
+**전체 카테고리 라이브 검증 (2026-06-05, 매장 top50jn, 6개 카테고리):**
+- grounding **6/6 전부 `available` + `grounded:true`** (각 검색 10건 + 본문 3건 스크래핑). 응답 100~339초로 모두 maxDuration 이내.
+- 제목↔메인키워드 의미 연결 6/6 양호. 실제 광학 스펙 grounding 확인: 콘택트=산소투과율·베이스커브·난시축, 안경렌즈=PD위치·동공간거리·블루라이트스펙, 누진=명시야폭·프레임높이, 눈정보=안압·눈물막파괴시간.
+- **개수 편차(기존 이슈, 본 변경과 무관)**: frames/lenses/contacts/eye-info/progressive = 각 10개. **glasses-story = 3개**(응답 100초, grounded:true이나 후보가 적게 생성됨). 안경이야기는 이전부터 소재 쏠림으로 개수 편차가 있던 카테고리 — 별도 튜닝 대상.
+
+### rule2(서브 앵커 반복) 제거 — grounding 서브가 대량 무효 처리되던 문제
+
+**버그(#9):** grounding으로 서브 키워드가 전문적·다양해지자(예: 메인 `아큐브렌즈 산소투과율` + 서브 `렌즈 Dk/t`/`각막 산소공급`) rule2 "서브 중 최소 하나에 메인 기준어 포함"에 걸려 대량 무효(contacts 10개 중 7개 X). rule2는 단조로운 `메인+착용감` 반복만 통과시켜 키워드 품질을 떨어뜨림. 또 백필 단계가 `validation.isValid`만 채우므로(route.ts 1790/1817/2030/2065/2099), 제품 카탈로그 없는 glasses-story는 전부 rule2 실패→백필 불가→3개로 마감.
+
+**변경사항:**
+- `lib/validation/keywordRules.ts`: rule2(앵커 반복 요구, 88~106행) 삭제. 미사용된 `selectKeywordAnchor` 헬퍼도 제거. 주제 응집성은 rule3(메인 키워드 제목 원형 포함)로 보장. rule1(2단어 체크)·rule3 유지.
+
+**검증 (라이브, rule2 제거 후 재실행):**
+- **contacts: 무효 7개 → 0개. 10/10 전부 유효** (함수율·BC·산소투과율·지질침전·축회전·단백질침전 전문 스펙 통과).
+- **glasses-story: 3개 → 7개**(유효 0→2). 남은 5개는 **rule3** 실패(메인 `안경힌지 관리`/`코패드 원인` 등이 제목에 원형 분리됨) — rule2와 무관한 별개 생성 품질 이슈. rule3는 SEO 핵심이라 유지. 안경이야기 "명사+관리/원인/방법" 키워드형의 제목 원형 보존은 생성 단계 튜닝 대상(미해결).
+- `tsc --noEmit` 0 에러.
+
+### 제목 폴리시 rule3 복구 — 분리된 메인 키워드를 원형으로 자연 복구 (#10)
+
+**버그:** 안경이야기 등에서 메인 키워드가 제목에 분리돼(`안경힌지가...관리`) rule3 탈락. 원인은 두 가지 불일치 — (1) Opus 제목 폴리시 채택 게이트가 "메인 토큰이 흩어져 있어도 통과"(route.ts, 기존 `mainTokens.every(t=>next.includes(t))`)라 분리 제목을 막지 못함. (2) 검증(`validateKeywordOption`)이 폴리시(route.ts ~3006)보다 먼저(~2542) 계산돼, 폴리시가 제목을 고쳐도 `isValid`가 옛 값으로 남음.
+
+**변경사항 (하드코딩/템플릿 없이 모델 기반 복구):**
+- `lib/prompts/titlePrompt.ts buildTitlePolishPrompt`: "main 두 단어를 띄어쓰기 그대로 붙여서(인접) 넣고, 분리돼 있으면 자연스럽게 붙도록 다시 쓰되 비문 금지" 지시 추가.
+- `app/api/keywords/route.ts` 폴리시 채택부: 게이트를 `next.includes(item.mainKeyword)`(원형 인접 포함)으로 강화 + 제목 교체 시 `validateKeywordOption` **재계산**.
+
+**검증 (라이브 재실행):**
+- **glasses-story**: 제목이 메인 키워드 원형 포함으로 복구("안경관리 중성세제가...", "안경세척 초음파를...", "안경김서림 세척 뒤에도..."). 유효 비율 2/7 → **3/4**. 하드코딩 아닌 자연·다양한 문장. (남은 무효 1개는 서브에 금칙어 "예방" — 정상 검증)
+- **contacts: 10/10 유효 유지**(회귀 없음).
+- `tsc --noEmit` 0 에러.
+
+**남은 이슈(별개, 미해결):** glasses-story 총 개수가 4~7개로 불안정·낮음(목표 10). 제품 카탈로그 없는 카테고리라 후보 풀이 작은 생성 단계 볼륨 문제. 하드코딩 폴백은 사용자가 명시적으로 거부 → 비하드코딩 볼륨 개선(생성 라운드/카테고리-핏 필터 완화)은 별도 검토 필요.
+
+### GPT 수렴 깨기 — avoidKeywords로 좁은 카테고리 볼륨 개선 (#11)
+
+**진단(단계별 깔때기 로그):** glasses-story 개수 부족은 카테고리/매장 로직이 아니라 **GPT 생성 수렴**이 원인. top50jn 안경이야기에서 GPT가 매 라운드 거의 같은 후보(원시 8개)를 뱉어 dedup에 전멸 → 풀이 4개에서 안 늘고 조기 종료(`pool.length===before` break). 반면 jinysgongju는 GPT가 다양하게 나와 풀 20 → **10/10**(즉 카테고리는 정상, 매장별 GPT 출력 다양성 차이).
+
+**변경사항 (하드코딩/dedup완화 없이 다양성 유도):**
+- `lib/ai/openaiKeywords.ts`: `avoidKeywords` 인자 + `[이미 만든 키워드 — 절대 겹치지 말 것]` 섹션. GPT에 누적 후보를 알려 새 소재로만 생성하게 유도.
+- `app/api/keywords/route.ts` GPT 풀 루프: 매 라운드 현재 풀의 메인 키워드를 `avoidKeywords`로 전달 → 라운드 간 수렴 차단.
+
+**검증 (top50jn glasses-story 재실행):** GPT 정상 동작 시 4개→**10/10**(수렴 해소). 제목 다양·자연(학생 안경수리·안경나사 관리·안경힌지 관리·안경케이스 관리·코패드 관리 등, 반복 아님).
+
+**남은 변동성(별개 인프라):** Codex CLI가 가끔 원시 0개 반환(aiSeed 0, 빠른 102초 실행) → Claude 폴백으로 8개(유효 6) 산출(이전 2~3개보다 개선). 키워드 로직 무관한 Codex 간헐 실패라 하드코딩으로 메우지 않음.
+
+### 다른 매장 검증 (jinysgongju)
+- glasses-story·contacts 모두 **10/10 유효**. #7~#11 수정이 두 번째 매장에서 그대로 동작 확인.
+
+### GPT 생성 안정화 — 정체 허용 + 시간 예산 (#12)
+
+**진단(Codex 직접 측정):** "Codex가 0개 반환"은 **현재 재현 안 됨**(~40회 호출 FAIL 0건, 각 46~53초/4개 정상 반환). 과거 aiSeed 0은 일시적 transient였음. 실제 변동 원인은 좁은 카테고리(top50jn 안경이야기)에서 GPT 풀이 라운드별로 정체→조기 break하던 것. (`KEYWORD_FAST_MODE` 기본 ON이지만 생성 개수와 무관 — 외부신호 enrichment TOP_K만 제어.)
+
+**변경사항 (route.ts GPT 풀 루프, 하드코딩 없음):**
+- **정체 허용(STALL_LIMIT=2)**: 1라운드 정체로 즉시 멈추지 않고 연속 2회까지 더 시도. 갱신된 `avoidKeywords` 제외목록으로 새 후보를 낼 기회 부여.
+- **시간 예산(POOL_TIME_BUDGET_MS=200s)**: 추가 라운드가 maxDuration(360s)을 잠식하지 않도록 생성 단계를 200초로 제한(이후 분석·폴리시·외부신호 ~140s 확보).
+- `openaiKeywords.ts` Codex 타임아웃 90→120s(정상 46~53초라 여유, 가끔 느릴 때 흡수).
+
+**검증 (top50jn glasses-story 반복):**
+- 시간: 3회 모두 **360초 이내**(283/146/137초). 직전 stall-only 수정에서 370초로 maxDuration 초과하던 회귀 제거.
+- 개수: 10/7/8(유효 10/5/6). 원본 2~4개 대비 개선·안정. 단 좁은 카테고리 특성상 항상 10 보장은 불가(GPT가 distinct 소재를 다 못 낼 때 7~8). jinysgongju는 10/10 — 카테고리 자체는 정상, top50jn의 소재 다양성 한계.
+- `tsc --noEmit` 0 에러. 임시 진단 전부 제거.
+
+**결론:** "Codex 0 반환"은 인프라 일시 현상으로 현재 미발생. 생성 단계를 정체-허용+시간예산으로 안정화해 안전하게(타임아웃 없이) 더 채우도록 개선. 항상 10개는 하드코딩 없이는 불가(사용자 거부 방침 유지).
+
+---
+
 ## v1.6 (2026-05-22)
 
 ### 키워드 맥락 조사 강화 + 채팅 기반 재수정

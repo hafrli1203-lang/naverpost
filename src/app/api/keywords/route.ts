@@ -21,6 +21,7 @@ import {
   inferShopRegion,
 } from "@/lib/keywords/seasonalStrategy";
 import { inferSmartBlockSubKeywords } from "@/lib/analysis/smartBlock";
+import { analyzeCompetitorMorphology } from "@/lib/analysis/competitorMorphology";
 import { analyzeTitleSimilarity } from "@/lib/analysis/titleSimilarity";
 import { combineKeywords } from "@/lib/keywords/keywordCombiner";
 import {
@@ -1311,6 +1312,12 @@ async function generateGptKeywordCandidatePool(params: {
   strategyGuide: string;
   fallbackCandidates: KeywordOption[];
   depthDimensions?: string[];
+  competitorTitles?: string[];
+  topPostContent?: {
+    bodyHighlights: string[];
+    contentBlocks: string[];
+    titleAngles: string[];
+  } | null;
 }): Promise<KeywordOption[]> {
   const seen = new Set<string>();
   const pool: KeywordOption[] = [];
@@ -1345,9 +1352,21 @@ async function generateGptKeywordCandidatePool(params: {
   };
 
   const targetPool = TARGET_RESULT_COUNT * 2;
+  // 한 라운드가 정체(새 후보 0)해도 즉시 포기하지 않는다. 갱신된 avoidKeywords 제외목록으로
+  // 다음 라운드가 새 소재를 낼 수 있으므로, 연속 정체 STALL_LIMIT회까지는 더 시도한다.
+  // (좁은 카테고리에서 Codex가 가끔 겹치는 후보를 반환해 풀이 덜 찬 채 멈추던 문제 완화.)
+  // 단, 생성 단계가 maxDuration(360s)을 잠식하지 않도록 시간 예산(150s)을 둔다. 이후 분석·폴리시·
+  // 외부신호 단계가 최대 ~170s까지 걸리므로(실측 glasses-story 369s = 생성200+후단169), 생성을
+  // 150s로 제한해 합산이 360s를 넘지 않게 한다(최악 ~320s, 안전 마진 확보).
+  const STALL_LIMIT = 2;
+  const POOL_TIME_BUDGET_MS = 150_000;
+  const poolStartedAt = Date.now();
+  let stallStreak = 0;
   for (
     let round = 0;
-    round < KEYWORD_GPT_MAX_ROUNDS && pool.length < targetPool;
+    round < KEYWORD_GPT_MAX_ROUNDS &&
+    pool.length < targetPool &&
+    Date.now() - poolStartedAt < POOL_TIME_BUDGET_MS;
     round += 1
   ) {
     const remaining = targetPool - pool.length;
@@ -1374,6 +1393,10 @@ async function generateGptKeywordCandidatePool(params: {
               focusCount
             ),
             targetCount: KEYWORD_GPT_PER_CALL,
+            competitorTitles: params.competitorTitles,
+            topPostContent: params.topPostContent,
+            // 이미 풀에 쌓인 후보를 GPT에 알려 "겹치지 말고 새 소재로" 유도(수렴 깨기).
+            avoidKeywords: pool.map((candidate) => candidate.mainKeyword),
             // 각 배치가 서로 다른 전문 깊이 차원을 맡게 해서 풀이 차원-다양하게 채워지도록 한다.
             // (한 차원에 쏠리는 것을 생성 단계에서 막는다. depth 차원이 없으면 일반 관점 로테이션.)
             batchFocus:
@@ -1391,9 +1414,14 @@ async function generateGptKeywordCandidatePool(params: {
 
     results.forEach(addCandidates);
 
-    // 이번 라운드에서 새 후보가 하나도 늘지 않으면(전부 실패하거나 전부 중복)
-    // 더 호출해도 같은 결과일 가능성이 높으므로 자원 보호를 위해 중단한다.
-    if (pool.length === before) break;
+    // 정체(새 후보 0)가 연속 STALL_LIMIT회 누적되면 더 호출해도 같은 결과일 가능성이 높으므로
+    // 중단한다. 1회 정체로는 멈추지 않아, 다음 라운드가 갱신된 제외목록으로 새 후보를 낼 기회를 준다.
+    if (pool.length === before) {
+      stallStreak += 1;
+      if (stallStreak >= STALL_LIMIT) break;
+    } else {
+      stallStreak = 0;
+    }
   }
 
   return pool.slice(0, TARGET_RESULT_COUNT * 8);
@@ -1442,8 +1470,9 @@ ${forbidden}
 [참고용 다른 매장 제목]
 ${references}
 
-[네이버 상위 경쟁 제목]
+[실제 상위 노출 제목 — 독자가 찾는 소재·의도의 지도]
 ${competitors}
+※ 위 소재·독자 의도는 적극 겨냥하되, 같은 표현·각도·어미·메인+서브 조합은 베끼지 말고 새 관점으로 차별화하세요.
 
 ${params.strategyGuide}
 
@@ -2661,7 +2690,11 @@ export async function POST(request: NextRequest) {
 
     // RSS 이력, 경쟁 제목, 검색량 신호는 서로 독립적이므로 동시에 수집한다.
     // (이전에는 직렬로 호출해 네트워크 지연이 합산되며 응답이 느려졌다.)
-    const [historyOutcome, competitorOutcome, demandOutcome] = await Promise.all([
+    // 상위 정보성 글 본문 내용(구조화 신호)을 키워드/제목 생성 방향에 반영한다. 스크래핑+분석이
+    // 느릴 수 있어 기존 수집과 병렬로 돌리고 18초 타임아웃을 둔다. 실패/초과/내부 unavailable 시
+    // null 로 떨어져 제목 방향참고만 남는다(속도 회귀·생성 실패 없음).
+    const morphologySeed = (effectiveTopic?.trim() || category.name).trim();
+    const [historyOutcome, competitorOutcome, demandOutcome, morphologyOutcome] = await Promise.all([
       // RSS 이력 + 세션 저장소 이력 병합.
       // 임시저장만 수행하는 워크플로우 특성상 RSS 에는 시스템 생성물이 반영되지 않으므로
       // 세션 저장소의 최근 생성 이력을 타깃=forbidden / 나머지=reference 로 합쳐
@@ -2702,11 +2735,33 @@ export async function POST(request: NextRequest) {
       fetchKeywordOpportunitySignals(discoverySeeds)
         .catch(() => fetchKeywordDemandSignals(discoverySeeds))
         .catch(() => [] as SearchVolumeSignal[]),
+      // 상위 정보성 글 본문 분석. 내부 Claude 형태소 분석만 35s + 본문 fetch라 Stage 2와 동일한
+      // 45s 예산을 준다(18s로는 항상 타임아웃됨). 초과 시 null 폴백(race), 내부 실패도 graceful.
+      (async () => {
+        if (!morphologySeed) return null;
+        try {
+          return await Promise.race([
+            analyzeCompetitorMorphology(morphologySeed),
+            new Promise<null>((resolve) => setTimeout(() => resolve(null), 48_000)),
+          ]);
+        } catch {
+          return null;
+        }
+      })(),
     ]);
 
     const { forbiddenList, referenceList } = historyOutcome;
     let competitorList: string[] = competitorOutcome;
     let demandSignals: SearchVolumeSignal[] = demandOutcome;
+    // 본문 분석이 성공(available)일 때만 구조화 신호를 키워드 생성에 주입한다.
+    const topPostContent =
+      morphologyOutcome && morphologyOutcome.status === "available"
+        ? {
+            bodyHighlights: morphologyOutcome.bodyHighlights,
+            contentBlocks: morphologyOutcome.contentBlocks,
+            titleAngles: morphologyOutcome.titleAngles,
+          }
+        : null;
 
     const strategyGuide = buildKeywordStrategyGuide({
       shop,
@@ -2773,6 +2828,8 @@ export async function POST(request: NextRequest) {
           strategyGuide,
           fallbackCandidates: fallbackKeywordSeeds,
           depthDimensions: getCategoryDepthDimensions(category.id),
+          competitorTitles: competitorList,
+          topPostContent,
         });
         if (aiSeedCandidates.length > 0) {
           baseCandidates = [...aiSeedCandidates, ...fallbackKeywordSeeds];
@@ -2976,9 +3033,17 @@ export async function POST(request: NextRequest) {
           if (/[,，、]/.test(next)) return item;
           if (next.length < 12 || next.length > 42) return item;
           if (isAwkwardGeneratedTitle(next)) return item;
-          const mainTokens = item.mainKeyword.split(/\s+/).filter(Boolean);
-          if (!mainTokens.every((token) => next.includes(token))) return item;
-          return { ...item, title: next };
+          // rule3 정합: 폴리시가 메인 키워드를 "원형 그대로(인접)" 담았을 때만 교체를 채택한다.
+          // 이렇게 해야 분리된 제목("안경힌지가...관리")을 폴리시가 자연스럽게 붙여 복구할 때만
+          // 반영되고, 흩어진 채로 통과하던 기존 누수(rule3 탈락 양산)를 막는다.
+          if (!next.includes(item.mainKeyword)) return item;
+          // 제목이 바뀌면 검증(rule3 제목-키워드 정합, 길이, forbidden 겹침)이 달라질 수 있으므로
+          // 재계산한다. 이게 없으면 폴리시가 분리 제목을 복구해도 isValid가 옛 값(X)으로 남는다.
+          const updated = { ...item, title: next };
+          return {
+            ...updated,
+            validation: validateKeywordOption(updated, forbiddenList, referenceList),
+          };
         });
       } catch {
         // 제목 교정 실패 시 원본 제목을 그대로 유지한다.
