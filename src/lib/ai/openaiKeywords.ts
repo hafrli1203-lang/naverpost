@@ -1,4 +1,5 @@
 import type { KeywordOption, SearchVolumeSignal } from "@/types";
+import { OPTICAL_ACCURACY_GUIDE } from "@/lib/domain/opticalDomainRules";
 import { TITLE_PATTERN_GUIDE } from "@/lib/prompts/titlePrompt";
 import { runCodex } from "./cli/codexCli";
 
@@ -67,6 +68,7 @@ export async function generateKeywordCandidatesWithGpt(params: {
     titleAngles: string[];
   } | null;
   avoidKeywords?: string[];
+  corpusTitles?: string[];
 }): Promise<KeywordOption[] | null> {
   const targetCount = params.targetCount ?? 10;
   // 이미 생성된 후보를 알려주고 "겹치지 말고 새 소재로" 유도한다. GPT가 매 라운드 같은 후보를
@@ -108,6 +110,17 @@ export async function generateKeywordCandidatesWithGpt(params: {
       .map((title) => `- ${title}`)
       .join("\n")}\n※ 실제 네이버 상위 노출 샘플입니다. 독자가 실제로 검색·클릭하는 소재와 의도를 보여줍니다.\n※ 이 소재·독자 의도는 적극 겨냥하되, 같은 표현·각도·어미·키워드 조합을 그대로 베끼지 말고 새 관점으로 차별화하세요.\n※ 위 제목과 무관한 일반론으로 빠지지 말고, 실제 검색 수요가 보이는 소재를 우선하세요.\n`;
   })();
+  // 실제 업종 상위 제목 말뭉치 — 용어·분류·표현 수준의 기준. 손수 만든 규칙 대신
+  // 실데이터가 "사람들이 실제로 쓰는 말"의 경계를 정한다.
+  const corpusSection = (() => {
+    const titles = (params.corpusTitles ?? []).filter(Boolean).slice(0, 40);
+    if (titles.length === 0) return "";
+    return `\n[실제 업종 상위 제목 말뭉치 — 용어·표현·분류 수준의 기준]\n${titles
+      .map((title) => `- ${title}`)
+      .join(
+        "\n"
+      )}\n※ 실제 네이버 블로그 상위 노출 제목입니다. 용어 선택과 분류 명칭, 표현 수준은 이 말뭉치를 기준으로 삼으세요.\n※ 문장을 그대로 베끼지는 말되, 말뭉치에서 쓰이지 않는 생소한 조어·분류·명사 조합을 만들지 마세요.\n`;
+  })();
   const depthSection =
     params.depthDimensions && params.depthDimensions.length > 0
       ? `\n[이 카테고리의 전문 깊이 차원 — 서로 다른 차원으로 퍼뜨릴 것]\n${params.depthDimensions
@@ -137,7 +150,7 @@ export async function generateKeywordCandidatesWithGpt(params: {
 
 [네이버 검색광고 조회]
 ${formatDemandSignals(params.demandSignals)}
-${competitorSection}${topPostSection}
+${competitorSection}${topPostSection}${corpusSection}
 ${params.strategyGuide ?? ""}
 
 [기본 후보]
@@ -168,6 +181,7 @@ ${depthSection}
 - 제목에 원인-결과 주장을 쓰지 마세요("~하면 ~됩니다", "~수록 ~해지는", "~따라 갈리는"). 인과는 본문에서 검증해 다룰 내용입니다. 제목은 검색자가 실제 겪는 상황이나 궁금증까지만 담으세요(예: "뿔테안경 다리가 자꾸 벌어질 때 확인할 부분").
 - 사실이 아니거나 검증할 수 없는 전제를 제목에 만들지 마세요. 헤드 키워드와 전문 개념을 한 문장에 욱여넣은 명사구("벌어지는 얼굴형에서 확인할 힌지 구조")는 비문입니다.
 ${TITLE_PATTERN_GUIDE}
+${OPTICAL_ACCURACY_GUIDE}
 - title에는 main_keyword 두 단어가 순서대로 이어져야 합니다. 두 단어 사이에는 조사(이/가/을/를/에/의 등)만 허용됩니다. 예: main="안경렌즈 얼룩" → "안경렌즈에 얼룩이 남는 이유" 가능.
 - 키워드 덩어리를 문두에 그대로 박고 뒤에 절을 이어붙이지 마세요(예: "안경보관 고온환경 코받침이 달라지는 과정" 같은 비문 금지). 키워드가 문장의 주어나 목적어로 자연스럽게 녹아야 합니다.
 - sub_keyword_1과 sub_keyword_2는 본문 확장 소재입니다. 제목에 억지로 모두 넣지 마세요.

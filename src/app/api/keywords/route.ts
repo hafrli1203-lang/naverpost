@@ -7,6 +7,7 @@ import {
   buildCategoryFitPrompt,
   TITLE_PATTERN_GUIDE,
 } from "@/lib/prompts/titlePrompt";
+import { OPTICAL_ACCURACY_GUIDE } from "@/lib/domain/opticalDomainRules";
 import { getCategoryDepthDimensions } from "@/lib/keywords/categoryDepth";
 import { generateKeywordCandidatesWithGpt } from "@/lib/ai/openaiKeywords";
 import { CATEGORIES } from "@/lib/constants";
@@ -25,6 +26,7 @@ import {
   inferShopRegion,
 } from "@/lib/keywords/seasonalStrategy";
 import { inferSmartBlockSubKeywords } from "@/lib/analysis/smartBlock";
+import { getCorpusTitles } from "@/lib/analysis/titleCorpus";
 import { analyzeCompetitorMorphology } from "@/lib/analysis/competitorMorphology";
 import { analyzeTitleSimilarity } from "@/lib/analysis/titleSimilarity";
 import { combineKeywords } from "@/lib/keywords/keywordCombiner";
@@ -94,8 +96,8 @@ const KEYWORD_FIRST_EDIT_TIMEOUT_MS = 70_000;
 const KEYWORD_TITLE_POLISH_TIMEOUT_MS = 90_000;
 const KEYWORD_CATEGORY_FIT_TIMEOUT_MS = 60_000;
 const KEYWORD_RESULT_CACHE_ENABLED = process.env.KEYWORD_RESULT_CACHE !== "0";
-// v14: 원기준 복원(15~25자·일상어·템플릿 6유형 분산) — 이전 결과 무효화.
-const KEYWORD_RESULT_CACHE_VERSION = 14;
+// v17: 실제 업종 제목 말뭉치(용어·표현 기준) 주입 + 다양화 후 출구 재검증 — 이전 결과 무효화.
+const KEYWORD_RESULT_CACHE_VERSION = 17;
 const KEYWORD_RESULT_CACHE_FILE = path.join(process.cwd(), "data", "keyword-result-cache.json");
 
 type KeywordResultResponseData = {
@@ -404,15 +406,22 @@ function hasSameKeywordCombination(a: KeywordOption, b: KeywordOption): boolean 
   return aSubs === bSubs;
 }
 
+// 같은 대상을 가리키는 헤드 동의어. 정규화하지 않으면 "안경알 두께"와 "안경렌즈 두께"가
+// 다른 축으로 잡혀 최종 결과에 같은 소재가 몰린다.
+const MAIN_AXIS_SYNONYMS: Record<string, string> = {
+  안경알: "안경렌즈",
+  렌즈알: "안경렌즈",
+  블루라이트렌즈: "블루라이트",
+  블루라이트차단: "블루라이트",
+};
+
 function inferMainKeywordAxis(option: KeywordOption): string {
   const main = splitKeyword(option.mainKeyword);
   if (!main) return option.mainKeyword.trim();
 
   const [head, core] = main;
-  if (isRegionWord(head)) {
-    return core;
-  }
-  return head;
+  const axis = isRegionWord(head) ? core : head;
+  return MAIN_AXIS_SYNONYMS[axis] ?? axis;
 }
 
 function isRegionWord(word: string): boolean {
@@ -1367,6 +1376,7 @@ async function generateGptKeywordCandidatePool(params: {
     contentBlocks: string[];
     titleAngles: string[];
   } | null;
+  corpusTitles?: string[];
 }): Promise<KeywordOption[]> {
   const seen = new Set<string>();
   const pool: KeywordOption[] = [];
@@ -1444,6 +1454,7 @@ async function generateGptKeywordCandidatePool(params: {
             targetCount: KEYWORD_GPT_PER_CALL,
             competitorTitles: params.competitorTitles,
             topPostContent: params.topPostContent,
+            corpusTitles: params.corpusTitles,
             // 이미 풀에 쌓인 후보를 GPT에 알려 "겹치지 말고 새 소재로" 유도(수렴 깨기).
             avoidKeywords: pool.map((candidate) => candidate.mainKeyword),
             // 각 배치가 서로 다른 전문 깊이 차원을 맡게 해서 풀이 차원-다양하게 채워지도록 한다.
@@ -1495,6 +1506,7 @@ function buildCandidateEditingPrompt(params: {
   referenceList: string[];
   competitorList: string[];
   strategyGuide: string;
+  corpusTitles?: string[];
 }): string {
   const candidateLines = params.candidates
     .map(formatPromptCandidate)
@@ -1502,6 +1514,13 @@ function buildCandidateEditingPrompt(params: {
   const forbidden = params.forbiddenList.slice(0, 10).join("\n") || "(없음)";
   const references = params.referenceList.slice(0, 8).join("\n") || "(없음)";
   const competitors = params.competitorList.slice(0, 8).join("\n") || "(없음)";
+  const corpusSection =
+    (params.corpusTitles ?? []).length > 0
+      ? `\n[실제 업종 상위 제목 말뭉치 — 용어·표현·분류 수준의 기준]\n${params
+          .corpusTitles!.slice(0, 40)
+          .map((title) => `- ${title}`)
+          .join("\n")}\n※ 용어 선택·분류 명칭·표현 수준은 이 말뭉치를 기준으로 삼되 문장을 베끼지 마세요. 말뭉치에 없는 생소한 조어·분류·명사 조합 금지.\n`
+      : "";
 
   return `당신은 네이버 블로그 제목/키워드 생성 에디터입니다.
 아래 키워드 seed는 제목 문장이 아니라 검색 축입니다. seed 문장을 따라 쓰지 말고, 직접 자연스러운 제목을 작성하세요.
@@ -1522,7 +1541,7 @@ ${references}
 [실제 상위 노출 제목 — 독자가 찾는 소재·의도의 지도]
 ${competitors}
 ※ 위 소재·독자 의도는 적극 겨냥하되, 같은 표현·각도·어미·메인+서브 조합은 베끼지 말고 새 관점으로 차별화하세요.
-
+${corpusSection}
 ${params.strategyGuide}
 
 [출력 규칙]
@@ -1530,6 +1549,7 @@ ${params.strategyGuide}
 - 가장 좋은 후보 1개만 고르지 마세요. 서로 다른 10개 독립 항목을 모두 생성하세요.
 - If the results array has fewer than 10 objects, the response is invalid.
 ${TITLE_PATTERN_GUIDE}
+${OPTICAL_ACCURACY_GUIDE}
 - title에는 main_keyword 두 단어가 순서대로 이어져야 합니다. 두 단어 사이에는 조사(이/가/을/를/에/의 등)만 허용됩니다.
 - 키워드 덩어리를 문두에 박고 절을 이어붙인 비문을 만들지 마세요. 키워드가 주어나 목적어로 자연스럽게 녹은 문장이어야 합니다.
 - 제목에 원인-결과 주장을 쓰지 마세요("~하면 ~됩니다", "~수록 ~해지는"). 제목은 검색자가 실제 겪는 상황·궁금증까지만 담고 답과 인과는 본문에 둡니다.
@@ -1963,6 +1983,13 @@ function appendLooseLlmBackfill<T extends AnalyzedKeyword>(
     if (hasRegisteredStoreOverlap(candidate)) continue;
     // 백필도 소재 쏠림 캡을 지킨다. 백필 단계에서 캡이 풀리면 부족분이 비슷한 소재로 채워진다.
     if (exceedsSharedTitleTokenCap(candidate, filled)) continue;
+    if (
+      filled.filter(
+        (picked) => inferMainKeywordAxis(picked) === inferMainKeywordAxis(candidate)
+      ).length >= 2
+    ) {
+      continue;
+    }
 
     const hasExactDuplicate = filled.some(
       (picked) =>
@@ -2181,6 +2208,15 @@ function dedupeFinalKeywordResults<T extends AnalyzedKeyword>(
     if (!titleContainsMainKeyword(candidate.title, candidate.mainKeyword)) return;
     if (isAwkwardGeneratedTitle(candidate.title)) return;
     if (exceedsSharedTitleTokenCap(candidate, result)) return;
+    // 메인 축(동의어 정규화) 중복은 출구에서도 2개로 제한한다.
+    // 선별 단계의 축 캡은 백필이 우회할 수 있어 여기서 최종 보장한다.
+    if (
+      result.filter(
+        (picked) => inferMainKeywordAxis(picked) === inferMainKeywordAxis(candidate)
+      ).length >= 2
+    ) {
+      return;
+    }
     const matchedProductHeads = getMatchedProductHeads(candidate, productHeads);
     if (matchedProductHeads.length > 1) return;
     if (
@@ -2800,7 +2836,7 @@ export async function POST(request: NextRequest) {
     // 느릴 수 있어 기존 수집과 병렬로 돌리고 18초 타임아웃을 둔다. 실패/초과/내부 unavailable 시
     // null 로 떨어져 제목 방향참고만 남는다(속도 회귀·생성 실패 없음).
     const morphologySeed = (effectiveTopic?.trim() || category.name).trim();
-    const [historyOutcome, competitorOutcome, demandOutcome, morphologyOutcome] = await Promise.all([
+    const [historyOutcome, competitorOutcome, demandOutcome, morphologyOutcome, corpusOutcome] = await Promise.all([
       // RSS 이력 + 세션 저장소 이력 병합.
       // 임시저장만 수행하는 워크플로우 특성상 RSS 에는 시스템 생성물이 반영되지 않으므로
       // 세션 저장소의 최근 생성 이력을 타깃=forbidden / 나머지=reference 로 합쳐
@@ -2854,6 +2890,23 @@ export async function POST(request: NextRequest) {
           return null;
         }
       })(),
+      // 실제 업종 제목 말뭉치(월간 캐시, 첫 수집만 ~10초). 용어·표현·분류의 기준으로
+      // 생성·검수 프롬프트에 주입된다. 실패 시 빈 배열(graceful).
+      (async () => {
+        try {
+          return await getCorpusTitles({
+            categoryId: category.id,
+            seedQueries: [
+              category.name,
+              ...category.subcategories,
+              ...(BROAD_KEYWORD_HEADS[category.id] ?? []),
+            ],
+            limit: 40,
+          });
+        } catch {
+          return [] as string[];
+        }
+      })(),
     ]);
 
     const { forbiddenList, referenceList } = historyOutcome;
@@ -2880,6 +2933,10 @@ export async function POST(request: NextRequest) {
     }
     if (!topPostContent) {
       signalNotes.push("상위 글 본문 구조 신호 없음(분석 실패 또는 타임아웃)");
+    }
+    const corpusTitles: string[] = corpusOutcome;
+    if (corpusTitles.length === 0) {
+      signalNotes.push("업종 제목 말뭉치 없음(수집 실패) — 용어 기준 없이 생성됨");
     }
 
     const strategyGuide = buildKeywordStrategyGuide({
@@ -2952,6 +3009,7 @@ export async function POST(request: NextRequest) {
           depthDimensions: getCategoryDepthDimensions(category.id),
           competitorTitles: competitorList,
           topPostContent,
+          corpusTitles,
         });
         if (aiSeedCandidates.length > 0) {
           baseCandidates = [...aiSeedCandidates, ...fallbackKeywordSeeds];
@@ -2973,6 +3031,7 @@ export async function POST(request: NextRequest) {
       referenceList,
       competitorList,
       strategyGuide,
+      corpusTitles,
     });
 
     let firstBatch: KeywordOption[] = [];
@@ -3152,13 +3211,16 @@ export async function POST(request: NextRequest) {
     // 전문 깊이 차원이 한쪽에 쏠리지 않게(예: 난시축 4개) 분산 → 그 다음 끝맺음 분산.
     diverseRankedResults = diversifyByDimension(diverseRankedResults, representationPool, category.id);
     diverseRankedResults = diversifyTitleEndings(diverseRankedResults, representationPool);
+    // 다양화 단계가 교체로 끼워넣은 항목이 출구 캡(축/토큰/브랜드)을 우회할 수 있으므로
+    // 최종 한 번 더 출구 검증을 통과시킨다(부족분은 내부에서 풀로 재충원).
+    diverseRankedResults = dedupeFinalKeywordResults(diverseRankedResults, representationPool, productHeads);
 
     // 최종 제목을 Opus로 자연스러움·오타·비문 교정. 키워드 토큰 보존 + 쉼표 금지 +
     // 길이/기계적패턴 통과 시에만 교체하고, 실패 시 원본 제목을 유지한다(graceful).
     if (KEYWORD_AI_EXPANSION_ENABLED && diverseRankedResults.length > 0) {
       try {
         const polished = await reviseKeywordTitles(
-          buildTitlePolishPrompt(diverseRankedResults),
+          buildTitlePolishPrompt(diverseRankedResults, corpusTitles),
           KEYWORD_TITLE_POLISH_TIMEOUT_MS
         );
         const polishedByIndex = new Map(polished.map((p) => [p.index, p.title.trim()]));
