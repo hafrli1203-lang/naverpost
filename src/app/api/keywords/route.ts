@@ -88,8 +88,8 @@ const KEYWORD_FIRST_EDIT_TIMEOUT_MS = 70_000;
 const KEYWORD_TITLE_POLISH_TIMEOUT_MS = 90_000;
 const KEYWORD_CATEGORY_FIT_TIMEOUT_MS = 60_000;
 const KEYWORD_RESULT_CACHE_ENABLED = process.env.KEYWORD_RESULT_CACHE !== "0";
-// v11: 소재 쏠림 캡(제목 공통어/시즌) + 불편보너스 축소 + 신호 표면화 — 이전 결과 무효화.
-const KEYWORD_RESULT_CACHE_VERSION = 11;
+// v12: 실검색어 앵커링(헤드 볼륨 점수 + 연관검색어 시드 역주입) — 이전 결과 무효화.
+const KEYWORD_RESULT_CACHE_VERSION = 12;
 const KEYWORD_RESULT_CACHE_FILE = path.join(process.cwd(), "data", "keyword-result-cache.json");
 
 type KeywordResultResponseData = {
@@ -1142,6 +1142,43 @@ function splitCompactDemandKeyword(
     return null;
   }
   return [head, core];
+}
+
+// 검색광고 연관 키워드(실제 사람들이 치는 검색어 + 실측 볼륨)를 후보 시드로 역주입한다.
+// 생성형 롱테일은 그럴듯해도 아무도 안 치는 조합이 많다. 실검색어를 시드 최앞단에 두면
+// LLM 확장이 실제 수요가 있는 소재에 앵커링된다.
+function buildRealQuerySeedOptions(
+  categoryId: string,
+  demandSignals: SearchVolumeSignal[]
+): KeywordOption[] {
+  return demandSignals
+    .filter((signal) => {
+      const total = signal.monthlyTotalSearches ?? 0;
+      return (
+        total >= 100 &&
+        total <= 30000 &&
+        isDemandKeywordRelevantForCategory(categoryId, signal.keyword) &&
+        !/추천|가격|비용|후기|할인|무료|예약|상담|문의|순위|병원|안과|수술/.test(signal.keyword)
+      );
+    })
+    .sort(
+      (a, b) =>
+        (b.opportunityScore ?? 0) - (a.opportunityScore ?? 0) ||
+        (b.monthlyTotalSearches ?? 0) - (a.monthlyTotalSearches ?? 0)
+    )
+    .slice(0, 30)
+    .map((signal): KeywordOption | null => {
+      const parts = signal.keyword.trim().split(/\s+/);
+      const inferred =
+        parts.length >= 2
+          ? ([parts[0], parts.slice(1).join("")] as [string, string])
+          : splitCompactDemandKeyword(categoryId, signal.keyword.trim());
+      if (!inferred) return null;
+      const main = `${inferred[0]} ${inferred[1]}`;
+      if (startsWithRegionWord(main)) return null;
+      return { title: "", mainKeyword: main, subKeyword1: main, subKeyword2: main };
+    })
+    .filter((option): option is KeywordOption => Boolean(option));
 }
 
 function buildFallbackKeywordOptions(params: {
@@ -2485,11 +2522,36 @@ function collectCandidateSearchSeeds(options: KeywordOption[]): string[] {
   for (const option of options) {
     if (!push(option.mainKeyword)) return seeds;
   }
+  // 헤드(첫 단어) 단독 검색량도 조회한다. 헤드가 실검색어인지가
+  // "사람들이 실제로 치는 키워드인가"를 가르는 1차 신호다.
+  for (const option of options) {
+    const head = option.mainKeyword.trim().split(/\s+/)[0] ?? "";
+    if (head && !push(head)) return seeds;
+  }
   for (const option of options) {
     if (!push(option.subKeyword1) || !push(option.subKeyword2)) return seeds;
   }
 
   return seeds;
+}
+
+// 헤드(메인 키워드 첫 단어)가 실제로 검색되는 단어인지로 가감한다.
+// 같은 롱테일이라도 헤드 자체 검색량이 높으면 실제 질의 변형일 가능성과 전환 기대가 높고
+// (예: "안경닦이 세탁"), 헤드가 미측정 전문용어면 아무도 안 치는 조합이다(예: "안장형브릿지 콧대").
+function getHeadKeywordDemandScore(
+  option: KeywordOption,
+  demandSignals: SearchVolumeSignal[]
+): number {
+  const head = option.mainKeyword.trim().split(/\s+/)[0] ?? "";
+  if (!head) return 0;
+  const signal = findDemandSignalForKeyword(head, demandSignals);
+  const total = signal?.monthlyTotalSearches ?? null;
+  if (total === null) return -15;
+  if (total >= 1000) return 28;
+  if (total >= 300) return 20;
+  if (total >= 100) return 12;
+  if (total > 0) return 4;
+  return -15;
 }
 
 function getExternalDemandScore(
@@ -2612,6 +2674,7 @@ async function analyzeOptions(params: {
         _priorityScore:
           getKeywordPriorityScore({ validation, analysis }) +
           getSearcherConversionQualityScore(option) +
+          getHeadKeywordDemandScore(option, demandSignals) +
           getTopicAlignmentScore(option, topic) +
           getProductHeadScore(option, productHeads) +
           getKeywordMeshScore(option, meshKeywordKeys) +
@@ -2835,7 +2898,10 @@ export async function POST(request: NextRequest) {
         .filter((option) => !matchesAnyProductHead(option, productHeads))
         .map(getKeywordOptionKey)
     );
+    // 실검색어 시드를 최앞단에 둔다. GPT 시드 윈도우가 실제 수요 키워드부터 보게 된다.
+    const realQuerySeedBatch = buildRealQuerySeedOptions(category.id, demandSignals);
     const fallbackBatch = dedupeKeywordOptions([
+      ...realQuerySeedBatch,
       ...meshSeedBatch,
       ...productSeedBatch,
       ...combinedSeedBatch,
