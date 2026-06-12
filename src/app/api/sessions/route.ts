@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { registerPostToBlogOps } from "@/lib/blogops/client";
 import { saveSession, listSessions, deleteSession } from "@/lib/storage/sessionStore";
 import type { SavedSession } from "@/lib/storage/sessionStore";
 
@@ -33,7 +34,18 @@ export async function POST(request: NextRequest) {
       images: Array.isArray(body.images) ? body.images : undefined,
     };
     await saveSession(session);
-    return NextResponse.json({ success: true, data: session });
+
+    // BlogOps(성과 측정) 글 기록 — 실패해도 세션 저장은 성공 처리하고 결과만 표면화한다.
+    // (설계: docs/designs/blogops-integration.md, BLOGOPS_API_URL 미설정 시 연동 OFF)
+    const blogops = await registerPostToBlogOps({
+      shopName: session.shopName,
+      category: session.category,
+      title: session.title,
+      mainKeyword: session.mainKeyword,
+      subKeywords: [session.subKeyword1, session.subKeyword2],
+    });
+
+    return NextResponse.json({ success: true, data: { ...session, blogops } });
   } catch (err) {
     return NextResponse.json(
       { success: false, error: err instanceof Error ? err.message : "세션 저장 실패" },
