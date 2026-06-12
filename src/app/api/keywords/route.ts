@@ -30,6 +30,8 @@ import {
 } from "@/lib/keywords/keywordMesh";
 import {
   buildProductKeywordOptions,
+  containsAnyKnownBrand,
+  containsUnregisteredBrand,
   getProductModifiers,
   getProductModifiersByHead,
   getShopProductHeads,
@@ -88,8 +90,8 @@ const KEYWORD_FIRST_EDIT_TIMEOUT_MS = 70_000;
 const KEYWORD_TITLE_POLISH_TIMEOUT_MS = 90_000;
 const KEYWORD_CATEGORY_FIT_TIMEOUT_MS = 60_000;
 const KEYWORD_RESULT_CACHE_ENABLED = process.env.KEYWORD_RESULT_CACHE !== "0";
-// v12: 실검색어 앵커링(헤드 볼륨 점수 + 연관검색어 시드 역주입) — 이전 결과 무효화.
-const KEYWORD_RESULT_CACHE_VERSION = 12;
+// v13: 제목 인과주장 금지 + 폴리시 사실성 검수 + 브랜드 총량 캡2 — 이전 결과 무효화.
+const KEYWORD_RESULT_CACHE_VERSION = 13;
 const KEYWORD_RESULT_CACHE_FILE = path.join(process.cwd(), "data", "keyword-result-cache.json");
 
 type KeywordResultResponseData = {
@@ -1149,7 +1151,8 @@ function splitCompactDemandKeyword(
 // LLM 확장이 실제 수요가 있는 소재에 앵커링된다.
 function buildRealQuerySeedOptions(
   categoryId: string,
-  demandSignals: SearchVolumeSignal[]
+  demandSignals: SearchVolumeSignal[],
+  registeredProductHeads: string[] = []
 ): KeywordOption[] {
   return demandSignals
     .filter((signal) => {
@@ -1158,7 +1161,10 @@ function buildRealQuerySeedOptions(
         total >= 100 &&
         total <= 30000 &&
         isDemandKeywordRelevantForCategory(categoryId, signal.keyword) &&
-        !/추천|가격|비용|후기|할인|무료|예약|상담|문의|순위|병원|안과|수술/.test(signal.keyword)
+        !/추천|가격|비용|후기|할인|무료|예약|상담|문의|순위|병원|안과|수술/.test(signal.keyword) &&
+        // 사람들이 브랜드를 검색해도 매장이 취급하지 않으면 글을 쓸 수 없다.
+        // 미등록 브랜드 실검색어는 시드에서 제외한다.
+        !containsUnregisteredBrand(signal.keyword, registeredProductHeads)
       );
     })
     .sort(
@@ -1521,6 +1527,8 @@ ${params.strategyGuide}
 - title은 15~60자 자연문입니다.
 - title에는 main_keyword 두 단어가 순서대로 이어져야 합니다. 두 단어 사이에는 조사(이/가/을/를/에/의 등)만 허용됩니다.
 - 키워드 덩어리를 문두에 박고 절을 이어붙인 비문을 만들지 마세요. 키워드가 주어나 목적어로 자연스럽게 녹은 문장이어야 합니다.
+- 제목에 원인-결과 주장을 쓰지 마세요("~하면 ~됩니다", "~수록 ~해지는"). 제목은 검색자가 실제 겪는 상황·궁금증까지만 담고 답과 인과는 본문에 둡니다.
+- 사실이 아니거나 검증 불가능한 전제를 제목으로 만들지 마세요.
 - main_keyword, sub_keyword_1, sub_keyword_2는 모두 실제 검색 가능한 2~3단어 조합입니다.
 - seed의 title이 비어 있으면 제목을 새로 창작하세요.
 - 같은 어미, 같은 문장 구조, 같은 소재를 반복하지 마세요.
@@ -2173,6 +2181,17 @@ function dedupeFinalKeywordResults<T extends AnalyzedKeyword>(
     if (
       matchedProductHeads.length === 1 &&
       result.filter((picked) => getMatchedProductHeads(picked, productHeads)[0] === matchedProductHeads[0]).length >= 2
+    ) {
+      return;
+    }
+    // 브랜드 키워드 총량 상한(전역 사전 기준): 매장이 팔더라도 결과 절반이 브랜드면
+    // 정보성 균형이 깨진다. 헤드 볼륨 가산이 브랜드를 밀어올릴 수 있으므로 출구에서 합계 2개 제한.
+    const candidateSource = `${candidate.mainKeyword} ${candidate.subKeyword1} ${candidate.subKeyword2}`;
+    if (
+      containsAnyKnownBrand(candidateSource) &&
+      result.filter((picked) =>
+        containsAnyKnownBrand(`${picked.mainKeyword} ${picked.subKeyword1} ${picked.subKeyword2}`)
+      ).length >= 2
     ) {
       return;
     }
@@ -2899,7 +2918,7 @@ export async function POST(request: NextRequest) {
         .map(getKeywordOptionKey)
     );
     // 실검색어 시드를 최앞단에 둔다. GPT 시드 윈도우가 실제 수요 키워드부터 보게 된다.
-    const realQuerySeedBatch = buildRealQuerySeedOptions(category.id, demandSignals);
+    const realQuerySeedBatch = buildRealQuerySeedOptions(category.id, demandSignals, productHeads);
     const fallbackBatch = dedupeKeywordOptions([
       ...realQuerySeedBatch,
       ...meshSeedBatch,
@@ -2972,6 +2991,15 @@ export async function POST(request: NextRequest) {
     firstBatch = [...firstBatch, ...aiSeedCandidates]
       .filter(isStructurallyUsableLlmCandidate)
       .filter((candidate) => isCategoryAppropriateCandidate(category.id, candidate))
+      // 매장이 취급하지 않는 브랜드 키워드는 진입 단계에서 차단한다.
+      // (연관검색어·LLM 생성 어느 경로로 들어와도 여기서 걸린다.)
+      .filter(
+        (candidate) =>
+          !containsUnregisteredBrand(
+            `${candidate.title} ${candidate.mainKeyword} ${candidate.subKeyword1} ${candidate.subKeyword2}`,
+            productHeads
+          )
+      )
       .filter((candidate) => {
         const key = `${candidate.title}|${candidate.mainKeyword}`;
         if (firstBatchSeen.has(key)) return false;

@@ -204,6 +204,38 @@ export function getCategoryProductHeads(categoryId: string): string[] {
   return CATEGORY_DEFAULT_PRODUCTS[categoryId] ?? [];
 }
 
+// 카탈로그의 모든 브랜드(헤드+별칭) 정규화 키. 매장 등록 여부와 무관한 전역 브랜드 사전.
+const ALL_BRAND_KEYS: string[] = PRODUCT_CATALOG.flatMap((entry) =>
+  [entry.head, ...(entry.aliases ?? [])].map(normalizeKey)
+).filter((key) => key.length >= 2);
+
+/**
+ * 텍스트에 카탈로그 브랜드가 포함되는지 검사한다.
+ * allowedHeads(매장이 실제 등록한 상품 헤드)에 속한 브랜드는 허용으로 본다.
+ * 미등록 브랜드 키워드는 매장이 취급하지 않는 상품 글이 되므로 시드/결과에서 걸러야 한다.
+ */
+export function containsUnregisteredBrand(text: string, allowedHeads: string[] = []): boolean {
+  const key = normalizeKey(text);
+  if (!key) return false;
+  const allowed = new Set(
+    allowedHeads.flatMap((head) => {
+      const entry = PRODUCT_CATALOG.find((item) => item.head === head);
+      return entry
+        ? [entry.head, ...(entry.aliases ?? [])].map(normalizeKey)
+        : [normalizeKey(head)];
+    })
+  );
+  return ALL_BRAND_KEYS.some(
+    (brand) => key.includes(brand) && !allowed.has(brand)
+  );
+}
+
+export function containsAnyKnownBrand(text: string): boolean {
+  const key = normalizeKey(text);
+  if (!key) return false;
+  return ALL_BRAND_KEYS.some((brand) => key.includes(brand));
+}
+
 export function getShopProductHeads(params: {
   shop: Shop;
   category: Category;
