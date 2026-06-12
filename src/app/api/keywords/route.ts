@@ -2,7 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import fs from "fs/promises";
 import path from "path";
 import { generateKeywords, reviseKeywordTitles, selectCategoryFitIndices } from "@/lib/ai/claude";
-import { buildTitlePolishPrompt, buildCategoryFitPrompt } from "@/lib/prompts/titlePrompt";
+import {
+  buildTitlePolishPrompt,
+  buildCategoryFitPrompt,
+  TITLE_PATTERN_GUIDE,
+} from "@/lib/prompts/titlePrompt";
 import { getCategoryDepthDimensions } from "@/lib/keywords/categoryDepth";
 import { generateKeywordCandidatesWithGpt } from "@/lib/ai/openaiKeywords";
 import { CATEGORIES } from "@/lib/constants";
@@ -90,8 +94,8 @@ const KEYWORD_FIRST_EDIT_TIMEOUT_MS = 70_000;
 const KEYWORD_TITLE_POLISH_TIMEOUT_MS = 90_000;
 const KEYWORD_CATEGORY_FIT_TIMEOUT_MS = 60_000;
 const KEYWORD_RESULT_CACHE_ENABLED = process.env.KEYWORD_RESULT_CACHE !== "0";
-// v13: 제목 인과주장 금지 + 폴리시 사실성 검수 + 브랜드 총량 캡2 — 이전 결과 무효화.
-const KEYWORD_RESULT_CACHE_VERSION = 13;
+// v14: 원기준 복원(15~25자·일상어·템플릿 6유형 분산) — 이전 결과 무효화.
+const KEYWORD_RESULT_CACHE_VERSION = 14;
 const KEYWORD_RESULT_CACHE_FILE = path.join(process.cwd(), "data", "keyword-result-cache.json");
 
 type KeywordResultResponseData = {
@@ -1274,8 +1278,9 @@ function isUsableLlmTitle(option: KeywordOption): boolean {
   if (!title) return false;
   // 메인 키워드는 제목에 원형 그대로 들어가야 한다(검색 노출의 전제).
   // 길이 안전장치(노출에서 잘리거나 너무 짧아 정보 기대감이 없는 제목 차단).
+  // 검증(rule5)은 32자 상한이므로 진입은 약간 여유를 두고 폴리시가 줄일 기회를 준다.
   const len = title.length;
-  if (len < 8 || len > 70) return false;
+  if (len < 8 || len > 48) return false;
   // 기계적/스팸성 패턴은 고치지 말고 버린다.
   if (isAwkwardGeneratedTitle(title)) return false;
   return true;
@@ -1524,7 +1529,7 @@ ${params.strategyGuide}
 - results 배열은 정확히 10개입니다. 10개보다 적게 반환하지 마세요.
 - 가장 좋은 후보 1개만 고르지 마세요. 서로 다른 10개 독립 항목을 모두 생성하세요.
 - If the results array has fewer than 10 objects, the response is invalid.
-- title은 15~60자 자연문입니다.
+${TITLE_PATTERN_GUIDE}
 - title에는 main_keyword 두 단어가 순서대로 이어져야 합니다. 두 단어 사이에는 조사(이/가/을/를/에/의 등)만 허용됩니다.
 - 키워드 덩어리를 문두에 박고 절을 이어붙인 비문을 만들지 마세요. 키워드가 주어나 목적어로 자연스럽게 녹은 문장이어야 합니다.
 - 제목에 원인-결과 주장을 쓰지 마세요("~하면 ~됩니다", "~수록 ~해지는"). 제목은 검색자가 실제 겪는 상황·궁금증까지만 담고 답과 인과는 본문에 둡니다.
@@ -3161,7 +3166,7 @@ export async function POST(request: NextRequest) {
           const next = polishedByIndex.get(i + 1);
           if (!next) return item;
           if (/[,，、]/.test(next)) return item;
-          if (next.length < 12 || next.length > 42) return item;
+          if (next.length < 12 || next.length > 32) return item;
           if (isAwkwardGeneratedTitle(next)) return item;
           // rule3 정합: 폴리시 제목도 같은 기준(두 단어 인접 + 조사 허용)으로 검사한다.
           // 원형-통째 강제는 "키워드 덩어리 + 절 연결" 비문만 통과시키던 원인이라 완화했다.

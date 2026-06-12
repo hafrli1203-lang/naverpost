@@ -122,14 +122,13 @@ export function validateKeywordOption(
   // 제목에 서브 코어 노출을 강제하면 "메인 + 서브 욱여넣기"식 기계적 제목이 되어
   // 자연스러움을 해친다. 서브 키워드는 본문 단계에서 소제목/단락으로 확장한다.
 
-  // Rule 5 (완화): 지역명은 사용자가 최종 단계에서 직접 붙이므로 생성 제목은 다소
-  // 짧을 수 있고, 자연문 제목은 30자를 넘길 수 있다. 검색 노출에서 의미 있는
-  // 범위(12~42자)로 완화한다.
+  // Rule 5: 원기준(10~25자 정보 예고) 복원. 지역명은 사용자가 나중에 앞에 붙이므로
+  // (+6~8자) 생성 제목이 32자를 넘으면 모바일 노출(~35자)에서 잘린다.
   const titleLength = title.length;
-  if (titleLength < 12 || titleLength > 42) {
+  if (titleLength < 12 || titleLength > 32) {
     failures.push({
       rule: "rule5",
-      reason: `제목 길이는 12~42자이어야 합니다 (현재 ${titleLength}자): "${title}"`,
+      reason: `제목 길이는 12~32자이어야 합니다 (현재 ${titleLength}자): "${title}"`,
     });
   }
 
