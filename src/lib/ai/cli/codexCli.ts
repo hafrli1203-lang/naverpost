@@ -25,6 +25,13 @@ export async function runCodex({
     "--ignore-rules",
     "--color",
     "never",
+    // codex의 멀티에이전트 기능이 spawn_agent 도구를 등록하는데 exec 모델과 호환되지 않아
+    // 모든 호출이 400으로 죽는다(2026-06 실측). 텍스트 생성에는 도구가 필요 없으므로
+    // 이 프로젝트의 headless 호출에서만 비활성화한다(대화형 codex 사용에는 영향 없음).
+    "--disable",
+    "multi_agent",
+    "-c",
+    "features.multi_agent_v2.enabled=false",
     "-c",
     'model_reasoning_effort="low"',
     "-o",

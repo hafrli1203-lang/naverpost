@@ -1,4 +1,30 @@
 import spawn from "cross-spawn";
+import fs from "node:fs/promises";
+import path from "node:path";
+
+async function appendCrashLog(entry: {
+  command: string;
+  args: string[];
+  exitCode: number | null;
+  signal: NodeJS.Signals | null;
+  stdout: string;
+  stderr: string;
+}): Promise<void> {
+  try {
+    const line = JSON.stringify({
+      at: new Date().toISOString(),
+      command: entry.command,
+      args: entry.args.slice(0, 6),
+      exitCode: entry.exitCode,
+      signal: entry.signal,
+      stdoutTail: entry.stdout.slice(-400),
+      stderrTail: entry.stderr.slice(-400),
+    });
+    await fs.appendFile(path.join(process.cwd(), "data", "cli-crash.log"), line + "\n", "utf8");
+  } catch {
+    // 진단 로그 실패는 본 흐름에 영향을 주지 않는다.
+  }
+}
 
 export type CliErrorCode = "not-found" | "timeout" | "non-zero" | "empty";
 
@@ -82,11 +108,14 @@ export function runCli({
       reject(new CliError(`${command} CLI failed to start: ${e.message}`, "not-found"));
     });
 
-    child.on("close", (exitCode) => {
+    child.on("close", (exitCode, signal) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       if (exitCode !== 0) {
+        // 크래시 진단: 종료 코드·시그널·출력 꼬리를 파일로 남긴다.
+        // (no stderr 크래시는 이 로그 없이는 원인 추적이 불가능하다.)
+        void appendCrashLog({ command, args, exitCode, signal, stdout, stderr });
         reject(
           new CliError(
             `${command} CLI exited with code ${exitCode}: ${stderr.trim() || "no stderr"}`,

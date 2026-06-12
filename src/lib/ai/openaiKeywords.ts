@@ -5,8 +5,21 @@ const GPT_KEYWORD_MODEL = "gpt-5.5";
 
 function parseKeywordJson(text: string): KeywordOption[] {
   const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-  const jsonText = jsonMatch ? jsonMatch[1].trim() : text.trim();
-  const parsed = JSON.parse(jsonText) as { results?: Array<Record<string, string>> };
+  const jsonText = (jsonMatch ? jsonMatch[1] : text).trim();
+  // LLM이 JSON 앞뒤에 설명문을 붙여도 죽지 않게 중괄호 범위로 한 번 더 시도한다.
+  let parsed: { results?: Array<Record<string, string>> };
+  try {
+    parsed = JSON.parse(jsonText) as { results?: Array<Record<string, string>> };
+  } catch {
+    const start = jsonText.indexOf("{");
+    const end = jsonText.lastIndexOf("}");
+    if (start < 0 || end <= start) {
+      throw new Error("GPT keyword generation returned non-JSON output.");
+    }
+    parsed = JSON.parse(jsonText.slice(start, end + 1)) as {
+      results?: Array<Record<string, string>>;
+    };
+  }
   const rawResults = Array.isArray(parsed) ? parsed : parsed.results;
   if (!Array.isArray(rawResults)) {
     throw new Error("GPT keyword generation returned an unexpected response shape.");
@@ -150,7 +163,8 @@ ${depthSection}
 - 모든 키워드는 실제 검색 가능한 2~3단어 조합.
 - main_keyword, sub_keyword_1, sub_keyword_2에는 "새로", "맞춘", "보일", "한다면" 같은 문장 조각이나 서술어를 넣지 마세요.
 - 키워드는 검색창에 그대로 입력할 수 있는 명사형 검색어여야 합니다.
-- title에는 main_keyword를 원형 그대로 포함.
+- title에는 main_keyword 두 단어가 순서대로 이어져야 합니다. 두 단어 사이에는 조사(이/가/을/를/에/의 등)만 허용됩니다. 예: main="안경렌즈 얼룩" → "안경렌즈에 얼룩이 남는 이유" 가능.
+- 키워드 덩어리를 문두에 그대로 박고 뒤에 절을 이어붙이지 마세요(예: "안경보관 고온환경 코받침이 달라지는 과정" 같은 비문 금지). 키워드가 문장의 주어나 목적어로 자연스럽게 녹아야 합니다.
 - sub_keyword_1과 sub_keyword_2는 본문 확장 소재입니다. 제목에 억지로 모두 넣지 마세요.
 - 제목은 main_keyword와 독자 상황이 자연스럽게 읽혀야 합니다.
 - 특정 어미를 금지하거나 강제로 쓰지 말고, 후보 전체에서 같은 구조가 반복되지 않게 하세요.

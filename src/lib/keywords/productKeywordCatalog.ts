@@ -217,11 +217,9 @@ export function getShopProductHeads(params: {
     .filter((value): value is string => Boolean(value));
   const freeform = extractFreeformProductHeads(params.shop.mainProducts ?? [], params.category.id);
 
-  return unique([
-    ...catalogMatches,
-    ...freeform,
-    ...getCategoryProductHeads(params.category.id),
-  ]).slice(0, 14);
+  // 매장이 실제로 등록한 취급 상품(mainProducts/serviceStrengths)에서 매칭된 브랜드만 쓴다.
+  // CATEGORY_DEFAULT_PRODUCTS 자동 주입은 모든 매장 제목에 무관한 브랜드가 끼어드는 원인이라 제거.
+  return unique([...catalogMatches, ...freeform]).slice(0, 14);
 }
 
 export function getProductModifiers(params: {

@@ -45,7 +45,7 @@ import { planBlogTopic } from "@/lib/topics/topicPlanner";
 import { analyzeLanguageRisk } from "@/lib/validation/contentSignalAnalyzer";
 import { analyzeMorphology } from "@/lib/validation/morphologyAnalyzer";
 import { analyzeNetworkDuplicateRisk } from "@/lib/validation/networkDuplicateAnalyzer";
-import { validateKeywordOption } from "@/lib/validation/keywordRules";
+import { titleContainsMainKeyword, validateKeywordOption } from "@/lib/validation/keywordRules";
 import { analyzeTitleBodyAlignment } from "@/lib/validation/titleBodyAlignment";
 import type { KeywordOption, KeywordOptionAnalysis, SearchVolumeSignal } from "@/types";
 
@@ -88,7 +88,8 @@ const KEYWORD_FIRST_EDIT_TIMEOUT_MS = 70_000;
 const KEYWORD_TITLE_POLISH_TIMEOUT_MS = 90_000;
 const KEYWORD_CATEGORY_FIT_TIMEOUT_MS = 60_000;
 const KEYWORD_RESULT_CACHE_ENABLED = process.env.KEYWORD_RESULT_CACHE !== "0";
-const KEYWORD_RESULT_CACHE_VERSION = 9;
+// v11: 소재 쏠림 캡(제목 공통어/시즌) + 불편보너스 축소 + 신호 표면화 — 이전 결과 무효화.
+const KEYWORD_RESULT_CACHE_VERSION = 11;
 const KEYWORD_RESULT_CACHE_FILE = path.join(process.cwd(), "data", "keyword-result-cache.json");
 
 type KeywordResultResponseData = {
@@ -1278,7 +1279,7 @@ function isStructurallyUsableLlmCandidate(option: KeywordOption): boolean {
 }
 
 const GPT_KEYWORD_BATCH_FOCUSES = [
-  "검색광고 조회 신호가 있거나 seed에 포함된 기능렌즈, 브랜드, 상품명 중심으로 확장",
+  "검색광고 조회에서 실제 검색량이 확인되는 키워드 중심으로 확장",
   "사용자가 실제로 겪는 불편, 증상, 사용 장면, 생활 상황 중심으로 확장",
   "방문 전 확인 행동, 검사, 교체, 피팅 같은 전환 의도 중심으로 확장",
   "롱테일 질문 의도, 비교/선택 맥락, 새로 들어온 관심사 중심으로 확장",
@@ -1481,7 +1482,8 @@ ${params.strategyGuide}
 - 가장 좋은 후보 1개만 고르지 마세요. 서로 다른 10개 독립 항목을 모두 생성하세요.
 - If the results array has fewer than 10 objects, the response is invalid.
 - title은 15~60자 자연문입니다.
-- title에는 main_keyword를 공백 차이와 무관하게 원형 의미로 포함하세요.
+- title에는 main_keyword 두 단어가 순서대로 이어져야 합니다. 두 단어 사이에는 조사(이/가/을/를/에/의 등)만 허용됩니다.
+- 키워드 덩어리를 문두에 박고 절을 이어붙인 비문을 만들지 마세요. 키워드가 주어나 목적어로 자연스럽게 녹은 문장이어야 합니다.
 - main_keyword, sub_keyword_1, sub_keyword_2는 모두 실제 검색 가능한 2~3단어 조합입니다.
 - seed의 title이 비어 있으면 제목을 새로 창작하세요.
 - 같은 어미, 같은 문장 구조, 같은 소재를 반복하지 마세요.
@@ -1496,12 +1498,46 @@ ${params.strategyGuide}
 - 각 항목 키는 title, main_keyword, sub_keyword_1, sub_keyword_2 입니다.
 - placeholder나 설명 문장을 넣지 말고 실제 후보 10개만 작성하세요.`;
 }
+// 같은 내용 단어(예: "마스크")가 최종 결과의 다수 제목에 반복되는 소재 쏠림을 막는다.
+// 메인 키워드 자체의 단어는 검색 노출을 위해 반복될 수 있으므로 캡 대상에서 제외한다.
+const SHARED_TITLE_TOKEN_CAP = 3;
+
+// 조사가 붙은 토큰("착용감을"/"착용감이")이 서로 다른 단어로 잡히면 캡이 무력화되므로
+// 어간 기준으로 정규화해 비교한다.
+function titleTokenStems(title: string): string[] {
+  return [
+    ...new Set(
+      tokenizeTitleForComparison(title)
+        .map((token) => stripKoreanParticle(token))
+        .filter((token) => token.length >= 2)
+    ),
+  ];
+}
+
+function exceedsSharedTitleTokenCap(
+  candidate: KeywordOption,
+  selected: KeywordOption[],
+  cap = SHARED_TITLE_TOKEN_CAP
+): boolean {
+  const mainWords = candidate.mainKeyword.toLowerCase().split(/\s+/).filter(Boolean);
+  const tokens = titleTokenStems(candidate.title).filter(
+    (token) =>
+      !COMMON_TITLE_WORDS.has(token) &&
+      !mainWords.some((word) => word.includes(token) || token.includes(word))
+  );
+  return tokens.some(
+    (token) =>
+      selected.filter((picked) => titleTokenStems(picked.title).includes(token)).length >= cap
+  );
+}
+
 function canAddIntentBalancedCandidate<T extends KeywordOption>(
   candidate: T,
   selected: T[],
   options: { maxPerBucket?: number; allowSimilar?: boolean; maxRegional?: number } = {}
 ): boolean {
   if (isAwkwardGeneratedTitle(candidate.title)) return false;
+  if (exceedsSharedTitleTokenCap(candidate, selected)) return false;
 
   const hasExactDuplicate = selected.some(
     (picked) =>
@@ -1544,6 +1580,14 @@ function canAddIntentBalancedCandidate<T extends KeywordOption>(
   if (
     bucket === "regional" &&
     selected.filter((picked) => inferIntentBucket(picked) === "regional").length >= maxRegional
+  ) {
+    return false;
+  }
+
+  // 시즌 소재(김서림·자외선 등)는 시의성 가치가 있지만 한 결과에 몰리면 소재 쏠림이 된다.
+  if (
+    bucket === "seasonal" &&
+    selected.filter((picked) => inferIntentBucket(picked) === "seasonal").length >= 2
   ) {
     return false;
   }
@@ -1867,6 +1911,8 @@ function appendLooseLlmBackfill<T extends AnalyzedKeyword>(
     if (!isStructurallyUsableLlmCandidate(candidate)) continue;
     if (isAwkwardGeneratedTitle(candidate.title)) continue;
     if (hasRegisteredStoreOverlap(candidate)) continue;
+    // 백필도 소재 쏠림 캡을 지킨다. 백필 단계에서 캡이 풀리면 부족분이 비슷한 소재로 채워진다.
+    if (exceedsSharedTitleTokenCap(candidate, filled)) continue;
 
     const hasExactDuplicate = filled.some(
       (picked) =>
@@ -2032,40 +2078,6 @@ function matchesKeywordMesh(option: KeywordOption, meshKeywordKeys: Set<string>)
   return meshKeywordKeys.has(getKeywordOptionKey(option));
 }
 
-function ensureProductRepresentation<T extends AnalyzedKeyword>(
-  selected: T[],
-  candidates: T[],
-  productHeads: string[],
-  minCount = 2
-): T[] {
-  if (productHeads.length === 0) return selected;
-
-  const filled = [...selected];
-  const productCount = () => filled.filter((item) => matchesAnyProductHead(item, productHeads)).length;
-  if (productCount() >= minCount) return filled.slice(0, TARGET_RESULT_COUNT);
-
-  const selectedKeys = new Set(filled.map((item) => `${item.title}|${item.mainKeyword}`));
-  const productCandidates = candidates
-    .filter((candidate) => candidate.validation.isValid)
-    .filter((candidate) => matchesAnyProductHead(candidate, productHeads))
-    .filter((candidate) => !selectedKeys.has(`${candidate.title}|${candidate.mainKeyword}`))
-    .filter((candidate) => !isAwkwardGeneratedTitle(candidate.title))
-    .sort((a, b) => b._priorityScore - a._priorityScore);
-
-  for (const candidate of productCandidates) {
-    if (productCount() >= minCount) break;
-    const replaceIndex = [...filled]
-      .map((item, index) => ({ item, index }))
-      .reverse()
-      .find(({ item }) => !matchesAnyProductHead(item, productHeads))?.index;
-    if (replaceIndex === undefined) break;
-    filled[replaceIndex] = candidate;
-    selectedKeys.add(`${candidate.title}|${candidate.mainKeyword}`);
-  }
-
-  return interleaveIntentBuckets(filled).slice(0, TARGET_RESULT_COUNT);
-}
-
 function ensureKeywordMeshRepresentation<T extends AnalyzedKeyword>(
   selected: T[],
   candidates: T[],
@@ -2116,8 +2128,9 @@ function dedupeFinalKeywordResults<T extends AnalyzedKeyword>(
   const result: T[] = [];
   const pushIfFresh = (candidate: T) => {
     if (!candidate.validation.isValid) return;
-    if (!candidate.title.includes(candidate.mainKeyword)) return;
+    if (!titleContainsMainKeyword(candidate.title, candidate.mainKeyword)) return;
     if (isAwkwardGeneratedTitle(candidate.title)) return;
+    if (exceedsSharedTitleTokenCap(candidate, result)) return;
     const matchedProductHeads = getMatchedProductHeads(candidate, productHeads);
     if (matchedProductHeads.length > 1) return;
     if (
@@ -2247,16 +2260,12 @@ function findDemandSignalForKeyword(
   keyword: string,
   demandSignals: SearchVolumeSignal[]
 ): SearchVolumeSignal | undefined {
+  // 정확 일치만 인정한다. 과거 부분일치 폴백은 "누진렌즈 명시야폭" 같은 지어낸 조합이
+  // "누진렌즈"의 검색량을 상속받아 미측정 페널티와 볼륨 게이트를 통째로 우회하게 만들었다.
   const normalized = keyword.replace(/\s+/g, "").toLowerCase();
-  const exact = demandSignals.find(
+  return demandSignals.find(
     (signal) => signal.keyword.replace(/\s+/g, "").toLowerCase() === normalized
   );
-  if (exact) return exact;
-
-  return demandSignals.find((signal) => {
-    const signalKey = signal.keyword.replace(/\s+/g, "").toLowerCase();
-    return normalized.includes(signalKey) || signalKey.includes(normalized);
-  });
 }
 
 function mergeDemandSignals(...groups: SearchVolumeSignal[][]): SearchVolumeSignal[] {
@@ -2314,7 +2323,9 @@ function getProductHeadScore(option: KeywordOption, productHeads: string[]): num
   const matched = productHeads.some((head) =>
     source.includes(head.replace(/\s+/g, "").toLowerCase())
   );
-  return matched ? 34 : 0;
+  // 과거 +34는 검색량 통과 보너스(+45)에 맞먹어 브랜드 후보가 일반 후보를 밀어내는 원인이었다.
+  // 매장 취급 상품이라는 약한 신호 수준(+8)으로만 반영한다.
+  return matched ? 8 : 0;
 }
 
 function getKeywordMeshScore(option: KeywordOption, meshKeywordKeys: Set<string>): number {
@@ -2326,8 +2337,10 @@ function getSearcherConversionQualityScore(option: KeywordOption): number {
   const mainTail = splitKeyword(option.mainKeyword)?.[1] ?? "";
   let score = 0;
 
+  // 과거 +18은 불편/증상 소재(김서림·마스크류)가 최종 10개를 점령하는 쏠림의 주범이었다.
+  // 검색 전환 신호로서의 가치만 남기고 약화한다.
   if (/울렁임|어지러움|건조|충혈|흐림|통증|이물감|흘러내림|눈부심|불편|피로/.test(source)) {
-    score += 18;
+    score += 6;
   }
   if (/처음|착용|야간|운전|업무|독서|스마트폰|생활|부모님|어린이|장시간/.test(source)) {
     score += 12;
@@ -2458,16 +2471,22 @@ type AnalyzedKeyword = KeywordOption & Partial<VolumeGateFields> & {
 function collectCandidateSearchSeeds(options: KeywordOption[]): string[] {
   const seen = new Set<string>();
   const seeds: string[] = [];
+  const push = (value: string): boolean => {
+    const seed = value.trim();
+    const key = seed.replace(/\s+/g, "").toLowerCase();
+    if (!seed || seen.has(key)) return seeds.length < TARGET_RESULT_COUNT * 10;
+    seen.add(key);
+    seeds.push(seed);
+    return seeds.length < TARGET_RESULT_COUNT * 10;
+  };
 
+  // 메인 키워드 전부를 먼저 수집한다. 메인이 검색량 조회에서 잘리면(이전: 메인/서브 교차 수집)
+  // 실제 노출 키워드가 unknown으로 남아 볼륨 게이트가 무력화된다. 서브는 남는 자리에만 채운다.
   for (const option of options) {
-    for (const value of [option.mainKeyword, option.subKeyword1, option.subKeyword2]) {
-      const seed = value.trim();
-      const key = seed.replace(/\s+/g, "").toLowerCase();
-      if (!seed || seen.has(key)) continue;
-      seen.add(key);
-      seeds.push(seed);
-      if (seeds.length >= TARGET_RESULT_COUNT * 10) return seeds;
-    }
+    if (!push(option.mainKeyword)) return seeds;
+  }
+  for (const option of options) {
+    if (!push(option.subKeyword1) || !push(option.subKeyword2)) return seeds;
   }
 
   return seeds;
@@ -2763,6 +2782,19 @@ export async function POST(request: NextRequest) {
           }
         : null;
 
+    // 죽은 신호를 표면화한다. 빈 catch로 신호가 사라져도 결과는 정상처럼 나오므로
+    // 무엇이 빠진 채 생성됐는지 notes로 알려야 무인 운영에서 품질 저하를 감지할 수 있다.
+    const signalNotes: string[] = [];
+    if (competitorList.length === 0) {
+      signalNotes.push("경쟁 상위 제목 신호 없음 — 차별화 검증이 약한 상태로 생성됨");
+    }
+    if (demandSignals.length === 0) {
+      signalNotes.push("검색광고 검색량 신호 없음 — 볼륨 게이트가 unknown으로 동작");
+    }
+    if (!topPostContent) {
+      signalNotes.push("상위 글 본문 구조 신호 없음(분석 실패 또는 타임아웃)");
+    }
+
     const strategyGuide = buildKeywordStrategyGuide({
       shop,
       category,
@@ -2836,6 +2868,10 @@ export async function POST(request: NextRequest) {
         }
       } catch {
         // GPT 후보 확장 실패 시 Claude 편집 단계로 계속 진행한다.
+        signalNotes.push("GPT 후보 확장 호출 실패 — 폴백 시드 기반으로 진행");
+      }
+      if (aiSeedCandidates.length === 0) {
+        signalNotes.push("GPT 후보 확장 결과 0개 — Claude 편집/폴백 경로로 생성됨");
       }
     }
 
@@ -2909,11 +2945,15 @@ export async function POST(request: NextRequest) {
         }
       } catch {
         // 카테고리 분류 실패 시 firstBatch를 그대로 사용한다.
+        signalNotes.push("LLM 카테고리 적합성 분류 실패 — 분류 없이 진행");
       }
     }
 
     try {
-      const candidateSeeds = collectCandidateSearchSeeds([...fallbackKeywordSeeds, ...firstBatch]);
+      // LLM 후보(firstBatch)가 실제 노출 대상이므로 검색량 조회 우선권을 준다.
+      // (이전: 폴백 시드 수백 개가 시드 상한(100)을 먼저 차지해 LLM 후보 키워드가
+      //  조회조차 되지 않은 채 unknown으로 게이트를 통과했다.)
+      const candidateSeeds = collectCandidateSearchSeeds([...firstBatch, ...fallbackKeywordSeeds]);
       const candidateDemandSignals = await fetchKeywordOpportunitySignals(candidateSeeds).catch(
         () => [] as SearchVolumeSignal[]
       );
@@ -2998,12 +3038,8 @@ export async function POST(request: NextRequest) {
       ),
       representationPool
     );
-    diverseRankedResults = ensureProductRepresentation(
-      diverseRankedResults,
-      representationPool,
-      productHeads,
-      category.id === "eye-info" || category.id === "glasses-story" ? 1 : 2
-    );
+    // 브랜드(상품명) 후보 강제 끼워넣기(ensureProductRepresentation)는 제거했다.
+    // 브랜드 키워드는 점수 경쟁으로만 진입하고, dedupe의 헤드당 2개 상한은 유지된다.
     diverseRankedResults = ensureKeywordMeshRepresentation(
       diverseRankedResults,
       representationPool,
@@ -3033,10 +3069,9 @@ export async function POST(request: NextRequest) {
           if (/[,，、]/.test(next)) return item;
           if (next.length < 12 || next.length > 42) return item;
           if (isAwkwardGeneratedTitle(next)) return item;
-          // rule3 정합: 폴리시가 메인 키워드를 "원형 그대로(인접)" 담았을 때만 교체를 채택한다.
-          // 이렇게 해야 분리된 제목("안경힌지가...관리")을 폴리시가 자연스럽게 붙여 복구할 때만
-          // 반영되고, 흩어진 채로 통과하던 기존 누수(rule3 탈락 양산)를 막는다.
-          if (!next.includes(item.mainKeyword)) return item;
+          // rule3 정합: 폴리시 제목도 같은 기준(두 단어 인접 + 조사 허용)으로 검사한다.
+          // 원형-통째 강제는 "키워드 덩어리 + 절 연결" 비문만 통과시키던 원인이라 완화했다.
+          if (!titleContainsMainKeyword(next, item.mainKeyword)) return item;
           // 제목이 바뀌면 검증(rule3 제목-키워드 정합, 길이, forbidden 겹침)이 달라질 수 있으므로
           // 재계산한다. 이게 없으면 폴리시가 분리 제목을 복구해도 isValid가 옛 값(X)으로 남는다.
           const updated = { ...item, title: next };
@@ -3047,6 +3082,7 @@ export async function POST(request: NextRequest) {
         });
       } catch {
         // 제목 교정 실패 시 원본 제목을 그대로 유지한다.
+        signalNotes.push("제목 자연화(폴리시) 실패 — 교정 전 제목으로 표시됨");
       }
     }
 
@@ -3152,7 +3188,7 @@ export async function POST(request: NextRequest) {
 
     const responseData: KeywordResultResponseData = {
       results,
-      notes: volumeGateNotes,
+      notes: [...volumeGateNotes, ...signalNotes],
       topic: articleTopic,
       topicLabel: effectiveTopic,
       topicPlan,

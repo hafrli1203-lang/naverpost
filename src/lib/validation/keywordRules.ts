@@ -16,6 +16,34 @@ const TITLE_EXTRA_PROHIBITED_WORDS = [
   "무료",
 ];
 
+// 두 단어 사이에 허용하는 조사. 긴 조사를 앞에 둬야 정규식 alternation이 올바르게 매칭된다.
+const TITLE_KEYWORD_JOSA =
+  "(?:에서|으로|보다|처럼|까지|부터|은|는|이|가|을|를|과|와|의|도|만|에|로)?";
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * 제목이 메인 키워드를 "살리고" 있는지 검사한다.
+ * 원형 통째 포함뿐 아니라, 두 단어가 순서대로 인접하되 첫 단어 뒤에
+ * 자연스러운 조사가 붙은 형태("안경렌즈에 얼룩이 …")도 허용한다.
+ * (기존 원형-통째 강제는 키워드 덩어리를 문두에 박은 비문 제목만 통과시키는 원인이었다.)
+ */
+export function titleContainsMainKeyword(title: string, mainKeyword: string): boolean {
+  const trimmed = mainKeyword.trim();
+  if (!trimmed) return false;
+  if (title.includes(trimmed)) return true;
+
+  const words = trimmed.split(/\s+/).filter(Boolean);
+  if (words.length < 2) return false;
+
+  const pattern = new RegExp(
+    words.map(escapeRegExp).join(`${TITLE_KEYWORD_JOSA}\\s*`)
+  );
+  return pattern.test(title);
+}
+
 function findProhibitedTitleTerms(option: KeywordOption): string[] {
   const source = `${option.title} ${option.mainKeyword} ${option.subKeyword1} ${option.subKeyword2}`;
   const terms = [
@@ -80,11 +108,13 @@ export function validateKeywordOption(
   // 단조로운 "메인+착용감" 반복만 통과시켜 키워드 품질을 떨어뜨렸다. 주제 응집성은 메인 키워드가
   // 제목에 원형 포함(rule3)되는 것으로 충분히 보장되므로 앵커 반복 요구를 제거한다.
 
-  // Rule 3: Main keyword must appear verbatim in the title
-  if (!title.includes(mainKeyword)) {
+  // Rule 3: Main keyword must appear in the title — verbatim, or with a natural
+  // particle between the two words ("안경렌즈에 얼룩이 …"). Both words must stay
+  // adjacent and in order so Naver search exposure is preserved.
+  if (!titleContainsMainKeyword(title, mainKeyword)) {
     failures.push({
       rule: "rule3",
-      reason: `제목에 메인 키워드 "${mainKeyword}"가 원형 그대로 포함되어야 합니다`,
+      reason: `제목에 메인 키워드 "${mainKeyword}"가 순서대로 포함되어야 합니다 (두 단어 사이 조사만 허용)`,
     });
   }
 

@@ -7,16 +7,33 @@ const EDIT_MODEL = "claude-opus-4-8";
 const PROMPT_MODEL = "claude-opus-4-8";
 const CODEX_ARTICLE_MODEL = "gpt-5.5";
 
+// LLM이 JSON 앞뒤에 설명문을 붙여도 죽지 않게 파싱한다.
+// (이 파싱 실패는 상위에서 빈 catch로 삼켜져 "성공처럼 보이는 실패"가 되기 쉽다.)
+function parseLlmJson(text: string) {
+  const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+  const jsonText = (jsonMatch ? jsonMatch[1] : text).trim();
+  try {
+    return JSON.parse(jsonText);
+  } catch {
+    const objectStart = jsonText.indexOf("{");
+    const arrayStart = jsonText.indexOf("[");
+    const candidates = [objectStart, arrayStart].filter((idx) => idx >= 0);
+    const start = candidates.length > 0 ? Math.min(...candidates) : -1;
+    const end = Math.max(jsonText.lastIndexOf("}"), jsonText.lastIndexOf("]"));
+    if (start < 0 || end <= start) {
+      throw new Error("LLM 응답에서 JSON을 찾지 못했습니다.");
+    }
+    return JSON.parse(jsonText.slice(start, end + 1));
+  }
+}
+
 export async function generateKeywords(
   prompt: string,
   timeoutMs = 300_000
 ): Promise<KeywordOption[]> {
   const text = await runClaude({ prompt, model: EDIT_MODEL, timeoutMs });
 
-  const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-  const jsonText = jsonMatch ? jsonMatch[1].trim() : text.trim();
-
-  const parsed = JSON.parse(jsonText);
+  const parsed = parseLlmJson(text);
   const rawResults = Array.isArray(parsed) ? parsed : parsed.results;
   if (!Array.isArray(rawResults)) {
     throw new Error("Keyword generation returned an unexpected response shape.");
@@ -36,9 +53,7 @@ export async function reviseKeywordTitles(
   timeoutMs = 90_000
 ): Promise<Array<{ index: number; title: string }>> {
   const text = await runClaude({ prompt, model: EDIT_MODEL, timeoutMs });
-  const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-  const jsonText = jsonMatch ? jsonMatch[1].trim() : text.trim();
-  const parsed = JSON.parse(jsonText);
+  const parsed = parseLlmJson(text);
   const rawResults = Array.isArray(parsed) ? parsed : parsed.results;
   if (!Array.isArray(rawResults)) {
     throw new Error("Title polish returned an unexpected response shape.");
@@ -55,9 +70,7 @@ export async function selectCategoryFitIndices(
   timeoutMs = 60_000
 ): Promise<number[]> {
   const text = await runClaude({ prompt, model: EDIT_MODEL, timeoutMs });
-  const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-  const jsonText = jsonMatch ? jsonMatch[1].trim() : text.trim();
-  const parsed = JSON.parse(jsonText);
+  const parsed = parseLlmJson(text);
   const keep = Array.isArray(parsed) ? parsed : parsed.keep;
   if (!Array.isArray(keep)) {
     throw new Error("Category fit returned an unexpected response shape.");

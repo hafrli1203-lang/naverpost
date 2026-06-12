@@ -60,14 +60,10 @@ function findVolumeSignal(
   keyword: string,
   signals: SearchVolumeSignal[]
 ): SearchVolumeSignal | undefined {
+  // 정확 일치만 인정한다. 과거 부분일치 폴백은 "누진렌즈 명시야폭" 같은 비검색 조합이
+  // "누진렌즈"의 실측 검색량을 상속받아 pass 판정을 받게 만들어 게이트를 무력화했다.
   const key = normalizeKeywordKey(keyword);
-  const exact = signals.find((signal) => normalizeKeywordKey(signal.keyword) === key);
-  if (exact) return exact;
-
-  return signals.find((signal) => {
-    const signalKey = normalizeKeywordKey(signal.keyword);
-    return key.includes(signalKey) || signalKey.includes(key);
-  });
+  return signals.find((signal) => normalizeKeywordKey(signal.keyword) === key);
 }
 
 function classifyVolumeTier(params: {
@@ -76,8 +72,15 @@ function classifyVolumeTier(params: {
   minVolume: number;
   maxSaturationRatio: number;
   searchAdEnabled: boolean;
+  signalsAvailable: boolean;
 }): KeywordVolumeTier {
-  if (!params.searchAdEnabled || !params.signal) return "unknown";
+  if (!params.searchAdEnabled) return "unknown";
+  if (!params.signal) {
+    // 검색광고 조회가 정상 동작했는데도 신호가 없으면 "검색 수요 미확인"으로 강등한다.
+    // unknown(중립)으로 두면 네이버가 한 번도 본 적 없는 조합이 실측 저수요(weak)보다
+    // 높게 랭크되는 역전이 생겨, 지어낸 키워드가 게이트를 그대로 통과했다.
+    return params.signalsAvailable ? "weak" : "unknown";
+  }
 
   const monthlyTotal = params.signal.monthlyTotalSearches ?? null;
   if (monthlyTotal === null) return "unknown";
@@ -132,6 +135,7 @@ export function applyVolumeGate<T extends KeywordOption>(
       minVolume,
       maxSaturationRatio,
       searchAdEnabled,
+      signalsAvailable: signals.length > 0,
     });
 
     return {

@@ -15,7 +15,13 @@ const NAVER_SEARCHAD_TIMEOUT_MS = 18_000;
 const KEYWORD_SIGNAL_CACHE_FILE = path.join(process.cwd(), "data", "keyword-signal-cache.json");
 const KEYWORD_SIGNAL_CACHE_VERSION = 1;
 const SEARCHAD_CHUNK_SIZE = 5;
-const SEARCHAD_MAX_FRESH_KEYWORDS_PER_RUN = 35;
+// 후보 메인 키워드 전부가 실검색량 조회를 받아야 볼륨 게이트가 의미가 있다.
+// (35로는 LLM 후보 상당수가 미조회 상태로 남아 unknown 통과했다.) 월간 캐시가
+// 쌓이면 신규 조회 수는 빠르게 줄어든다. 필요 시 환경변수로 조정.
+const SEARCHAD_MAX_FRESH_KEYWORDS_PER_RUN = Math.max(
+  10,
+  Math.min(120, Number(process.env.KEYWORD_SEARCHAD_MAX_FRESH) || 80)
+);
 const SEARCHAD_CHUNK_DELAY_MS = 1_250;
 const SEARCHAD_RATE_LIMIT_RETRY_DELAY_MS = 5_000;
 const SEARCHAD_MAX_RETRIES = 1;
