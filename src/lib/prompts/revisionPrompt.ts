@@ -86,6 +86,24 @@ export function buildRevisionPrompt(params: {
     );
   }
 
+  if (validation.languageRisk?.strongAiCliches?.length) {
+    problemLines.push(
+      `- AI 상투어 제거(필수): 다음 표현은 AI가 쓴 글의 대표 신호입니다. 의미는 유지하되 사람이 말하는 표현으로 바꾸거나 빼세요. ${validation.languageRisk.strongAiCliches.join(", ")} (예: "이를 통해"→문장 연결을 어미로, "알아보겠습니다"→바로 본론으로)`
+    );
+  }
+
+  if (validation.languageRisk?.formatViolations?.length) {
+    problemLines.push(
+      `- 형식 위반 수정(필수): ${validation.languageRisk.formatViolations.join(", ")} — 본문 쉼표는 문장을 나누거나 연결 어미로 풀어 모두 제거하세요(표 안과 천단위 숫자는 예외).`
+    );
+  }
+
+  if (validation.languageRisk?.mechanicalSignals?.length) {
+    problemLines.push(
+      `- 문장 리듬 다듬기: ${validation.languageRisk.mechanicalSignals.join(" / ")} — 어미와 문장 길이를 바꿔 균질한 리듬을 깨세요.`
+    );
+  }
+
   if (validation.duplicateRisk?.titlePatternOverlap?.length) {
     problemLines.push(
       `- 중복 회피: 같은 매장 또는 다른 블로그와 유사한 전개가 감지되었습니다. 도입부와 결론의 설명 방식, 정보 순서, 비교 포인트를 바꿔주세요. 참고 중복 패턴: ${validation.duplicateRisk.titlePatternOverlap.slice(0, 2).join(", ")}`

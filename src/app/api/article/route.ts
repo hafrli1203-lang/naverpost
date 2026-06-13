@@ -141,6 +141,10 @@ function needsHardRevision(
     validation.overusedWords.length > 0 ||
     validation.missingKeywords.length > 0 ||
     (validation.structure?.missingTitleKeywordCoverage.length ?? 0) > 0 ||
+    // 사람화 절대 규칙 위반(강한 AI 상투어·본문 쉼표)은 프롬프트가 어겨도
+    // 출구에서 수정 루프로 되돌린다 (설계: docs/designs/body-exit-validation.md).
+    (validation.languageRisk?.strongAiCliches?.length ?? 0) > 0 ||
+    (validation.languageRisk?.formatViolations?.length ?? 0) > 0 ||
     charOutOfRange
   );
 }

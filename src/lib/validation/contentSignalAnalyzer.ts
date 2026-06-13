@@ -36,13 +36,12 @@ function issuesForWords(
   ];
 }
 
+// 주의: 1인칭 경험 표현("매장에서도 자주 듣는" "경험 있으시죠")은 D.I.A. 경험
+// 신호로 프롬프트가 권장하므로 이 목록에 넣지 않는다 (권장-검증 충돌 방지).
 const AI_CLICHE_PATTERNS: RegExp[] = [
-  /경험 있으시죠/g,
   /느끼신 적 있으신가요/g,
   /한 번쯤 있으셨을 거예요/g,
   /많은 분들이/g,
-  /매장에서도 자주 듣/g,
-  /자주 듣습니다/g,
   /이번 글에서는/g,
   /살펴볼게요/g,
   /정리해봤어요/g,
@@ -62,6 +61,84 @@ const AI_CLICHE_PATTERNS: RegExp[] = [
   /기준이 됩니다/g,
   /논의로 이어집니다/g,
 ];
+
+// 검출 즉시 수정 루프를 발동시키는 강한 AI 상투어.
+// 한국어 AI 글 실무·연구에서 공통 지적되는 무결성 높은 목록만 담는다
+// (모호한 표현은 위 소프트 목록 유지 — 과차단 방지).
+const STRONG_AI_CLICHE_PATTERNS: RegExp[] = [
+  /이처럼/g,
+  /이러한/g,
+  /이를 통해/g,
+  /뿐만 아니라/g,
+  /알아보겠습니다/g,
+  /살펴보겠습니다/g,
+  /이상으로/g,
+  /도움이 되셨길/g,
+  /참고하시기 바랍니다/g,
+  /첫째[,，]/g,
+  /둘째[,，]/g,
+];
+
+function findStrongAiCliches(content: string): string[] {
+  const found = new Set<string>();
+  for (const pattern of STRONG_AI_CLICHE_PATTERNS) {
+    const matches = content.match(pattern) ?? [];
+    matches.forEach((match) => found.add(match));
+  }
+  return Array.from(found);
+}
+
+// 표 행·매장 안내 블록을 제외한 본문 텍스트.
+function getProseBody(content: string): string {
+  return content
+    .split(/\r?\n/)
+    .filter((line) => {
+      const trimmed = line.trim();
+      return trimmed && !trimmed.startsWith("|") && !trimmed.startsWith("[") && trimmed !== "---";
+    })
+    .join("\n");
+}
+
+// 본문 쉼표(천단위 숫자 제외) — 프로젝트 절대 규칙이자 한국어 AI 글의 최강 탐지 신호.
+function findFormatViolations(content: string): string[] {
+  const violations: string[] = [];
+  const prose = getProseBody(content).replace(/\d[,，]\d/g, "00");
+  const commaCount = (prose.match(/[,，]/g) ?? []).length;
+  if (commaCount >= 3) {
+    violations.push(`본문 쉼표 ${commaCount}회 사용(금지 규칙 위반)`);
+  }
+  return violations;
+}
+
+// 사람화 보조 신호: 동일 어미 3연속, 문두 접속사 과다 — 소프트(수정 지시문에만 반영).
+function findHumanizationSignals(content: string): string[] {
+  const signals: string[] = [];
+  const prose = getProseBody(content).replace(/^##.*$/gm, "");
+
+  const sentences = prose
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => sentence.length >= 5);
+  let streak = 1;
+  for (let i = 1; i < sentences.length; i += 1) {
+    const prev = sentences[i - 1].replace(/[.!?]+$/, "").slice(-3);
+    const curr = sentences[i].replace(/[.!?]+$/, "").slice(-3);
+    streak = prev && prev === curr ? streak + 1 : 1;
+    if (streak >= 3) {
+      signals.push(`동일 어미 "${curr}" ${streak}문장 연속`);
+      break;
+    }
+  }
+
+  const conjunctionStarts = (
+    prose.match(/(?:^|\n|\. )(그리고|그래서|하지만|또한|따라서|그런데)\s/g) ?? []
+  ).length;
+  if (conjunctionStarts >= 4) {
+    signals.push(`문두 접속사 ${conjunctionStarts}회(권장 3회 이하)`);
+  }
+
+  return signals;
+}
 
 function findAiCliches(content: string): string[] {
   const found = new Set<string>();
@@ -288,9 +365,14 @@ export function analyzeLanguageRisk(content: string, tone?: string): LanguageRis
   const emphasis = findEmphasisWords(content);
   const advertising = findAdvertisingWords(content);
   const aiCliches = findAiCliches(content);
+  const strongAiCliches = findStrongAiCliches(content);
+  const formatViolations = findFormatViolations(content);
   const toneMismatches = findToneMismatches(content, tone);
   const weakHooks = findWeakHooks(content);
-  const mechanicalSignals = findMechanicalSignals(content);
+  const mechanicalSignals = [
+    ...findMechanicalSignals(content),
+    ...findHumanizationSignals(content),
+  ];
 
   const issues: AnalysisIssue[] = [
     ...issuesForWords(
@@ -343,6 +425,20 @@ export function analyzeLanguageRisk(content: string, tone?: string): LanguageRis
       "medium"
     ),
     ...issuesForWords(
+      strongAiCliches,
+      "strong-ai-cliche-detected",
+      "강한 AI 상투어",
+      "AI가 쓴 글의 대표 신호로 자동 수정 대상입니다",
+      "high"
+    ),
+    ...issuesForWords(
+      formatViolations,
+      "format-violation-detected",
+      "형식 위반",
+      "본문 형식 절대 규칙 위반으로 자동 수정 대상입니다",
+      "high"
+    ),
+    ...issuesForWords(
       toneMismatches,
       "tone-mismatch-detected",
       "문체 불일치",
@@ -373,6 +469,8 @@ export function analyzeLanguageRisk(content: string, tone?: string): LanguageRis
     emphasis,
     advertising,
     aiCliches,
+    strongAiCliches,
+    formatViolations,
     toneMismatches,
     weakHooks,
     mechanicalSignals,

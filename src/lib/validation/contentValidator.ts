@@ -146,6 +146,8 @@ export async function validateContent(
     languageRisk.profanity.length > 0 ||
     languageRisk.abuse.length > 0 ||
     languageRisk.adult.length > 0 ||
+    (languageRisk.strongAiCliches?.length ?? 0) > 0 ||
+    (languageRisk.formatViolations?.length ?? 0) > 0 ||
     structure.missingTitleKeywordCoverage.length > 0;
 
   const revisionReasons: string[] = [];
@@ -189,6 +191,12 @@ export async function validateContent(
   }
   if (languageRisk.aiCliches && languageRisk.aiCliches.length > 0) {
     revisionReasons.push(`AI 문체 신호: ${languageRisk.aiCliches.join(", ")}`);
+  }
+  if (languageRisk.strongAiCliches && languageRisk.strongAiCliches.length > 0) {
+    revisionReasons.push(`강한 AI 상투어: ${languageRisk.strongAiCliches.join(", ")}`);
+  }
+  if (languageRisk.formatViolations && languageRisk.formatViolations.length > 0) {
+    revisionReasons.push(`형식 위반: ${languageRisk.formatViolations.join(", ")}`);
   }
   if (languageRisk.toneMismatches && languageRisk.toneMismatches.length > 0) {
     revisionReasons.push(`문체 불일치: ${languageRisk.toneMismatches.join(", ")}`);

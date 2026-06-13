@@ -93,6 +93,10 @@ export interface LanguageRiskAnalysis {
   emphasis: string[];
   advertising: string[];
   aiCliches?: string[];
+  /** 검출 즉시 수정 루프를 발동시키는 강한 AI 상투어 (이처럼/알아보겠습니다 등). */
+  strongAiCliches?: string[];
+  /** 형식 위반 (본문 쉼표 등) — 수정 루프 발동 대상. */
+  formatViolations?: string[];
   toneMismatches?: string[];
   weakHooks?: string[];
   mechanicalSignals?: string[];
