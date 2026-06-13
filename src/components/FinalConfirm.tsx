@@ -7,6 +7,7 @@ import {
   ChevronDown,
   ChevronUp,
   Copy,
+  Download,
   FileText,
   Key,
   RotateCcw,
@@ -18,7 +19,11 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { formatForNaver } from "@/lib/naver/contentFormatter";
+import {
+  buildNaverPlainText,
+  formatForNaver,
+  formatForNaverExport,
+} from "@/lib/naver/contentFormatter";
 import { WorkflowState } from "@/types";
 
 interface FinalConfirmProps {
@@ -104,32 +109,94 @@ export function FinalConfirm({ state, onStartOver }: FinalConfirmProps) {
   const [articleExpanded, setArticleExpanded] = useState(false);
   const [imagesExpanded, setImagesExpanded] = useState(false);
   const [previewMode, setPreviewMode] = useState<"raw" | "naver">("naver");
-  const [copiedHtml, setCopiedHtml] = useState(false);
+  const [copyState, setCopyState] = useState<"idle" | "done" | "error">("idle");
+  const [downloadState, setDownloadState] = useState<"idle" | "working" | "done" | "error">(
+    "idle"
+  );
   const { shop, category, article, images, selectedKeyword } = state;
+
+  const successImages = useMemo(
+    () => images.filter((img) => img.status === "success" && img.imageUrl),
+    [images]
+  );
 
   const previewHtml = useMemo(() => {
     if (!article) return "";
-    const imageUrls = images
-      .filter((img) => img.status === "success" && img.imageUrl)
-      .map((img) => img.imageUrl);
-
     return formatForNaver({
       title: article.title,
       content: article.content,
-      imageUrls,
+      imageUrls: successImages.map((img) => img.imageUrl),
     });
-  }, [article, images]);
+  }, [article, successImages]);
 
   const finalReport = useMemo(() => buildFinalReport(state), [state]);
 
-  const handleCopyHtml = async () => {
-    if (!previewHtml || typeof navigator === "undefined" || !navigator.clipboard) {
+  // 네이버 스마트에디터에 서식이 살아서 붙도록 리치(text/html) + 평문 폴백을 함께 복사한다.
+  // 이미지는 src 상대경로가 깨지므로 [사진 N 자리] 마커로 위치만 표시한다.
+  const handleCopyBody = async () => {
+    if (!article || typeof navigator === "undefined" || !navigator.clipboard) {
+      setCopyState("error");
       return;
     }
+    const richHtml = formatForNaverExport({
+      title: article.title,
+      content: article.content,
+      imageCount: successImages.length,
+    });
+    const plainText = buildNaverPlainText({
+      title: article.title,
+      content: article.content,
+      imageCount: successImages.length,
+    });
+    try {
+      if (typeof ClipboardItem !== "undefined" && navigator.clipboard.write) {
+        await navigator.clipboard.write([
+          new ClipboardItem({
+            "text/html": new Blob([richHtml], { type: "text/html" }),
+            "text/plain": new Blob([plainText], { type: "text/plain" }),
+          }),
+        ]);
+      } else {
+        await navigator.clipboard.writeText(plainText);
+      }
+      setCopyState("done");
+      window.setTimeout(() => setCopyState("idle"), 2500);
+    } catch {
+      try {
+        await navigator.clipboard.writeText(plainText);
+        setCopyState("done");
+        window.setTimeout(() => setCopyState("idle"), 2500);
+      } catch {
+        setCopyState("error");
+      }
+    }
+  };
 
-    await navigator.clipboard.writeText(previewHtml);
-    setCopiedHtml(true);
-    window.setTimeout(() => setCopiedHtml(false), 2000);
+  // 성공 이미지를 순서대로 일괄 저장. 브라우저 다중 다운로드 차단을 피해 간격을 둔다.
+  const handleDownloadAllImages = async () => {
+    if (successImages.length === 0) return;
+    setDownloadState("working");
+    let ok = 0;
+    for (let i = 0; i < successImages.length; i++) {
+      try {
+        const res = await fetch(successImages[i].imageUrl);
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `블로그사진-${i + 1}.jpg`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        ok += 1;
+        await new Promise((resolve) => window.setTimeout(resolve, 400));
+      } catch {
+        // 한 장 실패는 건너뛰고 계속한다.
+      }
+    }
+    setDownloadState(ok > 0 ? "done" : "error");
+    window.setTimeout(() => setDownloadState("idle"), 2500);
   };
 
   return (
@@ -142,16 +209,59 @@ export function FinalConfirm({ state, onStartOver }: FinalConfirmProps) {
         </p>
       </div>
 
-      <Card className="border-green-200 bg-green-50/50">
-        <CardContent className="flex items-start gap-3 py-5">
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-green-100">
-            <CheckCircle className="h-5 w-5 text-green-600" />
+      <Card className="border-teal-200 bg-teal-50/60">
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base text-teal-900">
+            <Copy className="h-4 w-4 text-teal-600" />
+            네이버에 올리기 (복사 → 붙여넣기)
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Button
+              type="button"
+              className="h-11 flex-1 gap-2"
+              onClick={handleCopyBody}
+              disabled={!article}
+            >
+              {copyState === "done" ? (
+                <Check className="h-4 w-4" />
+              ) : (
+                <Copy className="h-4 w-4" />
+              )}
+              {copyState === "done"
+                ? "본문 복사됨"
+                : copyState === "error"
+                  ? "복사 실패 (다시)"
+                  : "본문 복사 (서식 유지)"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="h-11 flex-1 gap-2"
+              onClick={handleDownloadAllImages}
+              disabled={successImages.length === 0 || downloadState === "working"}
+            >
+              <Download className="h-4 w-4" />
+              {downloadState === "working"
+                ? "저장 중..."
+                : downloadState === "done"
+                  ? "이미지 저장됨"
+                  : `이미지 전체 저장 (${successImages.length}장)`}
+            </Button>
           </div>
-          <div className="space-y-1">
-            <p className="font-medium text-green-800">발행 가능한 상태입니다.</p>
-            <p className="text-sm text-green-700">
-              제목, 본문, 이미지 흐름을 한눈에 확인할 수 있습니다. 아래 리포트만 마지막으로
-              보고 바로 발행하면 됩니다.
+
+          <div className="rounded-xl border border-teal-200 bg-white p-4">
+            <p className="mb-2 text-sm font-semibold text-teal-900">붙여넣는 순서</p>
+            <ol className="space-y-1.5 text-sm leading-6 text-slate-700">
+              <li>1. 네이버 블로그 글쓰기 화면을 엽니다.</li>
+              <li>2. 본문 칸을 누르고 붙여넣기 합니다 (Ctrl+V). 제목과 표가 함께 들어갑니다.</li>
+              <li>3. 본문 속 [사진 N 자리] 위치에 저장한 이미지를 끌어다 놓습니다.</li>
+              <li>4. 네이버 화면의 임시저장 버튼을 누릅니다 (발행 아님).</li>
+            </ol>
+            <p className="mt-3 text-xs leading-5 text-slate-500">
+              네이버 편집기가 일부 서식을 단순화할 수 있어 제목·표는 가볍게 다듬어야 할 수
+              있습니다. 발행은 직접 확인 후 임시저장만 하세요.
             </p>
           </div>
         </CardContent>
@@ -296,15 +406,15 @@ export function FinalConfirm({ state, onStartOver }: FinalConfirmProps) {
                   size="sm"
                   variant="outline"
                   className="ml-auto gap-1.5"
-                  onClick={handleCopyHtml}
-                  disabled={!previewHtml}
+                  onClick={handleCopyBody}
+                  disabled={!article}
                 >
-                  {copiedHtml ? (
+                  {copyState === "done" ? (
                     <Check className="h-3.5 w-3.5" />
                   ) : (
                     <Copy className="h-3.5 w-3.5" />
                   )}
-                  {copiedHtml ? "HTML 복사됨" : "네이버 HTML 복사"}
+                  {copyState === "done" ? "복사됨" : "본문 복사"}
                 </Button>
               </div>
 

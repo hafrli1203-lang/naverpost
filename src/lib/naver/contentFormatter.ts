@@ -21,6 +21,124 @@ export function formatForNaver(params: {
   ].join("\n");
 }
 
+/**
+ * 네이버 스마트에디터 붙여넣기용 리치 HTML.
+ * 이미지는 src 상대경로가 붙여넣기에서 깨지므로 <img> 대신 "[사진 N 자리]" 마커를 넣는다.
+ * 사용자는 붙여넣은 뒤 각 마커 자리에 저장한 이미지를 직접 끌어다 놓는다.
+ */
+export function formatForNaverExport(params: {
+  title: string;
+  content: string;
+  imageCount?: number;
+}): string {
+  const { title, content, imageCount = 0 } = params;
+  const body = convertMarkdownToHtml(content);
+  const withMarkers = imageCount > 0 ? insertImageMarkers(body, imageCount) : body;
+
+  return [
+    `<div style="max-width:860px;margin:0 auto;font-family:'Apple SD Gothic Neo','Malgun Gothic',sans-serif;color:#1f2937;line-height:1.9;">`,
+    `<h1 style="margin:0 0 28px;font-size:30px;line-height:1.4;font-weight:800;color:#111827;letter-spacing:-0.02em;">${escapeHtml(
+      title
+    )}</h1>`,
+    withMarkers,
+    `</div>`,
+  ].join("\n");
+}
+
+function buildImageMarker(order: number): string {
+  return `<p style="margin:24px 0;padding:14px 16px;border:2px dashed #94a3b8;border-radius:12px;background:#f8fafc;text-align:center;font-size:15px;font-weight:700;color:#475569;">[ 사진 ${order} 자리 — 저장한 이미지를 여기에 끌어다 놓으세요 ]</p>`;
+}
+
+function insertImageMarkers(html: string, imageCount: number): string {
+  const sections = html.split(
+    /(?=<div style="margin:38px 0 14px;">|<div style="margin:40px 0 18px;|<h3 style="margin:28px 0 12px;)/
+  );
+  if (sections.length === 0 || imageCount === 0) return html;
+
+  const step = Math.max(1, Math.floor(sections.length / imageCount));
+  const result: string[] = [];
+  let imageIndex = 0;
+
+  for (let index = 0; index < sections.length; index++) {
+    result.push(sections[index]);
+    if (imageIndex < imageCount && index > 0 && index % step === 0) {
+      result.push(buildImageMarker(imageIndex + 1));
+      imageIndex++;
+    }
+  }
+  while (imageIndex < imageCount) {
+    result.push(buildImageMarker(imageIndex + 1));
+    imageIndex++;
+  }
+  return result.join("\n");
+}
+
+/**
+ * 붙여넣기 폴백용 평문 텍스트. 마크다운 마커 제거, 표는 "셀 / 셀" 줄로,
+ * 줄바꿈 보존, 이미지 자리에 [사진 N] 마커. (리치 복사가 안 되는 환경 대비)
+ */
+export function buildNaverPlainText(params: {
+  title: string;
+  content: string;
+  imageCount?: number;
+}): string {
+  const { title, content, imageCount = 0 } = params;
+  const lines = content.split("\n");
+  const out: string[] = [title, ""];
+  const headingPositions: number[] = [];
+
+  for (const rawLine of lines) {
+    const line = rawLine.trimEnd();
+    const trimmed = line.trim();
+
+    if (/^\|[\s|:-]+\|$/.test(trimmed)) {
+      continue; // table separator row
+    }
+    if (trimmed.startsWith("|")) {
+      const cells = trimmed
+        .replace(/^\|/, "")
+        .replace(/\|$/, "")
+        .split("|")
+        .map((cell) => stripInline(cell.trim()));
+      out.push(cells.join(" / "));
+      continue;
+    }
+    if (/^#{1,3}\s/.test(trimmed)) {
+      const text = stripInline(trimmed.replace(/^#{1,3}\s/, ""));
+      out.push("");
+      headingPositions.push(out.length);
+      out.push(text);
+      continue;
+    }
+    out.push(stripInline(line.replace(/^- /, "• ")));
+  }
+
+  if (imageCount > 0) {
+    // 소제목 앞에 [사진 N] 마커를 고르게 배치(첫 소제목 제외).
+    const targets = headingPositions.slice(1);
+    const step = Math.max(1, Math.floor(targets.length / imageCount) || 1);
+    let placed = 0;
+    for (let i = 0; i < targets.length && placed < imageCount; i += step) {
+      out.splice(targets[i] + placed * 2, 0, `[사진 ${placed + 1}]`, "");
+      placed++;
+    }
+    while (placed < imageCount) {
+      out.push(`[사진 ${placed + 1}]`);
+      placed++;
+    }
+  }
+
+  return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function stripInline(text: string): string {
+  return text
+    .replace(/\*\*(.+?)\*\*/g, "$1")
+    .replace(/__(.+?)__/g, "$1")
+    .replace(/\*(.+?)\*/g, "$1")
+    .replace(/`(.+?)`/g, "$1");
+}
+
 type Block =
   | { type: "heading"; level: 2 | 3; text: string }
   | { type: "table"; lines: string[] }
