@@ -5,6 +5,35 @@
 
 ---
 
+## v1.8 (2026-06-13)
+
+### C-Rank 보강 4종 (사진 제외)
+
+C-Rank/DIA 점수를 끌어올리는 in-system 레버를 묶어 추가. 실매장 사진 보강은 운영 영역이라 제외.
+
+**1. C-Rank 사전 점검 패널 (UI 연결)**
+- 이미 구현돼 있었지만 UI에 연결 안 된 `/api/analysis` `posting-audit`를 본문 미리보기 화면에 노출.
+- 신규 `components/CRankAudit.tsx`: 질의 의도 집중도(제목 형태소 본문 활성화율)·상위 반복 형태소·과다반복(스팸 신호)·주의 표현·글자수/형태소 종류/쉼표를 점수로 표시. `ArticlePreview` 우측 패널에 마운트.
+- 이미지 마커가 본문에 없다는 경고는 이 앱이 이미지를 별도 단계로 처리하므로 UI에서 숨김.
+- 추가형이라 본문 생성 규칙은 미변경(무회귀).
+
+**2. AI 상투어 워싱 결정론적 치환 보강**
+- 신규 `lib/wash/aiClicheSanitizer.ts`: `contentSignalAnalyzer`가 "약한 AI 상투어"로 검출만 하고 강제 재작성은 안 하던 표현 중, 문법·어미 레지스터를 깨지 않는 안전한 1:1 치환만 적용(예: 차근차근→하나씩, 살펴볼게요→짚어볼게요, 도움이 돼요→도움이 될 수 있어요). 문장 끝을 깨는 구조형 상투어는 의도적으로 제외(LLM 워싱에 위임).
+- `api/article/wash`의 Pass 1·3 결정론 단계에 연결. `washReport.aiClicheReplacements` 집계 추가. 워싱 클릭 시에만 적용돼 기본 생성 경로 무회귀.
+
+**3. 시리즈 발행 플래너 (설계: docs/designs/series-planner.md)**
+- 신규 `lib/topics/seriesPlanner.ts` + `POST /api/topics/series` + `components/SeriesPlanner.tsx`.
+- 한 헤드 키워드를 여러 검색 의도 축(문제·비교·검사·생활·방문·상품)으로 나눠 N편 시리즈를 제안 → 주제 권위(C-Rank 맥락) 누적. `topicPlanner` 축 순환 재사용, BlogOps 노출 1~3위 키워드는 자기잠식 가드로 제외. 매장 미등록 상품 시 카테고리 표준 헤드(누진렌즈 등) 폴백.
+
+**4. 발행 일관성 트래커 (설계: docs/designs/posting-cadence-tracker.md)**
+- 신규 `lib/blogops/cadence.ts` + `GET /api/blogops/cadence` + `components/CadenceTracker.tsx`.
+- BlogOps `/posts`의 `published_at`으로 매장별 마지막 발행 경과·평균 간격·상태(good/slowing/stale) 산출(권장 간격 3일). C-Rank 연결(Chain) 축의 꾸준한 발행 점검. 읽기 전용, BlogOps 다운 시 graceful.
+- 신규 페이지 `/operations`(콘텐츠 운영)에 3·4 마운트. 메인/admin 헤더에서 상호 링크.
+
+**검증:** `tsc --noEmit` 0 에러, `next build` 0 에러(신규 라우트 `/api/topics/series`·`/api/blogops/cadence`·`/operations` 컴파일 확인). 라이브: cadence 6매장 전부 good, series 축 다양성 5편·headKeyword "누진렌즈", posting-audit coverageRatio 1.0 정상.
+
+---
+
 ## v1.7 (2026-06-04)
 
 ### 본문이 수정된 제목/키워드를 무시하고 옛 주제로 써지는 버그

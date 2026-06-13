@@ -331,7 +331,13 @@ export default function AdminPage() {
           >
             <ArrowLeft className="h-5 w-5" />
           </Link>
-          <h1 className="text-lg font-bold text-gray-900">상점 관리</h1>
+          <h1 className="flex-1 text-lg font-bold text-gray-900">상점 관리</h1>
+          <Link
+            href="/operations"
+            className="text-sm text-muted-foreground transition-colors hover:text-gray-700"
+          >
+            콘텐츠 운영
+          </Link>
         </div>
       </header>
 

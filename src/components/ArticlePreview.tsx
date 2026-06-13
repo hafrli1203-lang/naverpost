@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { ArticleChat } from "@/components/ArticleChat";
+import { CRankAudit } from "@/components/CRankAudit";
 import { ArticleContent } from "@/types";
 import {
   CheckCircle,
@@ -512,6 +513,14 @@ export function ArticlePreview({
               )}
             </CardContent>
           </Card>
+
+          <CRankAudit
+            title={article.title}
+            body={article.content}
+            mainKeyword={article.mainKeyword}
+            subKeyword1={article.subKeyword1}
+            subKeyword2={article.subKeyword2}
+          />
 
           {onChat && (
             <ArticleChat

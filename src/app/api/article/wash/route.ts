@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { reviseArticle } from "@/lib/ai/claude";
 import { buildWashingPrompt } from "@/lib/prompts/washingPrompt";
 import { sanitizeMedicalLaw } from "@/lib/wash/medicalLawSanitizer";
+import { sanitizeAiCliches } from "@/lib/wash/aiClicheSanitizer";
 import { validateContent } from "@/lib/validation/contentValidator";
 import type { ArticleContent } from "@/types";
 
@@ -39,12 +40,13 @@ export async function POST(request: NextRequest) {
 
     const charCount = body.charCount ?? 2000;
 
-    // Pass 1 — 결정론적 의료법/광고법 안전화
+    // Pass 1 — 결정론적 의료법/광고법 안전화 + 약한 AI 상투어 사람말투 치환
     const sanitized = sanitizeMedicalLaw(article.content);
+    const declichedPass1 = sanitizeAiCliches(sanitized.content);
 
     // Pass 2 — LLM 워싱: 안경사 톤 + 본문 구조 점검 + 잔존 위반 마무리 정리
     const washingPrompt = buildWashingPrompt({
-      originalContent: sanitized.content,
+      originalContent: declichedPass1.content,
       mainKeyword: article.mainKeyword,
       subKeyword1: article.subKeyword1,
       subKeyword2: article.subKeyword2,
@@ -64,9 +66,10 @@ export async function POST(request: NextRequest) {
 
     let content = stripLeadingTitleLine(washedRaw, article.title);
 
-    // Pass 3 — LLM 워싱 후에도 잔존할 수 있는 의료/광고 위반 표현을 한 번 더 결정론적으로 청소
+    // Pass 3 — LLM 워싱 후에도 잔존할 수 있는 의료/광고 위반 표현 + AI 상투어를 한 번 더 결정론적으로 청소
     const finalSanitized = sanitizeMedicalLaw(content);
-    content = finalSanitized.content;
+    const declichedPass3 = sanitizeAiCliches(finalSanitized.content);
+    content = declichedPass3.content;
 
     const validationKeywords = {
       title: article.title,
@@ -86,7 +89,12 @@ export async function POST(request: NextRequest) {
         preWashContent: article.preWashContent ?? article.content,
         preWashValidation: article.preWashValidation ?? article.validation,
         washReport: {
-          deterministicReplacements: sanitized.totalReplacements + finalSanitized.totalReplacements,
+          deterministicReplacements:
+            sanitized.totalReplacements +
+            finalSanitized.totalReplacements +
+            declichedPass1.totalReplacements +
+            declichedPass3.totalReplacements,
+          aiClicheReplacements: declichedPass1.totalReplacements + declichedPass3.totalReplacements,
           deterministicByCategory: {
             medicalTerm: sanitized.byCategory["medical-term"] + finalSanitized.byCategory["medical-term"],
             exaggeration: sanitized.byCategory.exaggeration + finalSanitized.byCategory.exaggeration,

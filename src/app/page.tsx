@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { toast } from "sonner";
 import { ArticlePreview } from "@/components/ArticlePreview";
 import { FinalConfirm } from "@/components/FinalConfirm";
@@ -668,14 +669,22 @@ export default function Home() {
       <header className="sticky top-0 z-50 border-b border-gray-200 bg-white">
         <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-4">
           <h1 className="text-lg font-bold text-gray-900">네이버 블로그 콘텐츠 생성기</h1>
-          {uiStage > 0 && (
-            <button
-              onClick={handleStartOver}
+          <div className="flex items-center gap-4">
+            <Link
+              href="/operations"
               className="text-sm text-muted-foreground transition-colors hover:text-gray-700"
             >
-              새로 시작
-            </button>
-          )}
+              콘텐츠 운영
+            </Link>
+            {uiStage > 0 && (
+              <button
+                onClick={handleStartOver}
+                className="text-sm text-muted-foreground transition-colors hover:text-gray-700"
+              >
+                새로 시작
+              </button>
+            )}
+          </div>
         </div>
       </header>
 
