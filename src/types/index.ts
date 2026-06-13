@@ -46,6 +46,8 @@ export interface KeywordGenerationResult {
 export interface KeywordValidationResult {
   isValid: boolean;
   failures: { rule: string; reason: string }[];
+  /** 같은 소재의 기존 글이 있지만 다른 관점이라 허용된 시리즈 후보. */
+  series?: boolean;
 }
 
 // ===== Blai Analysis Types =====

@@ -140,8 +140,13 @@ export function validateKeywordOption(
     });
   }
 
-  // Rule 6: Same-store duplicate protection. The target blog must not reuse the
-  // same title or the same main keyword/material from its own history.
+  // Rule 6 (시리즈 인식): 같은 매장 이력 보호.
+  // "같은 내용 반복"만 차단하고 시리즈(같은 소재 + 다른 관점)는 허용한다.
+  // - 동일 제목 → 차단
+  // - 같은 메인 키워드 이력 3회 이상 → 차단 (한 키워드 무한 반복 방지)
+  // - 최근 발행 10개 안에 같은 키워드 → 차단 (연속 게시 방지; forbiddenList는
+  //   RSS 최신순이 앞에 오므로 앞 10개를 최근으로 본다)
+  // - 그 외: 기존 글과 제목 유사도 높으면(같은 관점) 차단, 낮으면 시리즈로 허용
   const titleNormalized = title.replace(/\s/g, "");
   for (const forbidden of forbiddenList) {
     const forbiddenNormalized = forbidden.replace(/\s/g, "");
@@ -156,12 +161,33 @@ export function validateKeywordOption(
       break;
     }
   }
-  const sameStoreMainKeyword = forbiddenList.some((forbidden) => forbidden.includes(mainKeyword));
-  if (sameStoreMainKeyword) {
+
+  let series = false;
+  const keywordMatches = forbiddenList.filter((forbidden) => forbidden.includes(mainKeyword));
+  if (keywordMatches.length >= 3) {
     failures.push({
       rule: "rule6",
-      reason: `같은 매장 기존 글에 메인 키워드 "${mainKeyword}"가 이미 사용되었습니다`,
+      reason: `메인 키워드 "${mainKeyword}"로 이미 ${keywordMatches.length}개 글이 있습니다 (키워드 소진)`,
     });
+  } else if (
+    forbiddenList.slice(0, 10).some((forbidden) => forbidden.includes(mainKeyword))
+  ) {
+    failures.push({
+      rule: "rule6",
+      reason: `메인 키워드 "${mainKeyword}"가 최근 발행 글에 사용되었습니다 (연속 게시 방지)`,
+    });
+  } else if (keywordMatches.length > 0) {
+    const sameAngle = keywordMatches.some(
+      (forbidden) => titleSimilarity(title, forbidden) >= 0.5
+    );
+    if (sameAngle) {
+      failures.push({
+        rule: "rule6",
+        reason: `메인 키워드 "${mainKeyword}"의 기존 글과 같은 관점입니다 (시리즈가 되려면 다른 각도 필요)`,
+      });
+    } else {
+      series = true;
+    }
   }
 
   void referenceList;
@@ -169,5 +195,23 @@ export function validateKeywordOption(
   return {
     isValid: failures.length === 0,
     failures,
+    ...(series ? { series: true } : {}),
   };
+}
+
+function tokenizeForSimilarity(text: string): string[] {
+  return [...new Set(text.toLowerCase().match(/[가-힣a-z0-9]{2,}/g) ?? [])];
+}
+
+/** 토큰 기반 제목 유사도(0~1). 시리즈(다른 관점) 판별에 쓴다. */
+export function titleSimilarity(a: string, b: string): number {
+  const aTokens = tokenizeForSimilarity(a);
+  const bTokens = tokenizeForSimilarity(b);
+  if (aTokens.length === 0 || bTokens.length === 0) return 0;
+  const bSet = new Set(bTokens);
+  const shared = aTokens.filter((token) => bSet.has(token)).length;
+  const union = new Set([...aTokens, ...bTokens]).size;
+  const jaccard = union === 0 ? 0 : shared / union;
+  const overlapByShorter = shared / Math.max(1, Math.min(aTokens.length, bTokens.length));
+  return Math.max(jaccard, overlapByShorter);
 }

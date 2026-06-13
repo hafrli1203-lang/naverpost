@@ -27,6 +27,10 @@ import {
 } from "@/lib/keywords/seasonalStrategy";
 import { inferSmartBlockSubKeywords } from "@/lib/analysis/smartBlock";
 import { getCorpusTitles } from "@/lib/analysis/titleCorpus";
+import {
+  getTopExposedKeywordKeys,
+  normalizeExposureKeyword,
+} from "@/lib/blogops/insights";
 import { analyzeCompetitorMorphology } from "@/lib/analysis/competitorMorphology";
 import { analyzeTitleSimilarity } from "@/lib/analysis/titleSimilarity";
 import { combineKeywords } from "@/lib/keywords/keywordCombiner";
@@ -96,8 +100,8 @@ const KEYWORD_FIRST_EDIT_TIMEOUT_MS = 70_000;
 const KEYWORD_TITLE_POLISH_TIMEOUT_MS = 90_000;
 const KEYWORD_CATEGORY_FIT_TIMEOUT_MS = 60_000;
 const KEYWORD_RESULT_CACHE_ENABLED = process.env.KEYWORD_RESULT_CACHE !== "0";
-// v17: 실제 업종 제목 말뭉치(용어·표현 기준) 주입 + 다양화 후 출구 재검증 — 이전 결과 무효화.
-const KEYWORD_RESULT_CACHE_VERSION = 17;
+// v18: rule6 시리즈 허용(다른 관점) + 테마 감점 완화 + 자기잠식 가드 — 이전 결과 무효화.
+const KEYWORD_RESULT_CACHE_VERSION = 18;
 const KEYWORD_RESULT_CACHE_FILE = path.join(process.cwd(), "data", "keyword-result-cache.json");
 
 type KeywordResultResponseData = {
@@ -2741,7 +2745,11 @@ async function analyzeOptions(params: {
           getVolumeTierScore(option._volumeTier) +
           (demandSignal ? getDemandSignalScore(demandSignal) : 0) -
           (hasMeasuredDemand ? 0 : 18) -
-          Math.min(45, sameStoreThemeOverlap * 15) -
+          // 시리즈(같은 소재·다른 관점)는 허용하되 새 소재보다 약간 뒤로.
+          (validation.series ? 10 : 0) -
+          // 이력 테마 감점 완화(-15→-8, 캡 -45→-24): 배치 내 다양성은 공통어/축 캡이
+          // 지키므로 이력 감점이 키워드 공간을 잠그지 않게 한다 (시리즈 억제 해소).
+          Math.min(24, sameStoreThemeOverlap * 8) -
           Math.min(30, crossBlogThemeOverlap * 4),
       };
     })
@@ -2836,7 +2844,7 @@ export async function POST(request: NextRequest) {
     // 느릴 수 있어 기존 수집과 병렬로 돌리고 18초 타임아웃을 둔다. 실패/초과/내부 unavailable 시
     // null 로 떨어져 제목 방향참고만 남는다(속도 회귀·생성 실패 없음).
     const morphologySeed = (effectiveTopic?.trim() || category.name).trim();
-    const [historyOutcome, competitorOutcome, demandOutcome, morphologyOutcome, corpusOutcome] = await Promise.all([
+    const [historyOutcome, competitorOutcome, demandOutcome, morphologyOutcome, corpusOutcome, topExposedOutcome] = await Promise.all([
       // RSS 이력 + 세션 저장소 이력 병합.
       // 임시저장만 수행하는 워크플로우 특성상 RSS 에는 시스템 생성물이 반영되지 않으므로
       // 세션 저장소의 최근 생성 이력을 타깃=forbidden / 나머지=reference 로 합쳐
@@ -2907,6 +2915,8 @@ export async function POST(request: NextRequest) {
           return [] as string[];
         }
       })(),
+      // 자기잠식 가드: 노출 측정에서 이미 1~3위인 키워드(BlogOps). 실패 시 빈 집합.
+      getTopExposedKeywordKeys(shopId).catch(() => new Set<string>()),
     ]);
 
     const { forbiddenList, referenceList } = historyOutcome;
@@ -2937,6 +2947,12 @@ export async function POST(request: NextRequest) {
     const corpusTitles: string[] = corpusOutcome;
     if (corpusTitles.length === 0) {
       signalNotes.push("업종 제목 말뭉치 없음(수집 실패) — 용어 기준 없이 생성됨");
+    }
+    const topExposedKeys: Set<string> = topExposedOutcome;
+    if (topExposedKeys.size > 0) {
+      signalNotes.push(
+        `자기잠식 가드: 검색 1~3위 노출 중인 키워드 ${topExposedKeys.size}개는 재작성 대상에서 제외`
+      );
     }
 
     const strategyGuide = buildKeywordStrategyGuide({
@@ -3063,6 +3079,12 @@ export async function POST(request: NextRequest) {
             `${candidate.title} ${candidate.mainKeyword} ${candidate.subKeyword1} ${candidate.subKeyword2}`,
             productHeads
           )
+      )
+      // 자기잠식 가드: 이미 검색 1~3위에 노출 중인 키워드는 새 글로 재작성하지 않는다.
+      // (내 1위 글과 내 새 글이 같은 키워드에서 경쟁하는 것을 방지)
+      .filter(
+        (candidate) =>
+          !topExposedKeys.has(normalizeExposureKeyword(candidate.mainKeyword))
       )
       .filter((candidate) => {
         const key = `${candidate.title}|${candidate.mainKeyword}`;
