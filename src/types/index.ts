@@ -100,6 +100,8 @@ export interface LanguageRiskAnalysis {
   toneMismatches?: string[];
   weakHooks?: string[];
   mechanicalSignals?: string[];
+  /** 프롬프트 지침 어휘가 소제목·표 머리글에 그대로 새어나온 경우 — 수정 루프 발동 대상. */
+  templateLeaks?: string[];
   issues: AnalysisIssue[];
 }
 

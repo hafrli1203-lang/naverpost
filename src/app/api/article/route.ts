@@ -145,6 +145,7 @@ function needsHardRevision(
     // 출구에서 수정 루프로 되돌린다 (설계: docs/designs/body-exit-validation.md).
     (validation.languageRisk?.strongAiCliches?.length ?? 0) > 0 ||
     (validation.languageRisk?.formatViolations?.length ?? 0) > 0 ||
+    (validation.languageRisk?.templateLeaks?.length ?? 0) > 0 ||
     charOutOfRange
   );
 }

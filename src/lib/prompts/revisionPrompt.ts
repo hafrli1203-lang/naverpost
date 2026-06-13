@@ -98,6 +98,14 @@ export function buildRevisionPrompt(params: {
     );
   }
 
+  if (validation.languageRisk?.templateLeaks?.length) {
+    problemLines.push(
+      `- 지침 단어 노출 수정(필수): ${validation.languageRisk.templateLeaks.join(
+        " / "
+      )} — "신호" "넘겨짚을" "판별 축" "확인 순서" 같은 작성 지침용 단어를 소제목·표 머리글에서 빼고 실제 사람이 쓰는 말로 바꾸세요. 집과 안경원을 나눠 보여줄 때는 "집에서 보이는 모습 / 안경원에서 손보는 부분"처럼 자연스럽게 쓰세요. 표의 행 구분과 내용은 그대로 두고 머리글 문구만 자연어로 교체하세요.`
+    );
+  }
+
   if (validation.languageRisk?.mechanicalSignals?.length) {
     problemLines.push(
       `- 문장 리듬 다듬기: ${validation.languageRisk.mechanicalSignals.join(" / ")} — 어미와 문장 길이를 바꿔 균질한 리듬을 깨세요.`

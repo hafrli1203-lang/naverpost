@@ -88,6 +88,34 @@ function findStrongAiCliches(content: string): string[] {
   return Array.from(found);
 }
 
+// 프롬프트 지침 어휘가 본문 구조(소제목·표 머리글)로 그대로 새어나온 경우를 잡는다.
+// 평문의 자연스러운 "신호"(예: "위험 신호")는 오검출되지 않도록 구조 위치에서만,
+// 그리고 '집/안경원' 대비 프레임과 결합된 경우로 한정한다. "넘겨짚"은 출력에 쓰일 때
+// 거의 항상 지침 누수(넘겨짚다=잘못 짐작하다)이므로 구조 위치에서 단독으로도 잡는다.
+const TEMPLATE_LEAK_PATTERN = /(집에서|안경원에서|매장에서)[^|\n]{0,12}신호/;
+
+function findTemplateLeakSignals(content: string): string[] {
+  const issues = new Set<string>();
+  const lines = content.split(/\r?\n/);
+  const headings = lines.filter((line) => line.trim().startsWith("##"));
+  const tableRows = lines.filter((line) => line.trim().startsWith("|"));
+
+  for (const heading of headings) {
+    if (/넘겨짚/.test(heading) || TEMPLATE_LEAK_PATTERN.test(heading)) {
+      const text = heading.replace(/^#+\s*/, "").trim();
+      issues.add(`소제목에 지침 단어가 그대로 노출됨("${text}")`);
+      break;
+    }
+  }
+  for (const row of tableRows) {
+    if (/넘겨짚/.test(row) || TEMPLATE_LEAK_PATTERN.test(row)) {
+      issues.add("표 머리글에 '집에서/안경원에서 ~신호' 식 지침 단어가 그대로 들어감");
+      break;
+    }
+  }
+  return Array.from(issues);
+}
+
 // 표 행·매장 안내 블록을 제외한 본문 텍스트.
 function getProseBody(content: string): string {
   return content
@@ -368,6 +396,7 @@ export function analyzeLanguageRisk(content: string, tone?: string): LanguageRis
   const strongAiCliches = findStrongAiCliches(content);
   const formatViolations = findFormatViolations(content);
   const toneMismatches = findToneMismatches(content, tone);
+  const templateLeaks = findTemplateLeakSignals(content);
   const weakHooks = findWeakHooks(content);
   const mechanicalSignals = [
     ...findMechanicalSignals(content),
@@ -439,6 +468,13 @@ export function analyzeLanguageRisk(content: string, tone?: string): LanguageRis
       "high"
     ),
     ...issuesForWords(
+      templateLeaks,
+      "template-leak-detected",
+      "지침 단어 노출",
+      "작성 지침용 단어가 소제목·표 머리글에 그대로 노출되어 자동 수정 대상입니다",
+      "high"
+    ),
+    ...issuesForWords(
       toneMismatches,
       "tone-mismatch-detected",
       "문체 불일치",
@@ -472,6 +508,7 @@ export function analyzeLanguageRisk(content: string, tone?: string): LanguageRis
     strongAiCliches,
     formatViolations,
     toneMismatches,
+    templateLeaks,
     weakHooks,
     mechanicalSignals,
     issues,
