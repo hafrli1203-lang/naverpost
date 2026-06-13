@@ -49,6 +49,12 @@ export function buildImagePrompts(params: {
 - 원고에 "어린이"가 없으면 어린이 이미지 금지
 - 원고에 "노안/다초점"이 없으면 중장년 이미지 금지
 
+# 인종 — 절대 규칙 (어김 금지)
+★★★ 모든 인물은 예외 없이 한국인(동아시아 한국인)입니다 ★★★
+- 사람이 등장하는 모든 프롬프트에 "Korean person, East Asian Korean ethnicity"를 반드시 넣으세요.
+- 서양인/백인/외국인 얼굴은 절대 금지. "absolutely not Western, not Caucasian, not foreign" 를 인물 프롬프트에 포함하세요.
+- 한 명이든 여러 명이든, 배경에 스쳐 지나가는 사람이든 전부 한국인이어야 합니다.
+
 # 원고 분석 방법
 
 ## 1단계: 핵심 키워드 추출
@@ -86,18 +92,25 @@ ${sectionGuide}
 - 인물 이미지: 원고 주인공/상황에 맞는 한국인
 - 정보 이미지: 원고에 나온 개념/도구/비유
 
+# 현실성 원칙 (AI 티 제거 — 매우 중요)
+★★★ 광고 모델·스톡사진이 아니라 "동네 안경원에서 손님이 실제로 찍힌 사진"처럼 보여야 합니다 ★★★
+- AI가 만든 티가 나는 신호를 피하세요: 인위적으로 매끈한 피부, 잡티 하나 없는 얼굴, 좌우 완벽 대칭, 스튜디오 광택, 과한 보정, 스톡사진 미소.
+- 다음 영어 표현은 쓰지 마세요: glossy skin, airbrushed, flawless, perfect symmetry, plastic skin, ultra-polished, 8k hyperdetailed, glamour.
+
 # 프롬프트 규칙
 
-## 인물 이미지
-- 반드시 "Korean" 명시
-- 원고에 나온 연령대/직업/상황 그대로 반영
-- 원고의 구체적 행동/증상 묘사
+## 인물 이미지 (진짜 찍은 사진처럼)
+- 반드시 "Korean person, East Asian Korean ethnicity, absolutely not Western/Caucasian/foreign" 명시. 모델이 아니라 동네에서 볼 법한 평범하고 자연스러운 한국 사람.
+- 원고에 나온 연령대/직업/상황/행동/증상 그대로 반영.
 - 계절에 맞는 의상: ${clothing}
+- 아래 영어 표현을 인물 프롬프트에 반드시 포함해 "실제로 찍은 사진"의 질감을 주세요:
+  "candid documentary photograph of an ordinary relatable Korean person (not a model), natural available window light, realistic skin texture with visible pores and subtle imperfections, natural relaxed expression, shot on 35mm film, soft natural color, authentic everyday moment, slight natural imperfections"
 
 ## 정보 이미지
 - 원고에 나온 개념/비유/도구를 직접 표현
 - "no text, no letters, no words" 필수 포함
 - 원고에 없는 제품은 넣지 않기
+- 정보 이미지도 광택 없는 자연스러운 실사 질감으로: "natural realistic photo, soft daylight, no glossy CGI look"
 
 # 블로그 원고
 ${articleContent}
@@ -114,7 +127,8 @@ ${articleContent}
 ...
 (마지막 프롬프트 = 본문 마무리 장면)
 
-각 프롬프트 끝에 "--ar 4:3" 포함. 인물 이미지는 "real photo, DSLR 8k" 포함.`;
+각 프롬프트 끝에 "--ar 4:3" 포함.
+인물 이미지에는 "8k DSLR" 대신 위 현실성 표현(candid documentary, 35mm film, visible pores, natural available light)을 넣어 진짜 찍은 사진처럼 만드세요. 과하게 선명하고 매끈한 스톡사진 표현은 쓰지 마세요.`;
 }
 
 function extractSections(text: string): string[] {
