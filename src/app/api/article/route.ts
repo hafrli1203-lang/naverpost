@@ -141,6 +141,10 @@ function needsHardRevision(
     validation.overusedWords.length > 0 ||
     validation.missingKeywords.length > 0 ||
     (validation.structure?.missingTitleKeywordCoverage.length ?? 0) > 0 ||
+    // C-Rank 질의의도: 제목 핵심 형태소가 본문에 안 깔리면("순서" 누락 등) 생성 단계에서
+    // 바로 보강한다. 검출은 morphology에 이미 있었으나 게이트에 미연결이라 사전점검에서야
+    // 잡혔다 — 생성이 correct-by-construction이 되도록 연결한다. revisionPrompt가 보강 지시 보유.
+    (validation.morphology?.missingTitleMorphemesInBody?.length ?? 0) > 0 ||
     // 사람화 절대 규칙 위반(강한 AI 상투어·본문 쉼표)은 프롬프트가 어겨도
     // 출구에서 수정 루프로 되돌린다 (설계: docs/designs/body-exit-validation.md).
     (validation.languageRisk?.strongAiCliches?.length ?? 0) > 0 ||
@@ -234,6 +238,9 @@ export async function POST(request: NextRequest) {
           subKeyword1: keyword.subKeyword1,
           subKeyword2: keyword.subKeyword2,
           categoryName: category.name,
+          // 자연스러운 제목을 조사 주제로 앞세운다(붙인 키워드 조합만 주면 Perplexity가
+          // 못 알아듣고 일반 주제로 빗나가 본문이 제목과 무관해진다).
+          topic: keyword.title,
           glossaryHint,
         }),
         RESEARCH_TIMEOUT_MS,

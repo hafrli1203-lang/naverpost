@@ -47,6 +47,7 @@ export async function POST(request: NextRequest) {
     // Pass 2 — LLM 워싱: 안경사 톤 + 본문 구조 점검 + 잔존 위반 마무리 정리
     const washingPrompt = buildWashingPrompt({
       originalContent: declichedPass1.content,
+      title: article.title,
       mainKeyword: article.mainKeyword,
       subKeyword1: article.subKeyword1,
       subKeyword2: article.subKeyword2,

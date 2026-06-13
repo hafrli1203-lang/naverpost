@@ -15,6 +15,7 @@ import { getToneGuide } from "./articlePrompt";
 
 export function buildWashingPrompt(params: {
   originalContent: string;
+  title: string;
   mainKeyword: string;
   subKeyword1: string;
   subKeyword2: string;
@@ -22,7 +23,7 @@ export function buildWashingPrompt(params: {
   shopName: string;
   tone?: string;
 }): string {
-  const { originalContent, mainKeyword, subKeyword1, subKeyword2, charCount, shopName, tone } = params;
+  const { originalContent, title, mainKeyword, subKeyword1, subKeyword2, charCount, shopName, tone } = params;
   const toneGuide = getToneGuide(tone);
 
   return `당신은 안경원 블로그 본문을 광고법·의료법에 안전하게 다듬는 워싱 에디터입니다.
@@ -82,11 +83,12 @@ ${toneGuide}
 [소제목·표 머리글 자연스러움 자기점검 — 출력 직전 반드시]
 - 출력하기 전에 모든 소제목과 표 머리글(컬럼명)을 한 번 다시 소리 내어 읽어 보세요.
 - 사람이 실제로 쓴 말이 아니라 '작성 지침을 옮긴 라벨'처럼 들리는 것이 있으면 다시 쓰세요. 판별 기준은 단어 목록이 아니라 느낌입니다 — 도식적인 명사로 딱 떨어지게 끝나거나(예: 어떤 단어 + "신호/축/순서/포인트/요소"), 두 칸이 억지스러운 대칭을 이루거나, 안경사가 손님 앞에서 절대 입으로 말하지 않을 표현이면 라벨입니다.
-- 라벨로 느껴지면 손님에게 실제로 설명하듯 자연스러운 말로 바꾸세요(예: "집에서 보이는 모습" "안경원에서 손보는 부분"). 표의 행 구분과 칸 내용은 그대로 두고 머리글 문구만 자연어로 교체하세요.
+- 라벨로 느껴지면 비교 대상을 그대로 가리키는 자연스러운 말로 바꾸세요(예: "뿔테 / 금속테" "증상 / 대처법" "일반 렌즈 / 기능성 렌즈"). "집에서 보이는 모습" 같은 의미 없는 억지 구분은 만들지 마세요. 표의 행 구분과 칸 내용은 그대로 두고 머리글 문구만 자연어로 교체하세요.
 
-[키워드 보존]
+[키워드·제목 형태소 보존 — C-Rank 질의의도]
 - 메인 키워드 "${mainKeyword}"는 원형 그대로 본문에 최소 2회 남기세요.
 - 서브 키워드 "${subKeyword1}", "${subKeyword2}"는 원형 그대로 각각 최소 1회 남기세요.
+- 제목 "${title}"에 들어간 핵심 단어들은 본문에서 그대로 유지하세요. 동의어로 바꾸거나 빼면 제목-본문 질의 의도가 흐려져 C-Rank가 떨어집니다. (예: 제목에 "순서"가 있으면 본문에도 "순서"가 남아 있어야 합니다.)
 - 키워드 단어 안에 의료 단어가 들어 있어도(예: "안경수리") 키워드는 그대로 유지하세요.
 
 [분량]

@@ -63,6 +63,10 @@ import type { KeywordOption, KeywordOptionAnalysis, SearchVolumeSignal } from "@
 
 export const maxDuration = 360;
 const TARGET_RESULT_COUNT = 10;
+// 건강한 런도 백필 한계로 9개에서 멈추는 경우가 잦다. 캐시 조건이 엄격히 10이면
+// 그런 런이 저장되지 않아 매 호출이 새 라이브 런이 되고(분산↑), 자기잠식 제거가 겹친
+// 얇은 런에서 2개로 붕괴할 수 있다. "충분히 좋은" 런(>= MIN)은 저장·재사용한다.
+const KEYWORD_RESULT_MIN_CACHEABLE = 7;
 const KEYWORD_FAST_MODE = process.env.KEYWORD_FAST_MODE !== "0";
 const KEYWORD_AI_EXPANSION_ENABLED = process.env.KEYWORD_AI_EXPANSION !== "0";
 const KEYWORD_GPT_EXPANSION_ENABLED = process.env.KEYWORD_GPT_EXPANSION !== "0";
@@ -101,7 +105,8 @@ const KEYWORD_TITLE_POLISH_TIMEOUT_MS = 90_000;
 const KEYWORD_CATEGORY_FIT_TIMEOUT_MS = 60_000;
 const KEYWORD_RESULT_CACHE_ENABLED = process.env.KEYWORD_RESULT_CACHE !== "0";
 // v18: rule6 시리즈 허용(다른 관점) + 테마 감점 완화 + 자기잠식 가드 — 이전 결과 무효화.
-const KEYWORD_RESULT_CACHE_VERSION = 18;
+// v19: 합성 헤드·비검색 조합 억제(GPT 프롬프트) + 붕괴 floor 3종 + 제목 끝맺음 계열 정규화.
+const KEYWORD_RESULT_CACHE_VERSION = 19;
 const KEYWORD_RESULT_CACHE_FILE = path.join(process.cwd(), "data", "keyword-result-cache.json");
 
 type KeywordResultResponseData = {
@@ -182,7 +187,7 @@ async function getCachedKeywordResultData(
   if (!KEYWORD_RESULT_CACHE_ENABLED) return null;
   const cache = await readKeywordResultCache();
   const entry = cache.months[month]?.[key] ?? null;
-  if (!entry || entry.data.results.length < TARGET_RESULT_COUNT) return null;
+  if (!entry || entry.data.results.length < KEYWORD_RESULT_MIN_CACHEABLE) return null;
   return entry;
 }
 
@@ -192,7 +197,7 @@ async function saveKeywordResultData(
   month = getKeywordResultCacheMonth()
 ): Promise<void> {
   if (!KEYWORD_RESULT_CACHE_ENABLED) return;
-  if (data.results.length < TARGET_RESULT_COUNT) return;
+  if (data.results.length < KEYWORD_RESULT_MIN_CACHEABLE) return;
   const cache = await readKeywordResultCache();
   const monthCache = cache.months[month] ?? {};
   monthCache[key] = {
@@ -2011,7 +2016,17 @@ function appendLooseLlmBackfill<T extends AnalyzedKeyword>(
 
 // 제목의 끝 어절(명사형 끝맺음)을 키로 본다. 예: "...적응 문제"→"문제", "...살펴볼 원인"→"원인".
 function getTitleEndingKey(title: string): string {
-  const tokens = title.trim().split(/\s+/);
+  // 마지막 어절만 보면 "쓰인다면/불편하다면/남는다면"이 서로 다른 끝맺음으로 잡혀
+  // "~다면" 계열 반복(절-어미 패턴)이 다양화에서 빠져나간다. 계열로 정규화해 묶는다.
+  const trimmed = title.trim();
+  if (/다면$/.test(trimmed)) return "다면";
+  if (/(을|를|이|가)?\s*때$/.test(trimmed) || /때$/.test(trimmed)) return "때";
+  if (/(까|까요|ㄹ까|일까)$/.test(trimmed)) return "질문";
+  if (/(법|순서|방법)$/.test(trimmed)) return "방법";
+  if (/(이유|원인)$/.test(trimmed)) return "이유";
+  if (/(부분|점|곳|것)$/.test(trimmed)) return "부분";
+  if (/(차이|기준)$/.test(trimmed)) return "기준";
+  const tokens = trimmed.split(/\s+/);
   return tokens[tokens.length - 1] ?? "";
 }
 
@@ -3068,7 +3083,7 @@ export async function POST(request: NextRequest) {
     }
 
     const firstBatchSeen = new Set<string>();
-    firstBatch = [...firstBatch, ...aiSeedCandidates]
+    const firstBatchAll = [...firstBatch, ...aiSeedCandidates]
       .filter(isStructurallyUsableLlmCandidate)
       .filter((candidate) => isCategoryAppropriateCandidate(category.id, candidate))
       // 매장이 취급하지 않는 브랜드 키워드는 진입 단계에서 차단한다.
@@ -3080,12 +3095,6 @@ export async function POST(request: NextRequest) {
             productHeads
           )
       )
-      // 자기잠식 가드: 이미 검색 1~3위에 노출 중인 키워드는 새 글로 재작성하지 않는다.
-      // (내 1위 글과 내 새 글이 같은 키워드에서 경쟁하는 것을 방지)
-      .filter(
-        (candidate) =>
-          !topExposedKeys.has(normalizeExposureKeyword(candidate.mainKeyword))
-      )
       .filter((candidate) => {
         const key = `${candidate.title}|${candidate.mainKeyword}`;
         if (firstBatchSeen.has(key)) return false;
@@ -3093,6 +3102,23 @@ export async function POST(request: NextRequest) {
         return true;
       })
       .slice(0, TARGET_RESULT_COUNT * 8);
+
+    // 자기잠식 가드: 이미 검색 1~3위에 노출 중인 키워드는 새 글로 재작성하지 않는다.
+    // (내 1위 글과 내 새 글이 같은 키워드에서 경쟁하는 것을 방지)
+    // 단, 가드 제거 후 남는 후보가 floor 미만이면 풀 붕괴(→ 결과 2개) 위험이 있으므로
+    // 이때는 노출 중 후보를 맨 뒤에 재편입한다(가드는 충분히 남을 때만 강제).
+    const nonCannibalBatch = firstBatchAll.filter(
+      (candidate) => !topExposedKeys.has(normalizeExposureKeyword(candidate.mainKeyword))
+    );
+    firstBatch =
+      nonCannibalBatch.length >= TARGET_RESULT_COUNT
+        ? nonCannibalBatch
+        : [
+            ...nonCannibalBatch,
+            ...firstBatchAll.filter((candidate) =>
+              topExposedKeys.has(normalizeExposureKeyword(candidate.mainKeyword))
+            ),
+          ];
 
     if (!Array.isArray(firstBatch) || firstBatch.length === 0) {
       return NextResponse.json(
@@ -3120,8 +3146,24 @@ export async function POST(request: NextRequest) {
         );
         const keepSet = new Set(keepIndices);
         const fitted = firstBatch.filter((_, index) => keepSet.has(index + 1));
-        if (fitted.length > 0) {
+        // LLM 분류가 과도하게 솎아내 풀이 floor 미만으로 떨어지면(→ 결과 2개 붕괴),
+        // fitted를 앞에 두되 나머지를 예비로 유지한다. 충분히 남길 때만 완전 교체한다.
+        const fitFloor = Math.max(
+          TARGET_RESULT_COUNT,
+          Math.ceil(firstBatch.length * 0.5)
+        );
+        if (fitted.length >= fitFloor) {
           firstBatch = fitted;
+        } else if (fitted.length > 0) {
+          const fittedKeys = new Set(
+            fitted.map((c) => `${c.title}|${c.mainKeyword}`)
+          );
+          firstBatch = [
+            ...fitted,
+            ...firstBatch.filter(
+              (c) => !fittedKeys.has(`${c.title}|${c.mainKeyword}`)
+            ),
+          ];
         }
       } catch {
         // 카테고리 분류 실패 시 firstBatch를 그대로 사용한다.

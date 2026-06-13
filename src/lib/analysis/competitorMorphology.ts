@@ -107,6 +107,17 @@ function countMatches(texts: string[], pattern: RegExp): number {
   return texts.filter((text) => pattern.test(text)).length;
 }
 
+// 네이버 블로그 본문 스크래핑은 가끔 사이드바("이 블로그 인기글" 등)의 무관한 글
+// 제목 묶음을 본문으로 잡아온다(실측: "달팽이 피해 예방법"·"속도위반 면책"·"해충 퇴치").
+// 안경 도메인 어휘 밀도가 낮은 본문은 추출 단계에서 버려 bodyHighlights/bodyNouns 오염을 막는다.
+const OPTICAL_DOMAIN_PATTERN =
+  /(안경|렌즈|시력|도수|초점|시야|코받침|코패드|경첩|힌지|안경테|콘택트|누진|다초점|난시|근시|원시|노안|선글라스|피팅|굴절|블루라이트|김서림|착용감|안광|검안)/g;
+
+function isOpticalRelevantBody(body: string): boolean {
+  if (!body.trim()) return false;
+  return (body.match(OPTICAL_DOMAIN_PATTERN)?.length ?? 0) >= 3;
+}
+
 function analyzeExposurePatterns(blogs: Array<BlogItem & { body: string }>): {
   titleAngles: string[];
   contentBlocks: string[];
@@ -281,10 +292,11 @@ export async function analyzeCompetitorMorphology(
   }
 
   const blogsWithBodies = await Promise.all(
-    blogs.slice(0, BODY_FETCH_LIMIT).map(async (blog) => ({
-      ...blog,
-      body: await fetchBlogBody(blog.link).catch(() => ""),
-    }))
+    blogs.slice(0, BODY_FETCH_LIMIT).map(async (blog) => {
+      const body = await fetchBlogBody(blog.link).catch(() => "");
+      // 안경 도메인과 무관한 본문(사이드바 인기글 등)은 추출 오염을 막기 위해 버린다.
+      return { ...blog, body: isOpticalRelevantBody(body) ? body : "" };
+    })
   );
 
   const bodySampleSize = blogsWithBodies.filter((blog) => blog.body.trim().length > 0).length;
