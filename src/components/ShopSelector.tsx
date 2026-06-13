@@ -1,13 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { CATEGORIES } from "@/lib/constants";
-import { Loader2, PenLine, Sparkles, Settings, ChevronDown, ChevronUp, Upload, FileText, X } from "lucide-react";
+import { Loader2, PenLine, Settings, ChevronDown, ChevronUp, Upload, FileText, X } from "lucide-react";
 import { toast } from "sonner";
 import type { Shop } from "@/types";
 
@@ -55,8 +55,6 @@ export function ShopSelector({ shops, onStart, isLoading }: ShopSelectorProps) {
   const [shopId, setShopId] = useState("");
   const [categoryId, setCategoryId] = useState("");
   const [topic, setTopic] = useState("");
-  const [suggestedTopics, setSuggestedTopics] = useState<string[]>([]);
-  const [isSuggesting, setIsSuggesting] = useState(false);
 
   // New fields
   const [articleType, setArticleType] = useState<ArticleType>("info");
@@ -77,38 +75,6 @@ export function ShopSelector({ shops, onStart, isLoading }: ShopSelectorProps) {
   const showCharCount = articleType === "info" || !FIXED_LENGTH_SUBTYPES.includes(promoSubtype);
   const showEventFields = articleType === "promo" && promoSubtype === "event";
   const showPromoSubtype = articleType === "promo";
-
-  // 매장 + 카테고리 선택 시 자동 주제 추천. 사용자가 직접 입력한 값은 덮어쓰지 않는다.
-  useEffect(() => {
-    if (!shopId || !categoryId) {
-      return;
-    }
-
-    let ignore = false;
-
-    fetch("/api/topics/suggest", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ shopId, categoryId }),
-    })
-      .then((r) => r.json())
-      .then((json) => {
-        if (ignore) return;
-        if (json.success && json.data) {
-          const topics = Array.isArray(json.data) ? json.data : [];
-          setSuggestedTopics(topics);
-          setTopic((current) => current.trim() || topics[0] || "");
-        }
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (!ignore) setIsSuggesting(false);
-      });
-
-    return () => {
-      ignore = true;
-    };
-  }, [shopId, categoryId]);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -134,7 +100,7 @@ export function ShopSelector({ shops, onStart, isLoading }: ShopSelectorProps) {
           </div>
           <CardTitle className="text-2xl">블로그 자동 작성</CardTitle>
           <CardDescription className="text-base mt-1">
-            안경원과 카테고리를 선택하면 주제와 키워드를 자동으로 잡습니다
+            안경원과 카테고리를 선택하면 키워드를 자동으로 잡습니다
           </CardDescription>
         </CardHeader>
         <CardContent className="pt-4">
@@ -157,8 +123,6 @@ export function ShopSelector({ shops, onStart, isLoading }: ShopSelectorProps) {
                   if (!v) return;
                   setShopId(v);
                   setTopic("");
-                  setSuggestedTopics([]);
-                  if (categoryId) setIsSuggesting(true);
                 }}
                 disabled={isLoading}
               >
@@ -189,8 +153,6 @@ export function ShopSelector({ shops, onStart, isLoading }: ShopSelectorProps) {
                   if (!v) return;
                   setCategoryId(v);
                   setTopic("");
-                  setSuggestedTopics([]);
-                  if (shopId) setIsSuggesting(true);
                 }}
                 disabled={isLoading}
               >
@@ -219,34 +181,6 @@ export function ShopSelector({ shops, onStart, isLoading }: ShopSelectorProps) {
                 maxLength={100}
               />
               <p className="text-xs text-muted-foreground text-right">{topic.length}/100</p>
-
-              {/* AI 자동 주제 추천 */}
-              {isSuggesting && (
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <Loader2 className="w-3 h-3 animate-spin" />
-                  AI가 주제를 추천하고 있습니다...
-                </div>
-              )}
-              {suggestedTopics.length > 0 && (
-                <div className="space-y-1.5">
-                  <p className="text-xs text-muted-foreground flex items-center gap-1">
-                    <Sparkles className="w-3 h-3" />
-                    자동 주제 후보
-                  </p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {suggestedTopics.map((t, i) => (
-                      <button
-                        key={i}
-                        type="button"
-                        onClick={() => setTopic(t)}
-                        className="text-xs px-2.5 py-1.5 rounded-md bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors border border-blue-200"
-                      >
-                        {t}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
             </div>
 
             {/* ── 글 설정 ── */}
