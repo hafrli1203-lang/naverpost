@@ -244,13 +244,15 @@ export async function fetchCompetitorTitles(
   return Array.from(collected.values());
 }
 
-async function fetchBlogSearch(keyword: string): Promise<{
+// 노출 추적(blogops/exposure)이 순위 판별에 link/bloggerlink를 쓰므로 export.
+// display 기본 10은 기존 호출(경쟁 제목·문서수) 동작을 그대로 유지한다.
+export async function fetchBlogSearch(keyword: string, display = 10): Promise<{
   total: number;
   items: Array<{ title: string; description: string; link: string; bloggerlink: string }>;
 }> {
   const url = new URL("https://openapi.naver.com/v1/search/blog.json");
   url.searchParams.set("query", keyword);
-  url.searchParams.set("display", "10");
+  url.searchParams.set("display", String(Math.max(1, Math.min(100, display))));
   url.searchParams.set("start", "1");
   url.searchParams.set("sort", "sim");
 
