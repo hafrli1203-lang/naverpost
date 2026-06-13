@@ -122,6 +122,14 @@ export function auditPosting(params: {
       `"${topRepeated[0].token}"가 ${topRepeated[0].count}회로 비중이 과도합니다. 다른 형태소와 균형을 맞추세요.`
     );
   }
+  // 어미 단조로움 — 한국어 AI 글의 대표 신호("거든요/답니다" 설명조 돌려막기).
+  const geudeunyoCount = (body.match(/거든요/g) ?? []).length;
+  const damnidaCount = (body.match(/답니다/g) ?? []).length;
+  if (geudeunyoCount > 3 || damnidaCount > 3) {
+    warnings.push(
+      `어미 단조로움: "거든요" ${geudeunyoCount}회 · "답니다" ${damnidaCount}회 — 설명조 어미가 반복되면 AI가 쓴 티가 납니다. 평서 마침과 단문을 섞어 다양화하세요.`
+    );
+  }
   if (commaCount > 0) {
     warnings.push(`쉼표(,)가 ${commaCount}개 있습니다. 이 프로젝트 규칙상 쉼표는 사용하지 않습니다.`);
   }

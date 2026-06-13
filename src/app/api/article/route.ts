@@ -6,6 +6,7 @@ import { buildPromoPrompt } from "@/lib/prompts/promoPrompt";
 import {
   buildRevisionPrompt,
   buildAutocompleteAugmentPrompt,
+  buildNaturalnessPolishPrompt,
 } from "@/lib/prompts/revisionPrompt";
 import { validateContent } from "@/lib/validation/contentValidator";
 import { fetchBlogTitles } from "@/lib/naver/rssParser";
@@ -41,6 +42,9 @@ const AUTOCOMPLETE_AUGMENT_TIMEOUT_MS = 50_000;
 // maxDuration(360초)에 근접하면 G3 보강은 건너뛴다(전체 응답이 잘리지 않게).
 const ARTICLE_MAX_DURATION_MS = maxDuration * 1000;
 const G3_MIN_REMAINING_MS = 70_000;
+// 자연어 다듬기 패스(어색한 압축 조어 풀기). G3 뒤 마지막 폴리시이므로 잔여 시간 가드.
+const NATURALNESS_TIMEOUT_MS = 60_000;
+const NATURALNESS_MIN_REMAINING_MS = 65_000;
 
 function withTimeout<T>(
   promise: Promise<T>,
@@ -512,6 +516,37 @@ export async function POST(request: NextRequest) {
       }
     } catch {
       // 자완 색인 보강 실패는 본문 결과에 영향을 주지 않는다.
+    }
+
+    // 자연어 다듬기: 어색한 압축 조어("시선 자리"류)를 LLM 판정으로 푼다(하드코딩 없음).
+    // 진짜 용어·키워드·구조는 보존하고, 검수가 후퇴하지 않을 때만 채택한다(회귀 방지).
+    // maxDuration 근접 시 스킵(응답 잘림 방지). 설계: docs/designs/naturalness-polish-pass.md
+    const polishRemainingMs = ARTICLE_MAX_DURATION_MS - (Date.now() - requestStartedAt);
+    if (polishRemainingMs >= NATURALNESS_MIN_REMAINING_MS) try {
+      const polished = stripLeadingTitleLine(
+        sanitizeArticleContent(
+          await reviseArticle(
+            buildNaturalnessPolishPrompt({
+              originalContent: content,
+              mainKeyword: keyword.mainKeyword,
+              subKeyword1: keyword.subKeyword1,
+              subKeyword2: keyword.subKeyword2,
+              charCount,
+            }),
+            NATURALNESS_TIMEOUT_MS
+          )
+        ),
+        keyword.title
+      );
+      const polishedValidation = await validateContent(polished, keywordsForValidation, {
+        fast: true,
+      });
+      if (!needsHardRevision(polishedValidation, isCharCountOutOfRange(polished, charCount))) {
+        content = polished;
+        validation = polishedValidation;
+      }
+    } catch {
+      // 자연어 다듬기 실패는 본문 결과에 영향을 주지 않는다(직전 본문 유지).
     }
 
     const article: ArticleContent = {
