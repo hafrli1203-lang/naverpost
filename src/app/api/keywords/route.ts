@@ -4,6 +4,7 @@ import path from "path";
 import { generateKeywords, reviseKeywordTitles, selectCategoryFitIndices } from "@/lib/ai/claude";
 import {
   buildTitlePolishPrompt,
+  buildSeedTitlePrompt,
   buildCategoryFitPrompt,
   TITLE_PATTERN_GUIDE,
 } from "@/lib/prompts/titlePrompt";
@@ -106,7 +107,11 @@ const KEYWORD_CATEGORY_FIT_TIMEOUT_MS = 60_000;
 const KEYWORD_RESULT_CACHE_ENABLED = process.env.KEYWORD_RESULT_CACHE !== "0";
 // v18: rule6 시리즈 허용(다른 관점) + 테마 감점 완화 + 자기잠식 가드 — 이전 결과 무효화.
 // v19: 합성 헤드·비검색 조합 억제(GPT 프롬프트) + 붕괴 floor 3종 + 제목 끝맺음 계열 정규화.
-const KEYWORD_RESULT_CACHE_VERSION = 19;
+// v20: 롱테일 우선→실볼륨 우선 전환 + 실검색어 고정(검색광고 목록 우선) + 소재 군집 쏠림 금지.
+// v21: 안경이야기 범위 확장(관리 매뉴얼→안경·안경원 전반 이야기) — 스타일·상황·경험·트렌드 군집 시드/게이트 추가.
+// v22: 제목 폴리시 자연스러움 강화 — 도식 명사 스택("~순서/~법") 금지, 사람 말투(평서·조건·질문형)로.
+// v23: 개수 안정화 — 부족분을 실볼륨 시드에 제목 생성해 채우는 복구 백필(7~10 변동 해소).
+const KEYWORD_RESULT_CACHE_VERSION = 23;
 const KEYWORD_RESULT_CACHE_FILE = path.join(process.cwd(), "data", "keyword-result-cache.json");
 
 type KeywordResultResponseData = {
@@ -848,6 +853,13 @@ const FALLBACK_KEYWORD_SETS: Record<
     { main: "야간눈부심 원인", sub1: "야간눈부심 운전", sub2: "야간눈부심 검사" },
   ],
   "glasses-story": [
+    // 스타일·상황·경험·트렌드 군집 (관리 쏠림 방지 — 안경/안경원 전반의 이야기)
+    { main: "얼굴형 안경", sub1: "얼굴형 안경테", sub2: "얼굴형 코디" },
+    { main: "안경 코디", sub1: "안경 스타일", sub2: "안경 인상" },
+    { main: "첫 안경", sub1: "첫 안경 적응", sub2: "첫 안경 맞춤" },
+    { main: "어린이 안경", sub1: "어린이 안경 적응", sub2: "어린이 안경 관리" },
+    { main: "안경 맞춤", sub1: "안경 맞춤 과정", sub2: "안경 검안" },
+    { main: "안경 교체시기", sub1: "안경 수명", sub2: "안경 교체" },
     { main: "안경김서림 원인", sub1: "안경김서림 관리", sub2: "안경김서림 렌즈" },
     { main: "안경세척 방법", sub1: "안경세척 렌즈", sub2: "안경세척 코팅" },
     { main: "안경수리 맡기기", sub1: "안경수리 나사", sub2: "안경수리 파손" },
@@ -995,6 +1007,7 @@ const BROAD_KEYWORD_HEADS: Record<string, string[]> = {
     "운전시야",
   ],
   "glasses-story": [
+    // 관리/수리 군집
     "안경수리",
     "안경세척",
     "안경김서림",
@@ -1005,11 +1018,25 @@ const BROAD_KEYWORD_HEADS: Record<string, string[]> = {
     "안경흘러내림",
     "코패드교체",
     "안경스크래치",
-    "안경렌즈",
     "안경나사",
     "안경힌지",
     "안경닦이",
     "안경케이스",
+    // 스타일 군집
+    "얼굴형안경",
+    "안경코디",
+    "안경스타일",
+    "뿔테안경",
+    // 상황·계기 군집
+    "첫안경",
+    "어린이안경",
+    "안경교체시기",
+    // 안경원 경험 군집
+    "안경맞춤",
+    "안경검안",
+    // 트렌드·상식 군집
+    "안경트렌드",
+    "안경수명",
   ],
 };
 
@@ -1040,7 +1067,7 @@ const BROAD_KEYWORD_TAILS: Record<string, string[]> = {
     "찢어짐",
   ],
   "eye-info": ["원인", "증상", "검사", "관리", "습관", "피로", "흐림", "운전", "독서", "스마트폰", "어린이", "근시", "야간"],
-  "glasses-story": ["원인", "방법", "관리", "교체", "세척", "보관", "피팅", "수리", "흠집", "얼룩", "코팅", "착용감", "습관"],
+  "glasses-story": ["원인", "방법", "관리", "교체", "세척", "보관", "피팅", "수리", "흠집", "얼룩", "코팅", "착용감", "습관", "코디", "스타일", "얼굴형", "인상", "처음", "고르기", "시기", "트렌드", "맞춤"],
 };
 
 function isCategoryAppropriateCandidate(categoryId: string, option: KeywordOption): boolean {
@@ -1123,7 +1150,7 @@ function isDemandKeywordRelevantForCategory(categoryId: string, keyword: string)
     return /시력검사|눈피로|안구건조|눈초점|시력저하|야간시력|어린이시력|어린이근시|근시|난시|노안|눈부심/.test(compact);
   }
   if (categoryId === "glasses-story") {
-    return /안경수리|안경세척|안경관리|안경보관|안경피팅|안경흘러내림|안경김서림|코패드|안경나사|안경렌즈|안경테/.test(compact);
+    return /안경수리|안경세척|안경관리|안경보관|안경피팅|안경흘러내림|안경김서림|코패드|안경나사|안경렌즈|안경테|안경조정|안경착용감|안경스크래치|안경닦이|안경케이스|안경힌지|얼굴형|안경코디|안경스타일|첫안경|어린이안경|안경맞춤|검안|안경트렌드|뿔테|안경수명|안경교체/.test(compact);
   }
   return true;
 }
@@ -3278,6 +3305,76 @@ export async function POST(request: NextRequest) {
     // 다양화 단계가 교체로 끼워넣은 항목이 출구 캡(축/토큰/브랜드)을 우회할 수 있으므로
     // 최종 한 번 더 출구 검증을 통과시킨다(부족분은 내부에서 풀로 재충원).
     diverseRankedResults = dedupeFinalKeywordResults(diverseRankedResults, representationPool, productHeads);
+
+    // 개수 안정화: 백필이 "제목 있는 후보"만 받아 10 미만으로 남으면, 실볼륨 시드에 Claude로
+    // 제목을 달아 정식 분석(analyzeOptions) 후 채운다(볼륨 모드와 일치). 부족할 때만 발동(graceful).
+    if (KEYWORD_AI_EXPANSION_ENABLED && diverseRankedResults.length < TARGET_RESULT_COUNT) {
+      try {
+        const usedAxis = new Set(
+          diverseRankedResults.map((r) => normalizeKeywordKey(r.mainKeyword))
+        );
+        const seenSeed = new Set<string>();
+        const recoverySeedPool: KeywordOption[] = [];
+        for (const seed of [...realQuerySeedBatch, ...fallbackBatch]) {
+          const key = normalizeKeywordKey(seed.mainKeyword);
+          if (usedAxis.has(key) || seenSeed.has(key)) continue;
+          if (!isCategoryAppropriateCandidate(category.id, seed)) continue;
+          seenSeed.add(key);
+          recoverySeedPool.push(seed);
+        }
+        const need = TARGET_RESULT_COUNT - diverseRankedResults.length;
+        const recoverySeeds = recoverySeedPool.slice(0, need * 3);
+        if (recoverySeeds.length > 0) {
+          const titled = await reviseKeywordTitles(
+            buildSeedTitlePrompt(recoverySeeds),
+            KEYWORD_TITLE_POLISH_TIMEOUT_MS
+          );
+          const titleByIndex = new Map(titled.map((t) => [t.index, t.title.trim()]));
+          const titledSeeds: KeywordOption[] = recoverySeeds
+            .map((seed, i) => ({ ...seed, title: titleByIndex.get(i + 1) ?? "" }))
+            .filter(
+              (s) =>
+                s.title.length >= 12 &&
+                s.title.length <= 32 &&
+                !/[,，、]/.test(s.title) &&
+                !isAwkwardGeneratedTitle(s.title) &&
+                titleContainsMainKeyword(s.title, s.mainKeyword)
+            );
+          if (titledSeeds.length > 0) {
+            const recoveredAnalyzed = await analyzeOptions({
+              rawOptions: titledSeeds,
+              forbiddenList,
+              referenceList,
+              competitorList,
+              demandSignals,
+              topic: effectiveTopic,
+              productHeads,
+              meshKeywordKeys,
+            });
+            const existingKeys = new Set(
+              diverseRankedResults.map((r) => `${r.title}|${r.mainKeyword}`)
+            );
+            const recovered = recoveredAnalyzed
+              .filter((c) => c.validation.isValid && !hasRegisteredStoreOverlap(c))
+              .filter((c) => !usedAxis.has(normalizeKeywordKey(c.mainKeyword)))
+              .filter((c) => !existingKeys.has(`${c.title}|${c.mainKeyword}`))
+              .sort((a, b) => b._priorityScore - a._priorityScore);
+            if (recovered.length > 0) {
+              diverseRankedResults = dedupeFinalKeywordResults(
+                [...diverseRankedResults, ...recovered],
+                representationPool,
+                productHeads
+              );
+              signalNotes.push(
+                `개수 안정화: 실볼륨 시드 ${recovered.length}개에 제목을 생성해 보강`
+              );
+            }
+          }
+        }
+      } catch {
+        signalNotes.push("개수 안정화(시드 제목 생성) 실패 — 보강 없이 진행");
+      }
+    }
 
     // 최종 제목을 Opus로 자연스러움·오타·비문 교정. 키워드 토큰 보존 + 쉼표 금지 +
     // 길이/기계적패턴 통과 시에만 교체하고, 실패 시 원본 제목을 유지한다(graceful).
