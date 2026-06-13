@@ -676,14 +676,12 @@ export default function Home() {
             >
               콘텐츠 운영
             </Link>
-            {uiStage > 0 && (
-              <button
-                onClick={handleStartOver}
-                className="text-sm text-muted-foreground transition-colors hover:text-gray-700"
-              >
-                새로 시작
-              </button>
-            )}
+            <button
+              onClick={handleStartOver}
+              className="text-sm text-muted-foreground transition-colors hover:text-gray-700"
+            >
+              새로 시작
+            </button>
           </div>
         </div>
       </header>
