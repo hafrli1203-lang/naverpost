@@ -1,7 +1,9 @@
 # 네이버 블로그 자동 작성 프로그램 (안경원)
 
 ## 프로젝트 개요
-6개 안경원 네이버 블로그의 자동 콘텐츠 작성 시스템. 3단계 파이프라인(제목/키워드 → 본문 작성/검증 → 이미지 생성)을 Human-in-the-loop 웹 대시보드로 구현하며, 최종 결과는 네이버 블로그에 **임시저장만** 수행한다 (발행 금지).
+6개 안경원 네이버 블로그의 자동 콘텐츠 작성 시스템. 3단계 파이프라인(제목/키워드 → 본문 작성/검증 → 이미지 생성)을 Human-in-the-loop 웹 대시보드로 구현한다. 최종 결과는 사람이 네이버 스마트에디터에 직접 붙여넣어 **임시저장만** 한다 (발행 금지).
+
+> ⚠ 네이버 블로그 글쓰기 API(`writePost.json`)는 **2020-05-06자로 종료**되어 자동 발행/임시저장은 불가능하다. 대체 공식 API도 없다. 따라서 최종 산출물은 자동 업로드가 아니라 "붙여넣기용 export"(서식 유지 복사 + 이미지 일괄 저장)로 제공하고, 사람이 네이버에 붙여넣어 임시저장한다. 브라우저 자동화는 계정 제재 리스크로 채택하지 않음. (조사: docs/designs/naver-export.md)
 
 ## 기술 스택
 - **Framework**: TypeScript + Next.js 15 (App Router)
@@ -10,13 +12,14 @@
 - **AI 리서치**: Perplexity API
 - **AI 주제 추천**: Codex CLI (`codex exec`, ChatGPT 구독)
 - **이미지 생성**: god-tibo-imagen CLI (`gti`, gpt-image-2, ChatGPT 구독)
-- **블로그 연동**: Naver OpenAPI (writePost.json - 임시저장)
+- **블로그 연동**: 붙여넣기용 export (서식 유지 복사 + 이미지 일괄 저장). ※ writePost.json API는 2020 종료
+- **성과 측정**: BlogOps(blogoperator) 연동 — 발행 글 기록 + 키워드 노출 순위 추적
 - **데이터 입력**: Google Sheets API
 - **패키지 매니저**: pnpm
 - **미래 확장**: Electron/Tauri 데스크톱 앱
 
 ## 핵심 규칙
-- 네이버 블로그에 절대 "발행"하지 않음. 임시저장만 허용
+- 네이버 블로그에 절대 "발행"하지 않음. 사람이 직접 임시저장만 (자동 발행 API 없음)
 - 한국어 전용 콘텐츠
 - 광고법/의료법 준수: 금지어 100+ 자동 필터링
 - 6개 매장 간 콘텐츠 중복 방지 (RSS deduplication)
@@ -33,7 +36,8 @@ naverpost/
 │   │   │   ├── keywords/       # Stage 1: 제목/키워드 생성
 │   │   │   ├── article/        # Stage 2: 본문 작성/검증
 │   │   │   ├── image/          # Stage 3: 이미지 생성
-│   │   │   └── publish/        # Stage 4: 네이버 임시저장
+│   │   │   ├── sessions/       # 세션 저장 + BlogOps 글 기록
+│   │   │   └── blogops/        # 성과 측정 연동(노출 추적·백필). ※ publish/ 없음(API 종료)
 │   │   └── layout.tsx
 │   ├── components/             # UI 컴포넌트
 │   │   ├── ShopSelector.tsx    # 매장/카테고리 선택
@@ -47,8 +51,11 @@ naverpost/
 │   │   │   ├── perplexity.ts   # Perplexity API 클라이언트
 │   │   │   └── imageGen.ts     # Google AI Studio 이미지 생성
 │   │   ├── naver/
-│   │   │   ├── blogApi.ts      # Naver Blog API (임시저장)
+│   │   │   ├── (blogApi.ts)    # ※ 미구현 — writePost.json 2020 종료. export로 대체
+│   │   │   ├── contentFormatter.ts # 붙여넣기용 export(서식 복사·평문·이미지 마커)
+│   │   │   ├── searchSignals.ts # 검색량·블로그검색(노출 추적)
 │   │   │   └── rssParser.ts    # RSS 피드 파싱 (중복 방지)
+│   │   ├── blogops/            # BlogOps 성과 측정 연동 (글 기록·노출 추적·백필)
 │   │   ├── validation/
 │   │   │   ├── prohibitedWords.ts  # 금지어 필터
 │   │   │   ├── keywordRules.ts     # 키워드 7대 규칙 검증
@@ -82,7 +89,7 @@ naverpost/
      ↓
 [사용자 확인/재생성] ← ─────────────── [이미지 미리보기]
      ↓
-[최종 컨펌] → [Naver API: 임시저장] → [완료]
+[최종 컨펌] → [붙여넣기용 export: 서식 복사 + 이미지 저장] → [사람이 네이버 임시저장] → [완료]
 ```
 
 ## 6개 블로그 매장
@@ -99,8 +106,10 @@ naverpost/
 안경테, 안경렌즈, 콘택트렌즈, 눈정보, 누진다초점, 안경이야기
 
 ## API 엔드포인트
-- **Naver Blog Write**: POST `https://openapi.naver.com/blog/writePost.json`
-- **Naver Blog Categories**: GET `https://openapi.naver.com/blog/listCategory.json`
+- **Naver Blog Write**: ~~POST `writePost.json`~~ **2020 종료 — 사용 불가** (자동 발행/임시저장 없음, 붙여넣기 export로 대체)
+- **Naver Blog Categories**: ~~GET `listCategory.json`~~ 글쓰기 종료로 의존 안 함
+- **Naver 검색 OpenAPI**: 블로그 검색(`/v1/search/blog.json`) — 노출 순위 추적·말뭉치 수집에 사용 (읽기 전용, 정상)
+- **Naver 검색광고 API**: 키워드 검색량 조회 (볼륨 게이트)
 - **Claude**: `claude` CLI (`-p --output-format json`, OAuth 구독)
 - **Perplexity**: REST API
 - **GPT 텍스트 (주제 추천)**: `codex` CLI (`exec`, ChatGPT 구독)
@@ -110,7 +119,7 @@ naverpost/
 1. **Phase 1**: 제목/키워드 생성 + 사용자 선택 UI
 2. **Phase 2**: 본문 작성 + 검증 + 미리보기 UI
 3. **Phase 3**: 이미지 생성 + 확인 UI
-4. **Phase 4**: 네이버 API 연동 + 임시저장
+4. **Phase 4**: ~~네이버 API 연동~~ → 붙여넣기용 export (API 종료로 자동 발행 대신 사람이 임시저장)
 
 ## 개발 명령어
 ```bash
@@ -290,8 +299,9 @@ npx -y @smithery/cli@latest install @isnow890/naver-search-mcp --client claude
 | `lib/ai/imageGen.ts` | (CLI 위임 래퍼) | `generateBlogImage(prompt)` |
 | `lib/ai/perplexity.ts` | Perplexity 클라이언트 (REST 직접) | `researchKeyword()` |
 | `lib/nlp/nounExtractor.ts` | (CLI 위임 래퍼, Haiku) | `extractContentNouns()`, `generateRelatedKeywords()`, `extractCompetitorNouns()` |
-| `lib/naver/blogApi.ts` | Naver API 호출 | `saveDraft()` (임시저장만) |
-| `lib/naver/tokenManager.ts` | 토큰 인메모리 저장소 | `withTokenRetry()`, `loadTokens()` |
+| `lib/naver/contentFormatter.ts` | 없음 (순수함수) | `formatForNaver()`, `formatForNaverExport()`, `buildNaverPlainText()` (붙여넣기 export) |
+| `lib/blogops/*` | 없음 (BlogOps REST 호출) | `registerPostToBlogOps()`, `trackExposureForShops()`, `backfillPublishedPosts()`, `getTopExposedKeywordKeys()` |
+| `lib/naver/tokenManager.ts` | (미사용 — writePost.json 종료로 발행 토큰 불필요) | `withTokenRetry()`, `loadTokens()` |
 | `lib/storage/imageStore.ts` | 파일시스템 임시 이미지 | `saveImage()`, `getImage()`, `cleanupSession()` |
 | `lib/validation/*` | 없음 (순수함수) | `validateContent()` |
 | `hooks/usePersistedWorkflow.ts` | localStorage | `[state, setState, clearPersistedState]` |
