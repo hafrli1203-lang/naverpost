@@ -1,9 +1,32 @@
+import type { SceneTag } from "@/lib/data/shopRefs";
+
+export type ImagePromptShop = {
+  name: string;
+  interiorDescription?: string;
+};
+
+/** 프롬프트 줄 앞 장면 태그 매칭. 구버전 [STORE] 도 interior 로 흡수(하위호환). */
+const SCENE_MARKER = /^\s*\[(?:SCENE:(exterior|interior|exam|fitting|detail)|(STORE))\]\s*/i;
+
+/**
+ * 프롬프트 한 줄에서 장면 태그를 떼어내 { prompt, scene } 로 분리.
+ * 태그 없으면 scene=null (매장 밖/개념 이미지 → 참조사진 미첨부).
+ */
+export function parseScenePrompt(line: string): { prompt: string; scene: SceneTag | null } {
+  const match = line.match(SCENE_MARKER);
+  if (!match) return { prompt: line.trim(), scene: null };
+  const prompt = line.replace(SCENE_MARKER, "").trim();
+  const scene: SceneTag = match[1] ? (match[1].toLowerCase() as SceneTag) : "interior";
+  return { prompt, scene };
+}
+
 export function buildImagePrompts(params: {
   articleContent: string;
   title: string;
   mainKeyword: string;
+  shop?: ImagePromptShop;
 }): string {
-  const { articleContent, title, mainKeyword } = params;
+  const { articleContent, title, mainKeyword, shop } = params;
 
   const now = new Date();
   const month = now.getMonth() + 1;
@@ -38,6 +61,17 @@ export function buildImagePrompts(params: {
     ? `\n\n## 원고의 주요 소제목:\n${sections.map(s => `- "${s}"`).join("\n")}`
     : "";
 
+  const defaultInterior =
+    "modern, bright, clean Korean eyewear store interior; wall-mounted backlit display shelves with neat orderly rows of frames (no text labels); warm white LED lighting; polished floor; tidy fitting counter with a mirror; premium but approachable atmosphere";
+  const interior = shop?.interiorDescription?.trim() || defaultInterior;
+  const shopGuide = shop
+    ? `\n\n# 실제 매장 반영 (매우 중요 — "읽어서 반영", 합성 아님)
+- 매장 이름: ${shop.name}
+- 이 안경원의 실제 분위기/인테리어(실제 사진을 읽어 정리한 묘사): ${interior}
+- 매장 내부가 보이는 장면은 위 묘사를 반영해 "이 매장의 현재 모습"으로 그리세요. 가상의 허름한 안경원이 아닙니다.
+- 단, 위 묘사를 그대로 베껴 붙이는 게 아니라 "이런 느낌의 매장"으로 한 장의 자연스러운 사진을 새로 만드세요. 콜라주·합성·사진 짜깁기 느낌이 나면 안 됩니다(single cohesive photograph, not a composite/collage).`
+    : "";
+
   return `# 역할
 당신은 안경원 전문 상업 사진 포토그래퍼이자 프롬프트 엔지니어입니다.
 
@@ -49,11 +83,31 @@ export function buildImagePrompts(params: {
 - 원고에 "어린이"가 없으면 어린이 이미지 금지
 - 원고에 "노안/다초점"이 없으면 중장년 이미지 금지
 
+# 시대·환경 고정 (전역 — 절대 규칙)
+★★★ 모든 이미지는 "현재의 대한민국, 2020년대"입니다 ★★★
+- 모든 장면에 "present-day South Korea, modern contemporary 2020s, clean and well-maintained" 의미를 담으세요.
+- 다음은 절대 금지: vintage, retro, 1990s, old-fashioned, faded film look, sepia, run-down, shabby, dusty, developing-country look, poor lighting.
+- 안경원·거리·실내 모두 현대적이고 깔끔한 한국의 현재 모습이어야 합니다.
+
 # 인종 — 절대 규칙 (어김 금지)
 ★★★ 모든 인물은 예외 없이 한국인(동아시아 한국인)입니다 ★★★
 - 사람이 등장하는 모든 프롬프트에 "Korean person, East Asian Korean ethnicity"를 반드시 넣으세요.
 - 서양인/백인/외국인 얼굴은 절대 금지. "absolutely not Western, not Caucasian, not foreign" 를 인물 프롬프트에 포함하세요.
 - 한 명이든 여러 명이든, 배경에 스쳐 지나가는 사람이든 전부 한국인이어야 합니다.
+
+# 동작 사실성 — 절대 규칙 (어김 금지)
+★★★ 사람의 동작은 실제 안경원에서 하는 방식과 100% 일치해야 합니다 ★★★
+- 안경 피팅/조정: 안경사가 안경테를 "손에 들고 얼굴에서 떨어뜨려" 조정합니다. 공구(피팅 플라이어)는 안경테에만 사용합니다.
+  → 절대 금지: 손님 얼굴에 쓴 안경에 공구를 들이대는 장면, 얼굴 가까이에서 공구를 쓰는 장면.
+  → 올바른 표현: "optician holding the eyeglass frame in both hands, away from anyone's face, gently adjusting the temple arms with fingers or small frame-fitting pliers applied only to the frame itself"
+- 안경 착용 체험: 손님이 거울 앞에서 직접 안경을 써보는 장면은 자연스럽습니다(이때는 공구 없음).
+- 검안/시력검사 ([SCENE:exam]): 손님이 검안의자에 앉은 장면이면, 검안기(포롭터/자동굴절검사기)가 반드시 손님 얼굴 정면 정위치에 와 있어야 합니다.
+  → 절대 금지: 손님은 앉아 있는데 검안기/테이블이 옆으로 빠져 있거나 손님 정면이 텅 비어 있는 장면.
+  → 올바른 표현: "the refractor/phoropter is pulled directly in front of the seated customer's face, customer resting chin and forehead on the instrument looking into it, optician seated on the round stool beside operating it"
+  → (실제 검안기는 평소 옆 암(arm)에 접어두지만, 검사 중에는 손님 정면으로 끌어와 사용합니다. 사람이 앉은 장면 = 반드시 사용 중 정위치.)
+- 피팅/상담 ([SCENE:fitting]): 손님과 안경사가 피팅 카운터/상담 테이블에 마주 앉아 진행합니다. 안경사는 안경테를 손에 들고 조정.
+  → 피팅 테이블이 사진/묘사에 없으면 매장 톤에 맞는 깔끔한 현대식 피팅 카운터(거울 포함)를 자연스럽게 그려도 됩니다.
+- 그 외 모든 행동도 물리적으로 말이 되어야 하며, 실제 시술/상담 장면과 어긋나면 안 됩니다.
 
 # 원고 분석 방법
 
@@ -73,8 +127,7 @@ export function buildImagePrompts(params: {
 - "수동 검영법" → 수동 검영 검사 장면
 
 # 오늘 날짜: ${year}년 ${month}월 (${seasonKr})
-# 계절(${season}): 의상 ${clothing} / 조명 ${lighting}
-${sectionGuide}
+# 계절(${season}): 의상 ${clothing} / 조명 ${lighting}${shopGuide}${sectionGuide}
 
 # 블로그 제목: ${title}
 # 메인 키워드: ${mainKeyword}
@@ -92,25 +145,46 @@ ${sectionGuide}
 - 인물 이미지: 원고 주인공/상황에 맞는 한국인
 - 정보 이미지: 원고에 나온 개념/도구/비유
 
-# 현실성 원칙 (AI 티 제거 — 매우 중요)
-★★★ 광고 모델·스톡사진이 아니라 "동네 안경원에서 손님이 실제로 찍힌 사진"처럼 보여야 합니다 ★★★
-- AI가 만든 티가 나는 신호를 피하세요: 인위적으로 매끈한 피부, 잡티 하나 없는 얼굴, 좌우 완벽 대칭, 스튜디오 광택, 과한 보정, 스톡사진 미소.
-- 다음 영어 표현은 쓰지 마세요: glossy skin, airbrushed, flawless, perfect symmetry, plastic skin, ultra-polished, 8k hyperdetailed, glamour.
+# 현실성 원칙 (실사 톤 — 매우 중요)
+★★★ "현대 한국 안경원에서 좋은 조명으로 스마트폰/미러리스로 깔끔하게 찍은 실제 사진"처럼 보여야 합니다 ★★★
+- 목표 질감: clean, sharp, bright, true-to-life natural color, well-lit. 네이버 플레이스나 인스타에 올라오는 실제 매장 사진 느낌.
+- 두 극단을 모두 피하세요:
+  (1) 과한 보정 스톡사진 — glossy plastic skin, airbrushed, flawless, perfect symmetry, glamour, 8k hyperdetailed (금지)
+  (2) 낡은 필름룩 — 35mm film, grain, faded, sepia, vintage filter, low light (금지)
+- 자연스러운 실사: 적당한 피부 질감(모공이 살짝 보이되 깨끗), 자연스러운 표정, 평범하고 호감가는 보통 사람.
+
+# 글자 금지 (전역 — 매우 중요, AI 티 1순위)
+★★★ 이미지 안에 "글자"가 보이면 안 됩니다 ★★★
+- AI는 간판·진열대·라벨·포스터·가격표에 "깨진 가짜 한글/영어"를 멋대로 박는 버릇이 있습니다. 이게 가장 큰 AI 티입니다.
+- 모든 프롬프트에 "no text, no letters, no words, no signage text, no labels, no logos, blank clean shelves and walls" 의미를 넣으세요.
+- 진열대/벽/간판/카드/모니터 화면은 글자 없이 깔끔하게. 안경테만 진열되고 글자 라벨은 없게.
 
 # 프롬프트 규칙
 
-## 인물 이미지 (진짜 찍은 사진처럼)
-- 반드시 "Korean person, East Asian Korean ethnicity, absolutely not Western/Caucasian/foreign" 명시. 모델이 아니라 동네에서 볼 법한 평범하고 자연스러운 한국 사람.
-- 원고에 나온 연령대/직업/상황/행동/증상 그대로 반영.
+## 인물 이미지 (현대 실사)
+- 반드시 "Korean person, East Asian Korean ethnicity, absolutely not Western/Caucasian/foreign" 명시. 광고 모델이 아니라 동네에서 볼 법한 평범하고 자연스러운 한국 사람.
+- 원고에 나온 연령대/직업/상황/행동/증상 그대로 반영. 동작은 위 "동작 사실성" 규칙을 반드시 지킬 것.
 - 계절에 맞는 의상: ${clothing}
-- 아래 영어 표현을 인물 프롬프트에 반드시 포함해 "실제로 찍은 사진"의 질감을 주세요:
-  "candid documentary photograph of an ordinary relatable Korean person (not a model), natural available window light, realistic skin texture with visible pores and subtle imperfections, natural relaxed expression, shot on 35mm film, soft natural color, authentic everyday moment, slight natural imperfections"
+- 아래 영어 표현을 인물 프롬프트에 반드시 포함해 "현대적이고 깔끔한 실제 사진" 질감을 주세요:
+  "realistic candid photo of an ordinary relatable Korean person (not a model), bright clean modern lighting, natural true-to-life color, realistic skin texture with subtle natural imperfections, natural relaxed expression, present-day 2020s South Korea, sharp and clear, looks like a real photo taken on a modern phone or mirrorless camera, NOT film, NOT vintage, NOT faded"
 
 ## 정보 이미지
 - 원고에 나온 개념/비유/도구를 직접 표현
 - "no text, no letters, no words" 필수 포함
 - 원고에 없는 제품은 넣지 않기
-- 정보 이미지도 광택 없는 자연스러운 실사 질감으로: "natural realistic photo, soft daylight, no glossy CGI look"
+- 정보 이미지도 현대 실사 질감으로: "clean realistic modern photo, bright daylight, true-to-life color, sharp, NOT film, NOT vintage, no glossy CGI look"
+
+## 매장 장면 태그 [SCENE:xxx] (매우 중요)
+"매장 안에서 벌어지는 장면" 프롬프트는 줄 맨 앞에 아래 장면 태그 중 하나를 붙이세요. 이 태그로 그 매장의 "실제 사진"을 골라 참조에 첨부합니다(태그가 정확해야 검안 장면에 검안실 사진이 붙습니다).
+- "[SCENE:exterior] " : 매장 외관/간판/출입구(밖에서 본 모습)
+- "[SCENE:interior] " : 매장 내부 전경/진열장 와이드(진열대·매장 공간이 주인공)
+- "[SCENE:exam] " : 검안실/시력검사 장면(포롭터·검안기·검안의자)
+- "[SCENE:fitting] " : 피팅·상담·조제 카운터 장면(안경 조정, 상담, 콘택트렌즈)
+- "[SCENE:detail] " : 매장 안 안경테/선글라스 진열 클로즈업
+규칙:
+- 매장 장면에는 위 "실제 매장 반영"의 인테리어 묘사를 반영하세요(밝고 현대적이고 깔끔한 안경원, 벽면 백라이트 진열장, 오픈장·먼지·낡음 금지).
+- 매장 장면도 진열대·간판·벽에 "글자 없이" 깔끔하게(no text/labels/signage on shelves). 한 장의 자연스러운 사진(콜라주·합성 금지).
+- ★ 매장 "밖" 장면(집·사무실·야외 등 라이프스타일)이나 개념/비유 이미지에는 장면 태그를 절대 붙이지 마세요(매장 사진이 잘못 붙습니다).
 
 # 블로그 원고
 ${articleContent}
@@ -119,16 +193,20 @@ ${articleContent}
 ★ 원고에 없는 내용(콘택트렌즈/어린이 등)은 절대 포함하지 마세요.
 ★ 원고의 비유/예시/구체적 상황을 그대로 이미지로 표현하세요.
 ★ 반드시 본문 등장 순서대로 출력하세요. 1번이 도입부, 마지막이 마무리입니다. 순서를 섞으면 안 됩니다.
+★ 모든 이미지는 현대(2020년대) 한국의 깔끔한 모습. 90년대·필름톤·낡고 허름한 분위기 절대 금지.
+★ 사람 동작은 실제 안경원 방식과 일치(피팅은 테를 손에 들고 얼굴에서 떨어뜨려 조정. 검안은 검안기가 앉은 손님 정면 정위치).
+★ 이미지 안에 글자/간판텍스트/라벨/로고 금지(no text/letters/signage) — 깨진 가짜 한글이 AI 티 1순위.
 
 # 출력 형식
 번호 없이 영어 프롬프트만 한 줄씩, 본문 등장 순서대로 출력:
+(매장 안 장면이면 줄 앞에 "[SCENE:exterior|interior|exam|fitting|detail] " 중 하나를 붙임. 매장 밖/개념 이미지는 태그 없음)
 (프롬프트1 = 본문 도입부 장면)
 (프롬프트2 = 그 다음 장면)
 ...
 (마지막 프롬프트 = 본문 마무리 장면)
 
 각 프롬프트 끝에 "--ar 4:3" 포함.
-인물 이미지에는 "8k DSLR" 대신 위 현실성 표현(candid documentary, 35mm film, visible pores, natural available light)을 넣어 진짜 찍은 사진처럼 만드세요. 과하게 선명하고 매끈한 스톡사진 표현은 쓰지 마세요.`;
+인물 이미지에는 위 현대 실사 표현(realistic candid photo, bright clean modern lighting, true-to-life color, present-day 2020s, NOT film/vintage)을 넣어 진짜 찍은 사진처럼 만드세요. 과하게 선명하고 매끈한 스톡사진 표현, 그리고 낡은 필름룩 모두 쓰지 마세요.`;
 }
 
 function extractSections(text: string): string[] {

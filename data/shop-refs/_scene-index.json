@@ -1,0 +1,94 @@
+{
+  "shops": {
+    "top50jn": {
+      "brand": "으뜸50안경",
+      "interiorDescription": "Bright clean Korean eyewear store with warm beige and grey tones, exposed concrete ceiling with white track spotlights and a continuous rectangular LED light strip, polished light-grey tile floor, wall-mounted shelves and low cabinets in pale grey holding orderly rows of frames, glass-top display cases on grey bases, white walls with orange brand accents and green potted plants. no text labels",
+      "photos": {
+        "1.jpg": {"scene": "exterior", "desc": "주황색 간판 '으뜸50안경 장림시장점' 외관, 통유리 출입구로 내부 진열장 보임"},
+        "2.jpg": {"scene": "interior", "desc": "매장 내부 와이드샷, 양쪽 벽면 백라이트 진열장과 중앙 유리 진열대, 콘크리트 천장 LED"},
+        "3.jpg": {"scene": "interior", "desc": "유리 진열대 2개와 흰 화분, 천장 ㄷ자 LED 조명, 우측 벽 선반"},
+        "4.jpg": {"scene": "fitting", "desc": "콘택트렌즈 조제실/작업대, 흰 카운터에 카드단말기, 벽 수납장에 렌즈박스(re-nu 등), 엣지/검사 소형기기"},
+        "5.jpg": {"scene": "exam", "desc": "검안실, 검은 HUVITZ 검안의자 좌측+검은 본체 검안기와 흰 노트북 키패드, 상단 벽걸이 모니터(KER/AUTO), 우측 옆으로 빠지는 보조 암테이블에 흰색 기기, 흰 둥근 보조스툴"}
+      }
+    },
+    "jinysgongju": {
+      "brand": "지니스안경(JINY's) 공주신관점",
+      "interiorDescription": "Large bright Korean eyewear superstore with white walls and warm wood-toned display tables, dark slatted drop ceiling with linear LED strips and white track spotlights, glossy white tile floor, red JINY's cube signs hanging from ceiling, wood-and-white island display cases filled with frames, backlit wall shelves. no text labels",
+      "photos": {
+        "2'.jpg": {"scene": "fitting", "desc": "(이미지 90도 회전) 빨간 JINY's 사인 아래 상담 카운터, 모니터와 의자 3개, 접수데스크"},
+        "KakaoTalk_20250930_153515955_01.jpg": {"scene": "detail", "desc": "(회전) 벽면 우드 진열대에 안경테 다수 클로즈업, 빨간 매대"},
+        "KakaoTalk_20250930_153515955_18.jpg": {"scene": "interior", "desc": "(회전) 우드 매대 줄지어 선 진열 통로, 햇빛 드는 매장 전경"},
+        "KakaoTalk_20250930_153515955_20.jpg": {"scene": "interior", "desc": "(회전) 빨간 JINY's 사인 걸린 매장 전경, 중앙 원형 포스터 스탠드"},
+        "KakaoTalk_20250930_153515955_21.jpg": {"scene": "fitting", "desc": "(회전) 상담 테이블과 검은 의자들, 골드 다리 원형 거울, 창가 상담 공간"},
+        "KakaoTalk_20250930_153515955_22.jpg": {"scene": "interior", "desc": "(회전) 우드 진열대와 흰 의자들 늘어선 매장 내부 통로"},
+        "KakaoTalk_20250930_153515955_26.jpg": {"scene": "fitting", "desc": "(회전) 빨간 JINY's 사인 옆 파란 모니터 카운터와 검은 상담 의자 2개"},
+        "KakaoTalk_20250930_153515955_29.jpg": {"scene": "interior", "desc": "(회전) 콘택트렌즈 코너와 우드 진열장, 천장 빨간 와이파이 사인"},
+        "KakaoTalk_20260324_130702536_01.jpg": {"scene": "fitting", "desc": "콘택트렌즈 상담 카운터 정면, 'CONTACT LENS' 벽 진열장에 렌즈박스 가득, JINY's 데스크와 셀프 키오스크(NEXTPAY), 우측 REST ROOM"},
+        "KakaoTalk_20260324_130702536_13.jpg": {"scene": "detail", "desc": "안경테 매대 3열 클로즈업, AIR STAINLESS·CLEAR&METAL 포스터, 바닥 매대형 진열"},
+        "KakaoTalk_20260324_130702536_14.jpg": {"scene": "detail", "desc": "안경테 진열대 클로즈업, AIR STAINLESS 포스터와 인경렌즈 0원 안내"},
+        "KakaoTalk_20260324_130702536_15.jpg": {"scene": "detail", "desc": "벽면 안경테 빽빽한 클로즈업과 인경렌즈 0원 포스터 액자"},
+        "KakaoTalk_20260324_130702536_16.jpg": {"scene": "interior", "desc": "ACETATE 코너 중앙 우드 아일랜드 진열대 와이드샷, 검은 천장 LED"},
+        "KakaoTalk_20260324_130702536_17.jpg": {"scene": "interior", "desc": "빨간 JINY's 큐브 사인 아래 양쪽 우드 진열대 매장 전경, 바닥 온누리공주가맹점 표시"},
+        "KakaoTalk_20260324_130702536_18.jpg": {"scene": "interior", "desc": "매대형 우드 진열대 줄지어 선 매장 전경, 출입구 매트와 화분"},
+        "KakaoTalk_20260324_130702536_19.jpg": {"scene": "interior", "desc": "매장 전체 와이드샷, 양쪽 매대와 중앙 빨간 JINY's 사인, 광각 전경"},
+        "KakaoTalk_20260324_130702536_20.jpg": {"scene": "exterior", "desc": "코너 건물 외관, ONE Bar 아래 빨간 JINY's 통유리 매장, 도로변"},
+        "KakaoTalk_20260324_130702536_21.jpg": {"scene": "exterior", "desc": "빨간 JINY's 간판 코너 외관, 'AMIH BTTO' 유리, 지니스안경 표시"},
+        "KakaoTalk_20260324_130702536_23.jpg": {"scene": "exterior", "desc": "'지니스 안경' 한글 빨간 간판 정면 외관, 빨간 출입문, 신관광영주차장 안내"}
+      }
+    },
+    "attractiger": {
+      "brand": "지니스안경(JINY's) 김해장유점",
+      "interiorDescription": "Bright Korean eyewear store with white walls and warm wood-toned display tables and shelves, white tile floor, ceiling-mounted JINY's signage and TV displays, backlit wall niches showing rows of sunglasses, glossy white cabinet bases, red and navy brand accents. no text labels",
+      "photos": {
+        "KakaoTalk_20260402_122236182.jpg": {"scene": "exterior", "desc": "빨간 'JINY's' 간판 외관, 변색렌즈 무료 만화 현수막과 통유리 출입구"},
+        "다운로드 (1).jpg": {"scene": "interior", "desc": "빨간 JINY's 사인 아래 비스듬한 안경테 매대 줄지어 선 매장 통로 전경"},
+        "다운로드 (2).jpg": {"scene": "exam", "desc": "검안실, 짙은 네이비 벽, 벽걸이 검사 모니터와 안구 단면 포스터, 좌측 흰색 검안기 본체, 흰 검사 테이블에 회색 의자(좌측 고정형 배치), 검은 보조스툴"},
+        "다운로드 (8).jpg": {"scene": "detail", "desc": "빨간 컨테이너풍 벽 옆 흰 칸막이 안경테 진열장과 우드 선글라스 매대 클로즈업, 안쪽 검은 상담석"},
+        "다운로드.jpg": {"scene": "interior", "desc": "좌측 백라이트 선글라스 벽장과 우측 우드 매대, 빨간 JINY's 천장 사인, 매장 통로 전경"}
+      }
+    },
+    "leesi7007": {
+      "brand": "지니스안경(JINY's) 대전충남대점",
+      "interiorDescription": "Bright Korean eyewear store with white walls and warm wood-toned display cases, white acoustic-tile ceiling with recessed square panel lights, light tile floor, red JINY's cube signs and 'In JINYUS We Trust' wall text, white cabinet bases with backlit wall niches, mirror columns. no text labels",
+      "photos": {
+        "다운로드.jpg": {"scene": "exterior", "desc": "야간 외관, 빨간 'JINY's' 입체 간판 '지니스안경 대전충대점', 통유리와 입간판들"},
+        "다운로드 (1).jpg": {"scene": "interior", "desc": "접수/CONTACT LENS 코너 매장 전경, 우드+화이트 진열대와 거울, RAWROW 매대"},
+        "다운로드 (2).jpg": {"scene": "detail", "desc": "우드 안경테 진열대 클로즈업, JINY's 울템안경 가격 안내, 빽빽한 안경테"},
+        "다운로드 (3).jpg": {"scene": "detail", "desc": "JINYUS LOUNGE 아래 안경테 진열대 클로즈업, 인물 포스터와 누진다초점 안내"},
+        "다운로드 (4).jpg": {"scene": "exam", "desc": "검안실, 흰 벽에 안구 단면 포스터, 좌측 NIDEK 자동굴절검사기와 천장 포롭터(고정 암), 중앙 세극등현미경, 우측 흰색 검안기 본체, 자주색 보조스툴(중앙 배치)"},
+        "다운로드 (5).jpg": {"scene": "exterior", "desc": "빨간 'JINY's' 간판 외관, 아큐브 콘택트렌즈 포스터와 'P 지니스안경 주차장' 입간판"},
+        "다운로드 (6).jpg": {"scene": "detail", "desc": "JINYUS LOUNGE 코너 우드 안경테 진열대 클로즈업, 둥근 거울과 빽빽한 프레임"},
+        "다운로드 (7).jpg": {"scene": "fitting", "desc": "접수 데스크와 CONTACT LENS 벽 진열장, JINY's 우드 카운터에 모니터·카드단말기, 안경렌즈 0원 안내"}
+      }
+    },
+    "kl1854": {
+      "brand": "지니스안경(JINY's) 심곡고가사거리점",
+      "interiorDescription": "Bright Korean eyewear store with white walls and warm wood-toned display cases, white ceiling with recessed lights, light tile floor, red JINY's signage, white cabinet bases and wood-framed wall display niches, backlit black sunglasses showcase, red contact-lens drawer wall. no text labels",
+      "photos": {
+        "KakaoTalk_20250715_090101717_24.jpg": {"scene": "exterior", "desc": "빨간 'JINY's' 간판 외관 '지니스안경', 통유리 출입구와 입간판"},
+        "KakaoTalk_20250715_090101717_27.jpg": {"scene": "exam", "desc": "검안기 클로즈업(세로), 흰색 HUVITZ 자동검안기와 상단 천장 매달린 포롭터(고정 수직봉), 우측 검은 검안의자, 흰 키패드 콘솔, 짙은 회색 벽"},
+        "KakaoTalk_20250715_090101717_28.jpg": {"scene": "exam", "desc": "검안실(세로), 좌측 흰색 HUVITZ 굴절검사기에 연결된 가요성 암(천장 매달린 포롭터), 우측 벽걸이 검사 모니터, 검은 검안의자, 짙은 회색 벽"},
+        "KakaoTalk_20250715_090140916_10.jpg": {"scene": "exterior", "desc": "출입구 안쪽에서 본 빨간 JINY's 유리문과 도로 풍경, 양쪽 JINY's 안내 패널"},
+        "KakaoTalk_20250715_090140916_11.jpg": {"scene": "detail", "desc": "검은 유리 진열장 선글라스 클로즈업, DRIVING 포스터, 좌측 골드 거울"},
+        "KakaoTalk_20250715_090140916_12.jpg": {"scene": "detail", "desc": "흰 선반 선글라스 클로즈업, POLARIZE LIGHT 포스터, 단 별 정렬"},
+        "KakaoTalk_20250715_090140916_13.jpg": {"scene": "detail", "desc": "우드+화이트 안경테 매대 3구 클로즈업, AIR STAINLESS 포스터"},
+        "KakaoTalk_20250715_090140916_14.jpg": {"scene": "detail", "desc": "우드 진열대와 벽 선반 안경테 클로즈업, 따뜻한 우드톤 매대"},
+        "KakaoTalk_20250715_090140916_15.jpg": {"scene": "fitting", "desc": "콘택트렌즈 코너, 좌측 JINYUS LOUNGE 냉장고와 노란 렌즈박스 타워, 우측 빨강/흰 칸 렌즈 진열벽, 우드 서랍장"},
+        "KakaoTalk_20250715_090140916_16.jpg": {"scene": "fitting", "desc": "콘택트렌즈 진열벽과 거울, 'In JINYUS We Trust' 벽글씨, 우드 서랍장과 모니터, 소화기"},
+        "KakaoTalk_20250715_090140916_17.jpg": {"scene": "detail", "desc": "우드 진열대 선글라스+안경테 클로즈업, FA66 포스터, 따뜻한 우드톤"},
+        "KakaoTalk_20250715_090140916_18.jpg": {"scene": "detail", "desc": "우드+화이트 안경테 매대 클로즈업, AIR LOCK 포스터, 통유리로 도로 보임"}
+      }
+    },
+    "peace9486": {
+      "brand": "지니스안경(JINY's) 진해하나로마트점",
+      "interiorDescription": "Open-front kiosk-style eyewear store located INSIDE a large Korean mart/hypermarket (no separate street-facing facade); its storefront is the open counter frontage facing the mart aisle, with a hanging red JINY's sign and ceiling-mounted display TVs. Bright, white and grey walls with warm wood-toned display tables, fluorescent panel lights and mart-style acoustic ceiling, light tile floor, glossy white cabinet bases with backlit niches, sunglasses wall display. no text labels",
+      "photos": {
+        "다운로드 (1).jpg": {"scene": "interior", "desc": "좌측 안경테 매대들과 우측 흰 진열장 통로, 천장 LED, 매장 안쪽 전경"},
+        "다운로드 (2).jpg": {"scene": "exam", "desc": "검안실, 'JINY's 반갑습니다 안경사' 벽 안내문, 회색 벽, 좌측 흰 검안기와 흰 모니터, 우측 흰색 검안기 본체(고정 테이블), 검은 검안의자와 검은 보조스툴, 흰 작업대"},
+        "다운로드 (3).jpg": {"scene": "detail", "desc": "선글라스 백라이트 벽 진열장 클로즈업, 빨간 컨테이너풍 상단, 좌측 안경테 매대와 거울"},
+        "다운로드.jpg": {"scene": "interior", "desc": "안경테 매대들과 우측 콘택트렌즈/진열장, 천장 검은 트랙조명과 둥근 무한대 로고 사인, 누진다초점 50% 입간판"},
+        "다운로드.png": {"scene": "exterior", "desc": "마트 내 입점형 매장의 정면 외관(=외관샷). 마트 통로에서 본 JINY's 빨간 사인과 오픈형 매대 정면, 좌우 디스플레이 TV, 중앙 유리 카운터"}
+      }
+    }
+  }
+}

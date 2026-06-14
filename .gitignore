@@ -62,6 +62,16 @@ tmp-*
 /data/keyword-signal-cache.json
 /data/keyword-result-cache.json
 
+# shop reference photos (large binaries, kept local; index/profile/README tracked)
+/data/shop-refs/**/*.jpg
+/data/shop-refs/**/*.jpeg
+/data/shop-refs/**/*.png
+/data/shop-refs/**/*.webp
+
+# local scratch artifacts
+/.tmp-*
+/.playwright-mcp/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

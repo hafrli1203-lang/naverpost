@@ -5,6 +5,34 @@
 
 ---
 
+## v2.0 (2026-06-14)
+
+### 장면 매칭 (scene-aware reference) — 상황에 맞는 실제 매장 사진 사용
+사용자 요구: 실제 매장 사진을 넣되 "검안 장면엔 검안실 사진, 피팅엔 피팅 사진"을 골라 쓰고, 합성이 아니라 참조로 활용. 검안기 정위치·피팅 착석 동작 교정. 설계: `docs/designs/image-realism.md` (v2.0).
+
+- **사진 장면 인덱스**: `data/shop-refs/_scene-index.json` — 6개 매장 전 사진을 육안 분류(외관/내부/검안/피팅/디테일) + 매장별 `interiorDescription`·`brand`. (서브에이전트 생성)
+- **프롬프트 장면 태그 세분화**: `[STORE]` 단일 마커 → `[SCENE:exterior|interior|exam|fitting|detail]`. 매장 밖(집·사무실·야외)·개념 이미지는 무태그. 구버전 `[STORE]`는 interior로 흡수(하위호환).
+  - 신규 `parseScenePrompt()` (`imagePrompt.ts`), `getSceneReferenceImages(shopId, scene)` (`shopRefs.ts`, 최대 2장 + 폴백 체인 exam/fitting/detail→interior).
+- **검안 동작 교정**: 손님이 검안의자에 앉은 장면은 검안기/포롭터가 환자 정면 정위치(옆으로 빠지거나 앞이 비면 안 됨) — 사용자가 지적한 "테이블 옆으로 빠짐" 해결.
+- **피팅 동작 교정**: 피팅·상담은 카운터/테이블 착석 진행. 피팅 테이블 사진 없으면 매장 톤에 맞게 임의 생성 허용.
+- **interiorDescription 출처**: `_scene-index.json` 우선(profile.json 폴백).
+- **배선 변경**: `{prompt,isStore}` → `{prompt,scene}`. `BlogImage.isStore` → `BlogImage.scene`. `/api/image/{prompts,one,regenerate,generate}` 전부 scene 기반으로 전환.
+- 보안: `shopRefDir` 경로 트래버설 차단 유지. 한글/공백 파일명 참조 경로 정상 처리(실측 검증).
+
+## v1.9 (2026-06-14)
+
+### 이미지 사실성 개편 (실사 + 실제 매장 반영 + 동작 사실성)
+사용자 피드백: "90년대 필름톤·망한 안경원·피팅 동작 오류·후진국 모습". 설계: `docs/designs/image-realism.md`.
+
+- **필름톤 제거**: `imagePrompt.ts`에서 `shot on 35mm film`·`soft natural color` 삭제 → 현대 스마트폰/미러리스 실사 톤(clean/sharp/bright/true-to-life color).
+- **시대 고정(전역)**: present-day 2020s Korea 강제. vintage/retro/1990s/faded/run-down/developing-country 금지어 추가.
+- **현대 안경원 인테리어 강제**: 밝고 깔끔한 매장, 벽면 백라이트 진열장. 오픈장·먼지·낡음 금지.
+- **동작 사실성 규칙 신설**: 피팅은 안경테를 손에 들고 얼굴에서 떨어뜨려 조정(공구는 테에만). 쓴 안경 얼굴에 공구 들이대는 장면 금지. 검안 자세 명시.
+- **실제 매장 참조사진 파이프라인**: `gti --image`로 매장별 실제 사진 첨부. `data/shop-refs/<blogId>/`(사진 + profile.json). `[STORE]` 태그 프롬프트(매장 장면)에만 첨부, 정보/개념 이미지엔 미첨부.
+  - 신규: `lib/data/shopRefs.ts`(`getShopRefImages`/`getShopProfile`), `gtiCli` `images?` 옵션, `generateBlogImage(prompt, refImages?)`.
+  - shopId 배선: 프론트 → `/api/image/{prompts,one,regenerate,generate}`. 프롬프트 반환을 `{prompt,isStore}[]`로 객체화. `BlogImage.isStore` 추가.
+  - 폴백: 사진 없으면 profile.json 인테리어 설명(또는 기본 묘사)만으로 생성. 매장 미지정도 정상 동작.
+
 ## v1.8 (2026-06-13)
 
 ### C-Rank 보강 4종 (사진 제외)

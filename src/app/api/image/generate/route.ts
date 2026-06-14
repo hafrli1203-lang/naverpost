@@ -2,13 +2,15 @@ import { NextRequest } from "next/server";
 import { generateImagePrompts } from "@/lib/ai/claude";
 import { generateBlogImage } from "@/lib/ai/imageGen";
 import { saveImage, getGenerationParams, deleteGenerationParams } from "@/lib/storage/imageStore";
-import { buildImagePrompts } from "@/lib/prompts/imagePrompt";
+import { buildImagePrompts, parseScenePrompt } from "@/lib/prompts/imagePrompt";
+import { getShopById } from "@/lib/data/shops";
+import { getShopProfile, getSceneReferenceImages } from "@/lib/data/shopRefs";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
 export async function POST(request: NextRequest) {
-  let body: { sessionId: string; articleContent: string; title: string; mainKeyword: string };
+  let body: { sessionId: string; articleContent: string; title: string; mainKeyword: string; shopId?: string };
   try {
     body = await request.json();
   } catch {
@@ -18,7 +20,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { sessionId, articleContent, title, mainKeyword } = body;
+  const { sessionId, articleContent, title, mainKeyword, shopId } = body;
   if (!sessionId || !articleContent || !title || !mainKeyword) {
     return new Response(
       `data: ${JSON.stringify({ type: "complete", successCount: 0, failCount: 0, total: 0, error: "Missing required fields" })}\n\n`,
@@ -26,7 +28,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  return new Response(createImageStream(sessionId, articleContent, title, mainKeyword), {
+  return new Response(createImageStream(sessionId, articleContent, title, mainKeyword, shopId), {
     headers: sseHeaders(),
   });
 }
@@ -43,7 +45,8 @@ function createImageStream(
   sessionId: string,
   articleContent: string,
   title: string,
-  mainKeyword: string
+  mainKeyword: string,
+  shopId?: string
 ): ReadableStream {
   const encoder = new TextEncoder();
   return new ReadableStream({
@@ -60,19 +63,30 @@ function createImageStream(
       });
 
       try {
-        const promptText = buildImagePrompts({ articleContent, title, mainKeyword });
+        let shop: { name: string; interiorDescription?: string } | undefined;
+        if (shopId) {
+          const shopRecord = await getShopById(shopId);
+          if (shopRecord) {
+            const profile = await getShopProfile(shopId);
+            shop = { name: shopRecord.name, interiorDescription: profile?.interiorDescription };
+          }
+        }
+
+        const promptText = buildImagePrompts({ articleContent, title, mainKeyword, shop });
         const rawPrompts = await generateImagePrompts(promptText);
         const prompts = rawPrompts
           .split("\n")
           .map((p) => p.trim())
           .map((p) => (p.startsWith("(") && p.endsWith(")") ? p.slice(1, -1).trim() : p))
           .filter((p) => p.length > 0)
+          .map((line) => parseScenePrompt(line))
+          .filter((p) => p.prompt.length > 0)
           .slice(0, 10);
 
         console.log("[image.generate] prompts", {
           sessionId,
           promptCount: prompts.length,
-          samplePrompt: prompts[0]?.slice(0, 120) ?? "",
+          samplePrompt: prompts[0]?.prompt.slice(0, 120) ?? "",
         });
 
         if (prompts.length === 0) {
@@ -92,9 +106,11 @@ function createImageStream(
         }
 
         await Promise.all(
-          prompts.map(async (prompt, i) => {
+          prompts.map(async ({ prompt, scene }, i) => {
             try {
-              const result = await generateBlogImage(prompt);
+              const refImages =
+                scene && shopId ? await getSceneReferenceImages(shopId, scene) : [];
+              const result = await generateBlogImage(prompt, refImages);
               const saved = await saveImage(sessionId, i, result.base64Data, result.mimeType);
               send({
                 type: "image-ready",
@@ -145,7 +161,7 @@ export async function GET(request: NextRequest) {
   if (encodedParams) {
     try {
       const decoded = decodeURIComponent(escape(atob(encodedParams)));
-      const { sessionId, articleContent, title, mainKeyword } = JSON.parse(decoded);
+      const { sessionId, articleContent, title, mainKeyword, shopId } = JSON.parse(decoded);
       if (!sessionId || !articleContent || !title || !mainKeyword) {
         return new Response(
           `data: ${JSON.stringify({ type: "complete", successCount: 0, failCount: 0, total: 0, error: "Invalid params" })}\n\n`,
@@ -153,7 +169,7 @@ export async function GET(request: NextRequest) {
         );
       }
       return new Response(
-        createImageStream(sessionId, articleContent, title, mainKeyword),
+        createImageStream(sessionId, articleContent, title, mainKeyword, shopId),
         { headers: sseHeaders() }
       );
     } catch {
@@ -181,7 +197,13 @@ export async function GET(request: NextRequest) {
 
   await deleteGenerationParams(token);
   return new Response(
-    createImageStream(params.sessionId, params.articleContent, params.title, params.mainKeyword),
+    createImageStream(
+      params.sessionId,
+      params.articleContent,
+      params.title,
+      params.mainKeyword,
+      (params as { shopId?: string }).shopId
+    ),
     { headers: sseHeaders() }
   );
 }

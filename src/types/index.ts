@@ -389,6 +389,8 @@ export interface BlogImage {
   prompt: string;
   section: string;
   status: "pending" | "generating" | "success" | "failed" | "retrying";
+  /** 매장 장면 카테고리. 재생성 시 그 장면에 맞는 실제 매장 사진을 참조로 첨부. null=매장 밖/개념. */
+  scene?: "exterior" | "interior" | "exam" | "fitting" | "detail" | null;
 }
 
 // ===== Workflow Types =====

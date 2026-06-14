@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateBlogImage } from "@/lib/ai/imageGen";
 import { saveImage } from "@/lib/storage/imageStore";
+import { getSceneReferenceImages, type SceneTag } from "@/lib/data/shopRefs";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -8,10 +9,12 @@ export const maxDuration = 300;
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { index, sessionId, prompt } = body as {
+    const { index, sessionId, prompt, shopId, scene } = body as {
       index: number;
       sessionId: string;
       prompt?: string;
+      shopId?: string;
+      scene?: SceneTag | null;
     };
 
     if (index === undefined || !sessionId) {
@@ -23,9 +26,12 @@ export async function POST(request: NextRequest) {
 
     const imagePrompt =
       prompt ||
-      "A high-quality photo of modern eyeglasses in a clean, bright optical shop setting. Professional product photography, 4:3 aspect ratio.";
+      "A clean realistic photo of modern eyeglasses in a bright, modern present-day Korean optical shop with wall-mounted backlit display shelves. Sharp, true-to-life color, not film, not vintage. 4:3 aspect ratio.";
 
-    const result = await generateBlogImage(imagePrompt);
+    // 장면 태그가 있는 매장 장면에만 그 장면에 맞는 실제 매장 사진을 참조로 첨부.
+    const refImages = scene && shopId ? await getSceneReferenceImages(shopId, scene) : [];
+
+    const result = await generateBlogImage(imagePrompt, refImages);
 
     const saved = await saveImage(sessionId, index, result.base64Data, result.mimeType);
     const imageUrl = `/api/image/file/${saved.imageId}`;

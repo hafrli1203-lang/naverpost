@@ -354,16 +354,20 @@ export default function Home() {
       setImageProgress({ current: 0, total: 10 });
 
       try {
+        const shopId = state.shop?.id;
         const promptsRes = await fetch("/api/image/prompts", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ articleContent, title, mainKeyword }),
+          body: JSON.stringify({ articleContent, title, mainKeyword, shopId }),
         });
         const promptsJson = await safeJson(promptsRes);
         if (!promptsRes.ok || !promptsJson.success) {
           throw new Error(promptsJson.error ?? "프롬프트 생성 실패");
         }
-        const prompts: string[] = (promptsJson.data as { prompts: string[] }).prompts;
+        type ScenePrompt = { prompt: string; scene: BlogImage["scene"] };
+        const prompts: ScenePrompt[] = (
+          promptsJson.data as { prompts: ScenePrompt[] }
+        ).prompts;
         const total = prompts.length;
         setImageProgress({ current: 0, total });
 
@@ -390,7 +394,9 @@ export default function Home() {
                     body: JSON.stringify({
                       sessionId: state.sessionId,
                       index: i,
-                      prompt: prompts[i],
+                      prompt: prompts[i].prompt,
+                      shopId,
+                      scene: prompts[i].scene,
                     }),
                   });
                   json = await safeJson(res);
@@ -423,9 +429,10 @@ export default function Home() {
                 imageId: data.imageId ?? "",
                 imageUrl,
                 mimeType,
-                prompt: data.prompt ?? prompts[i],
+                prompt: data.prompt ?? prompts[i].prompt,
                 section: `섹션 ${i + 1}`,
                 status: "success",
+                scene: prompts[i].scene,
               };
               setState((prev) => ({
                 ...prev,
@@ -439,9 +446,10 @@ export default function Home() {
                 index: i,
                 imageId: "",
                 imageUrl: "",
-                prompt: prompts[i] ?? "",
+                prompt: prompts[i]?.prompt ?? "",
                 section: `섹션 ${i + 1}`,
                 status: "failed",
+                scene: prompts[i]?.scene,
               };
               setState((prev) => ({
                 ...prev,
@@ -466,7 +474,7 @@ export default function Home() {
         toast.error(err instanceof Error ? err.message : "이미지 생성 중 오류가 발생했습니다.");
       }
     },
-    [state.article, state.sessionId, setState]
+    [state.article, state.sessionId, state.shop, setState]
   );
 
   const handleImageRegenerate = useCallback(
@@ -479,9 +487,18 @@ export default function Home() {
       });
 
       try {
-        const body: { index: number; sessionId: string; prompt?: string } = {
+        const target = state.images.find((img) => img.index === index);
+        const body: {
+          index: number;
+          sessionId: string;
+          prompt?: string;
+          shopId?: string;
+          scene?: BlogImage["scene"];
+        } = {
           index,
           sessionId: state.sessionId,
+          shopId: state.shop?.id,
+          scene: target?.scene,
         };
         if (customPrompt) body.prompt = customPrompt;
 

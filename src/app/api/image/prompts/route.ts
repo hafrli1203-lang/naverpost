@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateImagePrompts } from "@/lib/ai/claude";
-import { buildImagePrompts } from "@/lib/prompts/imagePrompt";
+import { buildImagePrompts, parseScenePrompt } from "@/lib/prompts/imagePrompt";
+import { getShopById } from "@/lib/data/shops";
+import { getShopProfile } from "@/lib/data/shopRefs";
 
 export const runtime = "nodejs";
 export const maxDuration = 240;
@@ -8,10 +10,11 @@ export const maxDuration = 240;
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { articleContent, title, mainKeyword } = body as {
+    const { articleContent, title, mainKeyword, shopId } = body as {
       articleContent?: string;
       title?: string;
       mainKeyword?: string;
+      shopId?: string;
     };
 
     if (!articleContent || !title || !mainKeyword) {
@@ -21,14 +24,27 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const promptText = buildImagePrompts({ articleContent, title, mainKeyword });
+    let shop: { name: string; interiorDescription?: string } | undefined;
+    if (shopId) {
+      const shopRecord = await getShopById(shopId);
+      if (shopRecord) {
+        const profile = await getShopProfile(shopId);
+        shop = {
+          name: shopRecord.name,
+          interiorDescription: profile?.interiorDescription,
+        };
+      }
+    }
+
+    const promptText = buildImagePrompts({ articleContent, title, mainKeyword, shop });
     const raw = await generateImagePrompts(promptText);
     const prompts = raw
       .split("\n")
       .map((p) => p.trim())
       .map((p) => (p.startsWith("(") && p.endsWith(")") ? p.slice(1, -1).trim() : p))
       .map((p) => (p.startsWith("(") ? p.slice(1).trim() : p))
-      .filter((p) => p.length > 20)
+      .map((line) => parseScenePrompt(line))
+      .filter((p) => p.prompt.length > 20)
       .slice(0, 10);
 
     if (prompts.length === 0) {
