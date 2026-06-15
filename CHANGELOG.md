@@ -5,6 +5,35 @@
 
 ---
 
+## v2.3 (2026-06-15)
+
+### 매장 컷 = 실제 사진(하이브리드) + 이미지 워싱
+사용자 지적: AI 생성 매장컷이 실제 매장과 전혀 다르고, 글자를 다 지우니 오히려 AI 티가 남("글씨가 있어야 진짜 같다"). 또 같은 사진 재사용 시 네이버 중복 이미지 판정 우려.
+
+- **하이브리드(실제 사진 직접 사용)**: gti는 실제 매장을 정확히 재현 못하므로, "공간/장비/제품" 컷(scene=exterior/interior/detail)은 AI 생성 대신 `data/shop-refs`의 **진짜 사진을 그대로 서빙**. 실제 간판·글자·집기가 살아 진짜처럼 보임. 한 장 안에서 AI+실사를 섞지 않으므로 합성 티 없음.
+  - **검안·피팅은 예외**: 실제 사진엔 사람이 없는데(전 매장 검안/피팅 사진 = 빈 장비/공간) "사람이 검사/상담받는 장면"이 필요하므로, exam·fitting은 **AI 생성 + 실제 검안실/피팅 사진을 참조(getSceneReferenceImages)**로 붙여 만든다(사용자 선택 B). 인물/개념 컷(scene=null)도 AI 생성.
+  - `prompts/route.ts`: 공간 컷(exterior/interior/detail)마다 서로 다른 실제 사진을 배정(distinct, 중복 회피) → `rawPhoto` 필드로 전달. exam/fitting엔 rawPhoto 미배정 → AI 생성.
+  - `one/route.ts`·`regenerate/route.ts`: `rawPhoto`(또는 매장 scene)면 파일을 읽어 직접 서빙. 경로는 `resolveRefPathWithinRoot`로 트래버설 차단.
+  - `shopRefs.ts`: `listScenePhotos()`(폴백 포함 전체 후보, 캡 없음)·`resolveRefPathWithinRoot()` 추가. `page.tsx` ScenePrompt에 `rawPhoto` 배선.
+- **이미지 워싱(`lib/storage/imageWash.ts`, sharp)**: 같은 사진을 여러 글에 써도 매번 다른 해시가 되도록 미세 변형 — 미세 회전(±1.1°)+여백 제거, 팬 크롭(3~6%), 약한 스케일, 밝기/채도/색상 지터, JPEG 재압축(mozjpeg), EXIF 제거. **좌우반전은 금지**(간판 글자가 뒤집혀 가짜 티). 실측: 동일 사진 2회 서빙 → md5 상이(중복판정 회피), 육안 동일.
+  - 한계: 해시·지각해시를 흔들어 중복판정 위험을 낮추는 완화책이며 100% 보장은 아님. 매장 자기 블로그라 같은 매장 사진이 반복되는 것 자체는 정상.
+- **보안(임의 파일 읽기/IDOR 차단)**: 자동 보안 리뷰가 `one/route.ts`의 `rawPhoto`(클라 제공 경로) 신뢰를 HIGH로 지적. 수정 — 클라 경로를 신뢰하지 않고 `shopId+scene`로 서버가 허용 목록(`listScenePhotos`)을 재생성해 그 안의 경로일 때만 서빙(멤버십 검사) + 확장자 허용목록. `washImageBuffer`는 실패 시 원본을 반환하지 않고 throw(비이미지 파일 base64 누출 방지). `resolveRefPathWithinRoot`(문자열 검사) 제거. 실측: `_scene-index.json`·`profile.json` 읽기 시도 → 차단(누출 없음), 정상 사진은 그대로 서빙.
+- `tsc --noEmit` 0 에러. 실측 산출물: `Downloads/leesi7007-washed-{1,2}.jpg`.
+
+## v2.2 (2026-06-15)
+
+### BUG-002 검안 장면 과생성 + 매장 묘사 글자 모순
+사용자 지적: 블루라이트렌즈 코팅 원고(검사 내용 없음)인데 검안(시력검사) 이미지가 생성됨. 또 데이터의 매장 사진이 결과물에 제대로 반영되는지 의심.
+
+- **검안 과생성(①)**: 이미지 프롬프트 LLM이 마무리 CTA("생활거리·눈부심 확인", "도수를 잡아야")를 검안으로 넘겨짚어 `[SCENE:exam]`를 생성. `buildImagePrompts` 가드가 제품/인물 누락만 막고 장면 종류 규율이 없었음.
+  - 수정 A(프롬프트): `imagePrompt.ts`에 "exam은 시력검사·검안·굴절검사 '과정'을 실제 서술할 때만, CTA·확인·상담은 fitting/interior" 규칙 추가.
+  - 수정 B(결정론 가드): `api/image/prompts/route.ts`에서 원고에 검사 과정 어휘(시력검사·검안·굴절검사·검영·포롭터·안압·자동굴절·시력측정·도수측정 등)가 없으면 `[SCENE:exam]` 프롬프트를 드롭(LLM 미준수 2차 방어).
+  - **검증(라이브 :3100)**: 동일 블루라이트 원고+leesi7007 → 프롬프트 10개 중 exam 0개. 정상.
+- **매장 사진 반영(②)**: 메커니즘은 정상 작동 확인(shopId 전달 → `getShopProfile` interiorDescription 주입 + `getSceneReferenceImages`로 실제 사진 gti `--image` 첨부, leesi7007 한글 파일명 전부 해석). 그러나 결과물이 실제 매장과 다른 일반 매장으로 나옴.
+  - 원인: `_scene-index.json`의 6개 매장 interiorDescription이 브랜드 텍스트("red JINY's cube signs", "'In JINYUS We Trust' wall text")를 적어 두고 동시에 "no text labels"라 **자기모순** → 깨진 AI 글자 또는 정체성 소실.
+  - 수정(절충): 6개 매장 묘사에서 읽히는 글자·브랜드명 제거하고 색·형태로만 표현(예: "red accent cube light boxes, no readable text or logos"). 고유 비텍스트 특징 보존(백라이트 니치·천장/조명·콘택트렌즈 벽장 등). leesi7007엔 실제 사진에서 확인한 콘택트렌즈 벽장 추가. `imagePrompt.ts` shopGuide에 "고유 특징은 살리되 글자는 색·형태로만" 한 줄 추가.
+- `tsc --noEmit` 0 에러.
+
 ## v2.1 (2026-06-15)
 
 ### BUG-001 깨진 옛 제목이 화면에 되살아남 (stale localStorage)

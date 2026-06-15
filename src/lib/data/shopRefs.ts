@@ -210,3 +210,37 @@ export async function getSceneReferenceImages(
   }
   return [];
 }
+
+/**
+ * 장면+폴백 체인의 "모든" 실제 사진 절대경로(존재 확인, 중복 제거, 캡 없음).
+ * 라우트에서 매장 컷마다 서로 다른 실제 사진을 배정(distinct)할 때 쓴다.
+ * getSceneReferenceImages 와 달리 2장 캡이 없어 후보 풀 전체를 본다.
+ */
+export async function listScenePhotos(shopId: string, scene: SceneTag): Promise<string[]> {
+  if (!shopId || !isSceneTag(scene)) return [];
+  const dir = shopRefDir(shopId);
+  if (!dir) return [];
+  const index = await loadSceneIndex();
+  const entry = index?.[shopId];
+  if (!entry || Object.keys(entry.photos).length === 0) return [];
+
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const cat of SCENE_FALLBACK[scene]) {
+    const candidates = Object.entries(entry.photos)
+      .filter(([, p]) => p.scene === cat)
+      .map(([file]) => path.join(dir, file))
+      .sort();
+    for (const p of candidates) {
+      if (seen.has(p)) continue;
+      try {
+        await fs.access(p);
+        out.push(p);
+        seen.add(p);
+      } catch {
+        // 깨진 경로 스킵
+      }
+    }
+  }
+  return out;
+}

@@ -364,7 +364,7 @@ export default function Home() {
         if (!promptsRes.ok || !promptsJson.success) {
           throw new Error(promptsJson.error ?? "프롬프트 생성 실패");
         }
-        type ScenePrompt = { prompt: string; scene: BlogImage["scene"] };
+        type ScenePrompt = { prompt: string; scene: BlogImage["scene"]; rawPhoto?: string };
         const prompts: ScenePrompt[] = (
           promptsJson.data as { prompts: ScenePrompt[] }
         ).prompts;
@@ -397,6 +397,7 @@ export default function Home() {
                       prompt: prompts[i].prompt,
                       shopId,
                       scene: prompts[i].scene,
+                      rawPhoto: prompts[i].rawPhoto,
                     }),
                   });
                   json = await safeJson(res);
