@@ -111,7 +111,8 @@ const KEYWORD_RESULT_CACHE_ENABLED = process.env.KEYWORD_RESULT_CACHE !== "0";
 // v21: 안경이야기 범위 확장(관리 매뉴얼→안경·안경원 전반 이야기) — 스타일·상황·경험·트렌드 군집 시드/게이트 추가.
 // v22: 제목 폴리시 자연스러움 강화 — 도식 명사 스택("~순서/~법") 금지, 사람 말투(평서·조건·질문형)로.
 // v23: 개수 안정화 — 부족분을 실볼륨 시드에 제목 생성해 채우는 복구 백필(7~10 변동 해소).
-const KEYWORD_RESULT_CACHE_VERSION = 23;
+// v24: 안경렌즈 카테고리에 콘택트렌즈·선글라스 누수 차단 + "이름에 쓰기" 류 비문 제목 거름 — 이전 결과 무효화.
+const KEYWORD_RESULT_CACHE_VERSION = 24;
 const KEYWORD_RESULT_CACHE_FILE = path.join(process.cwd(), "data", "keyword-result-cache.json");
 
 type KeywordResultResponseData = {
@@ -708,6 +709,8 @@ function getSeasonalFallbackOptions(params: {
 function isAwkwardGeneratedTitle(title: string): boolean {
   return (
     MECHANICAL_TITLE_PATTERNS.some((pattern) => pattern.test(title)) ||
+    // 의미 붕괴 비문: "변색렌즈 이름에 쓰기 전" 처럼 키워드를 '이름'으로 오해해 만든 제목
+    /이름[을에는]\s*(쓰|적|넣|붙)/.test(title) ||
     // 같은 단어가 두 번 들어간 스팸성 제목
     /(확인 확인|기준 기준|선택 선택|관리 관리|검사 검사|차이 차이|원인 원인)/.test(title) ||
     // "A와 B 확인/기준/점검" 식 키워드 나열
@@ -1116,6 +1119,15 @@ function isCategoryAppropriateCandidate(categoryId: string, option: KeywordOptio
   if (categoryId === "eye-info") {
     if (/착용시간|원데이|콘택트|렌즈착용|렌즈관리/.test(source)) return false;
     if (/시력검사.*(안경닦이|안경수리|코패드|김서림|흘러내림|피팅|귀통증)/.test(source)) return false;
+  }
+  if (categoryId === "lenses") {
+    // 안경렌즈 카테고리에 콘택트렌즈·선글라스 도메인이 새는 것을 막는다.
+    // (예: "콘택트렌즈 도수", "레이벤선글라스 도수"가 안경렌즈 후보에 섞이던 누수.)
+    // 변색/블루라이트/자외선/편광/고굴절/압축/코팅렌즈는 안경렌즈이므로 건드리지 않는다.
+    if (/콘택트렌즈|콘택트|원데이|소프트렌즈|하드렌즈|컬러렌즈|서클렌즈|토릭렌즈|드림렌즈|미용렌즈|멀티포컬/.test(source)) {
+      return false;
+    }
+    if (/선글라스/.test(source)) return false;
   }
   if (categoryId === "glasses-story") {
     if (/안경수리\s+(흘러내림|착용감)|안경세척\s+코팅.*렌즈와 비교/.test(source)) return false;
