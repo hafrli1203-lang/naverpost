@@ -187,6 +187,7 @@ export function buildImagePrompts(params: {
 - 매장 장면도 진열대·간판·벽에 "글자 없이" 깔끔하게(no text/labels/signage on shelves). 한 장의 자연스러운 사진(콜라주·합성 금지).
 - ★ 매장 "밖" 장면(집·사무실·야외 등 라이프스타일)이나 개념/비유 이미지에는 장면 태그를 절대 붙이지 마세요(매장 사진이 잘못 붙습니다).
 - ★★★ [SCENE:exam](검안/시력검사)는 원고가 "시력검사·검안·굴절검사·검영" 같은 검사 '과정 자체'를 실제로 설명할 때만 쓰세요. 단순한 "확인 / 상담 / 도수를 잡아요 / 방문해 보세요" 같은 마무리 권유(CTA)는 검안 장면이 아닙니다 — 이런 경우 [SCENE:exam]를 절대 쓰지 말고 [SCENE:fitting](상담·조정) 또는 [SCENE:interior]/[SCENE:detail]를 쓰세요. 원고에 없는 검사 장면을 지어내면 안 됩니다.
+- 인물이 착용/취급하는 "안경"의 종류도 원고 맥락에 맞춰 스스로 판단하세요(케이스를 외우지 말고 글을 읽고 결정): 시력검사·검안 맥락이면 검안용 시험테(trial lens fitting frame), 안경테 선택·완성·일상 맥락이면 완성된 일반 안경(finished prescription eyeglasses). 원고가 다루지 않는 상황은 만들지 마세요.
 
 # 블로그 원고
 ${articleContent}
