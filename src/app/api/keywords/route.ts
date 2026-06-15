@@ -709,6 +709,10 @@ function getSeasonalFallbackOptions(params: {
 function isAwkwardGeneratedTitle(title: string): boolean {
   return (
     MECHANICAL_TITLE_PATTERNS.some((pattern) => pattern.test(title)) ||
+    // 형식 금지: 쉼표·이모지·번호목록/불릿 마커
+    /[,，、]/.test(title) ||
+    /[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}]/u.test(title) ||
+    /(^|\s)(\d+[.)]|[①-⑩]|[-*•])\s/.test(title) ||
     // 의미 붕괴 비문: "변색렌즈 이름에 쓰기 전" 처럼 키워드를 '이름'으로 오해해 만든 제목
     /이름[을에는]\s*(쓰|적|넣|붙)/.test(title) ||
     // 같은 단어가 두 번 들어간 스팸성 제목

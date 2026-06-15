@@ -130,9 +130,9 @@ export async function generateKeywordCandidatesWithGpt(params: {
   const countRule =
     targetCount === 1
       ? `- results 배열은 정확히 1개입니다. 기본 후보 중 가장 자연스럽고 검색 의도가 선명한 1개만 작성하세요.
-- 여러 개를 만들지 마세요. If the results array has more or fewer than 1 object, the response is invalid.`
-      : `- results 배열은 정확히 ${targetCount}개입니다. 가장 좋은 후보 1~3개만 고르지 말고 서로 다른 ${targetCount}개를 모두 생성하세요.
-- If the results array has fewer than ${targetCount} objects, the response is invalid.`;
+- 여러 개를 만들지 마세요. 1개가 아니면 무효입니다.`
+      : `- results 배열은 서로 다른 ${targetCount}개를 목표로 만드세요. 좋은 1~3개만 고르고 멈추지 마세요.
+- 단 아래 분산·군집·전문차원 규칙과 충돌하면 개수보다 품질을 우선하세요. 억지로 채우려 중복·비검색 조합을 만들지 말고, 부족하면 적게 내도 됩니다.`;
   const fallbackLines = params.fallbackCandidates
     .map(
       (candidate, index) =>

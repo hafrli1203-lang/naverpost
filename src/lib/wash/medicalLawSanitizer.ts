@@ -51,6 +51,13 @@ const PHRASE_REPLACEMENTS: Replacement[] = [
   { pattern: /놓치지 마세요/g, replacement: "", category: "discount-pressure" },
   { pattern: /기간 한정 특가/g, replacement: "안내", category: "discount-pressure" },
 
+  // 의료광고법 핵심 단정어 (누락분 보강)
+  { pattern: /완치됩니다|완치된다|완치돼요|완치가 됩니다/g, replacement: "개선될 수 있어요", category: "absolute" },
+  { pattern: /완치/g, replacement: "개선", category: "absolute" },
+  { pattern: /효과가 (확실합니다|확실해요|뛰어납니다|좋습니다|있습니다)/g, replacement: "도움이 될 수 있어요", category: "absolute" },
+  { pattern: /효과적입니다|효과적이에요/g, replacement: "도움이 될 수 있어요", category: "absolute" },
+  { pattern: /통증이 사라집니다|증상이 사라집니다/g, replacement: "불편이 줄어들 수 있어요", category: "absolute" },
+
   // 의료광고법 단정 - 시력 효과
   { pattern: /시력이 좋아집니다/g, replacement: "사용 환경에 맞는 보정에 도움을 줄 수 있어요", category: "absolute" },
   { pattern: /시력이 회복됩니다/g, replacement: "교정에 도움을 줄 수 있어요", category: "absolute" },

@@ -14,6 +14,15 @@ const TITLE_EXTRA_PROHIBITED_WORDS = [
   "예약",
   "할인",
   "무료",
+  // 프롬프트가 금지하지만 검증기에 빠져 있던 저품질·과장 플래그 (영향도 HIGH)
+  "순위",
+  "비교",
+  "충격",
+  "폭로",
+  "TOP",
+  "최고",
+  "최상",
+  "최적",
 ];
 
 // 두 단어 사이에 허용하는 조사. 긴 조사를 앞에 둬야 정규식 alternation이 올바르게 매칭된다.
@@ -130,6 +139,17 @@ export function validateKeywordOption(
       rule: "rule5",
       reason: `제목 길이는 12~32자이어야 합니다 (현재 ${titleLength}자): "${title}"`,
     });
+  }
+
+  // 형식 금지(프로젝트 핵심 규칙): 쉼표·이모지·번호목록 마커. 프롬프트는 막지만 검증기에 없던 구멍.
+  if (/[,，、]/.test(title)) {
+    failures.push({ rule: "rule9", reason: `제목에 쉼표를 쓸 수 없습니다: "${title}"` });
+  }
+  if (/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}️]/u.test(title)) {
+    failures.push({ rule: "rule9", reason: `제목에 이모지를 쓸 수 없습니다: "${title}"` });
+  }
+  if (/(^|\s)(\d+[.)]|[①-⑩]|[-*•])\s/.test(title)) {
+    failures.push({ rule: "rule9", reason: `제목에 번호목록/불릿 마커를 쓸 수 없습니다: "${title}"` });
   }
 
   const prohibitedTerms = findProhibitedTitleTerms(option);
