@@ -3,6 +3,12 @@ import path from "path";
 
 const REFS_ROOT = path.join(process.cwd(), "data", "shop-refs");
 const SCENE_INDEX_FILE = path.join(REFS_ROOT, "_scene-index.json");
+// 체험단 수집 사진 인덱스(공간컷) — _scene-index 와 병합해 직접사용 변형 풀을 넓힌다.
+const REFS_INDEX_FILE = path.join(REFS_ROOT, "_refs-index.json");
+// 체험단 사람 컷(착용/피팅) 인덱스 — fitting 장면의 "실제 사람 사진" 직접사용 판단에 쓴다.
+const PEOPLE_INDEX_FILE = path.join(REFS_ROOT, "_people-index.json");
+// 같은 브랜드(JINY's) 매장군 — 참조 생성 시 형제 매장 사람 풀을 공유할 수 있다(직접사용은 공유 안 함).
+const JINYS_GROUP = new Set(["jinysgongju", "attractiger", "peace9486", "leesi7007", "kl1854"]);
 const IMAGE_EXTS = new Set([".jpg", ".jpeg", ".png", ".webp"]);
 const MAX_REF_IMAGES = 3;
 /** 장면 매칭 시 첨부할 최대 사진 수. 많으면 콜라주/충돌 위험이라 2장으로 제한. */
@@ -81,10 +87,70 @@ async function loadSceneIndex(): Promise<Record<string, ShopSceneEntry> | null> 
         photos,
       };
     }
+
+    // 체험단 수집 공간컷(_refs-index.json) 병합 — 직접사용 변형 풀을 넓힌다(없어도 무시).
+    try {
+      const refsRaw = await fs.readFile(REFS_INDEX_FILE, "utf-8");
+      const refs = JSON.parse(refsRaw) as { shops?: Record<string, { photos?: Record<string, { scene?: unknown }> }> };
+      for (const [shopId, v] of Object.entries(refs.shops ?? {})) {
+        const entry = (result[shopId] ??= { photos: {} });
+        for (const [file, p] of Object.entries(v.photos ?? {})) {
+          const scene = (p as { scene?: unknown }).scene;
+          if (typeof scene === "string" && isSceneTag(scene)) entry.photos[file] = { scene };
+        }
+      }
+    } catch {
+      // _refs-index 없으면 기존 인덱스만 사용
+    }
+
     return result;
   } catch {
     return null;
   }
+}
+
+/**
+ * 매장 "자체" 사람 컷(체험단 착용/피팅) 절대경로 목록. _people-index.json 기반.
+ * fitting 장면에서 그 매장의 진짜 사람 사진을 직접 사용할지 판단/공급한다.
+ * (다른 매장 손님 사진을 직접 박지 않으려고 매장 자체 것만 반환한다.)
+ */
+export async function getOwnPersonPhotos(shopId: string): Promise<string[]> {
+  if (!shopId) return [];
+  const dir = shopRefDir(shopId);
+  if (!dir) return [];
+  try {
+    const raw = await fs.readFile(PEOPLE_INDEX_FILE, "utf-8");
+    const idx = JSON.parse(raw) as Record<string, unknown>;
+    const list = idx[shopId];
+    if (!Array.isArray(list)) return [];
+    const out: string[] = [];
+    for (const rel of list) {
+      if (typeof rel !== "string") continue;
+      const abs = path.join(dir, rel);
+      try {
+        await fs.access(abs);
+        out.push(abs);
+      } catch {
+        /* 파일 없음(깃 제외 등) → 스킵 */
+      }
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * 참조 생성용 사람 풀. 자체 사람 컷이 있으면 그것, 없고 JINY's 매장이면 형제 매장 사람 컷을 빌려온다.
+ * (참조=새 이미지 생성 재료이므로 브랜드 공유 OK. 직접사용에는 쓰지 않는다.)
+ */
+export async function getBrandPersonPhotos(shopId: string): Promise<string[]> {
+  const own = await getOwnPersonPhotos(shopId);
+  if (own.length > 0) return own;
+  if (!JINYS_GROUP.has(shopId)) return [];
+  const siblings = [...JINYS_GROUP].filter((s) => s !== shopId);
+  const pools = await Promise.all(siblings.map((s) => getOwnPersonPhotos(s)));
+  return pools.flat();
 }
 
 // blogId 형식만 허용 (영숫자/언더스코어/하이픈). 경로 트래버설 차단.

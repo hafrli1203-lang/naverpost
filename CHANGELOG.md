@@ -5,6 +5,22 @@
 
 ---
 
+## v2.5 (2026-06-15)
+
+### 체험단 실사진 수집·큐레이션 → 진짜 사람+진짜 매장 이미지
+사용자 요구: 합성티 없이 사람이 상황에 맞게 들어간 실제 매장 이미지. 체험단 블로거가 찍은 실제 사진을 수집해 활용(우회 크롤링은 거부, 사용자 제공 URL의 공개 이미지만 일반 페치).
+
+- **수집**: `scripts/collect-experience-photos.mjs` — `data/experience-urls.json`(매장별 체험단 글 URL)에서 본문 사진(`data-lazy-src` mblogthumb)을 받아 `data/shop-refs/<shop>/_refs/`에 저장. 지니스 4개 매장 462장 수집.
+- **큐레이션**: 매장별 병렬 분류 에이전트가 462장을 보고 쓸 것만 선별(홍보배너·가격카드·셀카·음식·주차장 제외). 실사람 컷 25장(착용 9·피팅 16, leesi7007 최다 15).
+- **인덱스**: `_refs-index.json`(공간컷 외관/내부/디테일 → `loadSceneIndex`가 `_scene-index`와 병합) + `_people-index.json`(매장별 사람 컷).
+- **연결**(`shopRefs.ts` + 3개 라우트):
+  - 공간컷(exterior/interior/detail) = 실제 사진 직접 서빙(워싱) — 변형 풀 확대로 중복↓.
+  - fitting = 그 매장에 **자체 사람 사진 있으면 직접 서빙(워싱)** → 진짜 사람+진짜 매장. 없으면 AI 생성 + 브랜드 사람 풀 참조.
+  - `getOwnPersonPhotos`(자체만 — 타 매장 손님 직접사용 차단), `getBrandPersonPhotos`(자체 없으면 JINY's 형제 매장 풀을 참조 생성용으로 공유). 심곡(kl1854)·으뜸(top50jn) 처리 포함.
+  - 보안 유지: `/one` rawPhoto 허용목록에 fitting의 자체 사람 컷 포함(멤버십 검사).
+- **검증(라이브)**: leesi7007 생성 → fitting 2컷이 실제 사람 사진(시험테 착용·프레임 착용, 진짜 JINY's 매장 배경)으로 워싱 서빙(`usedRealPhoto:true`). tsc 0.
+- 3rd-party 원본 사진·파생 인덱스는 `.gitignore`(로컬 전용, 저작권).
+
 ## v2.4 (2026-06-15)
 
 ### 안경렌즈 카테고리 누수 차단 + 비문 제목 거름

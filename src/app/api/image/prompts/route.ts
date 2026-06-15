@@ -2,7 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { generateImagePrompts } from "@/lib/ai/claude";
 import { buildImagePrompts, parseScenePrompt } from "@/lib/prompts/imagePrompt";
 import { getShopById } from "@/lib/data/shops";
-import { getShopProfile, listScenePhotos, type SceneTag } from "@/lib/data/shopRefs";
+import {
+  getShopProfile,
+  listScenePhotos,
+  getOwnPersonPhotos,
+  type SceneTag,
+} from "@/lib/data/shopRefs";
 
 export const runtime = "nodejs";
 export const maxDuration = 240;
@@ -68,6 +73,17 @@ export async function POST(request: NextRequest) {
       if (shopId && p.scene && RAW_PHOTO_SCENES.has(p.scene)) {
         const pool = await listScenePhotos(shopId, p.scene);
         const fresh = pool.find((x) => !usedPhotos.has(x));
+        if (fresh) {
+          usedPhotos.add(fresh);
+          prompts.push({ ...p, rawPhoto: fresh });
+          continue;
+        }
+      }
+      // 피팅/상담: 그 매장에 "진짜 사람 사진"(체험단 착용·피팅)이 있으면 직접 사용(워싱).
+      // 없으면 rawPhoto 미배정 → /one 에서 AI 생성 + (JINY's면) 브랜드 사람 풀 참조.
+      if (shopId && p.scene === "fitting") {
+        const people = await getOwnPersonPhotos(shopId);
+        const fresh = people.find((x) => !usedPhotos.has(x));
         if (fresh) {
           usedPhotos.add(fresh);
           prompts.push({ ...p, rawPhoto: fresh });

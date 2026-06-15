@@ -7,6 +7,8 @@ import { washImageBuffer } from "@/lib/storage/imageWash";
 import {
   getSceneReferenceImages,
   listScenePhotos,
+  getOwnPersonPhotos,
+  getBrandPersonPhotos,
   type SceneTag,
 } from "@/lib/data/shopRefs";
 
@@ -39,7 +41,12 @@ export async function POST(request: NextRequest) {
     // 다시 만들어(listScenePhotos — 그 매장·그 장면의 실제 파일만) 그 안에 정확히 들어있는
     // 경로일 때만 서빙한다. 이렇게 하면 임의 파일 읽기/IDOR가 원천 차단된다.
     if (rawPhoto && shopId && scene) {
-      const allowed = await listScenePhotos(shopId, scene);
+      // 허용목록 = 그 매장·그 장면의 실제 파일. fitting은 그 매장 "자체" 사람 컷도 직접사용 허용
+      // (타 매장 사람 사진 직접사용은 막기 위해 getOwnPersonPhotos = 자체만).
+      const allowed = [
+        ...(await listScenePhotos(shopId, scene)),
+        ...(scene === "fitting" ? await getOwnPersonPhotos(shopId) : []),
+      ];
       const target = path.resolve(rawPhoto);
       const match = allowed.find((a) => path.resolve(a) === target);
       if (match && ALLOWED_PHOTO_EXTS.has(path.extname(match).toLowerCase())) {
@@ -69,8 +76,13 @@ export async function POST(request: NextRequest) {
     }
 
     // 장면 태그가 있는 매장 장면에만 그 장면에 맞는 실제 매장 사진을 참조로 첨부.
+    // fitting(사람 직접사진 없는 매장)은 브랜드 사람 풀을 참조로 붙여 실제 응대 모습에 가깝게 생성.
     // 매장 밖/개념 이미지(scene=null)는 빈 배열 → 묘사 기반 생성.
-    const refImages = scene && shopId ? await getSceneReferenceImages(shopId, scene) : [];
+    const refImages = !scene || !shopId
+      ? []
+      : scene === "fitting"
+        ? [...(await getBrandPersonPhotos(shopId)), ...(await getSceneReferenceImages(shopId, scene))].slice(0, 2)
+        : await getSceneReferenceImages(shopId, scene);
 
     const result = await generateBlogImage(prompt, refImages);
     const saved = await saveImage(sessionId, index, result.base64Data, result.mimeType);

@@ -6,6 +6,8 @@ import { washImageBuffer } from "@/lib/storage/imageWash";
 import {
   getSceneReferenceImages,
   listScenePhotos,
+  getOwnPersonPhotos,
+  getBrandPersonPhotos,
   type SceneTag,
 } from "@/lib/data/shopRefs";
 
@@ -36,8 +38,13 @@ export async function POST(request: NextRequest) {
 
     // 매장 컷 재생성: AI로 다시 그리지 않고 "다른 실제 매장 사진"을 골라 워싱해서 서빙
     // (그래야 재생성해도 일반 AI 매장으로 되돌아가지 않고, 매번 다른 진짜 사진 + 다른 해시).
-    if (shopId && scene && RAW_PHOTO_SCENES.has(scene)) {
-      const pool = await listScenePhotos(shopId, scene);
+    // 공간컷=장면 풀, fitting=그 매장 자체 사람 컷(있을 때만 직접사용).
+    if (shopId && scene) {
+      const pool = RAW_PHOTO_SCENES.has(scene)
+        ? await listScenePhotos(shopId, scene)
+        : scene === "fitting"
+          ? await getOwnPersonPhotos(shopId)
+          : [];
       if (pool.length > 0) {
         const pick = pool[Math.floor(Math.random() * pool.length)];
         try {
@@ -66,7 +73,12 @@ export async function POST(request: NextRequest) {
       "A clean realistic photo of modern eyeglasses in a bright, modern present-day Korean optical shop with wall-mounted backlit display shelves. Sharp, true-to-life color, not film, not vintage. 4:3 aspect ratio.";
 
     // 장면 태그가 있는 매장 장면에만 그 장면에 맞는 실제 매장 사진을 참조로 첨부.
-    const refImages = scene && shopId ? await getSceneReferenceImages(shopId, scene) : [];
+    // fitting(자체 사람 사진 없는 매장)은 브랜드 사람 풀을 참조로 붙인다.
+    const refImages = !scene || !shopId
+      ? []
+      : scene === "fitting"
+        ? [...(await getBrandPersonPhotos(shopId)), ...(await getSceneReferenceImages(shopId, scene))].slice(0, 2)
+        : await getSceneReferenceImages(shopId, scene);
 
     const result = await generateBlogImage(imagePrompt, refImages);
 

@@ -75,3 +75,8 @@ tmp-*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# 체험단 수집 사진(3rd-party 저작권) + 파생 인덱스 — 로컬 전용
+data/shop-refs/*/_refs/
+data/shop-refs/_refs-index.json
+data/shop-refs/_people-index.json
