@@ -127,13 +127,26 @@ function getProseBody(content: string): string {
     .join("\n");
 }
 
-// 본문 쉼표(천단위 숫자 제외) — 프로젝트 절대 규칙이자 한국어 AI 글의 최강 탐지 신호.
+// 본문 쉼표: '제한적 허용' 정책(v2.8+). 호흡에 필요한 곳엔 쓰되 남발만 잡는다.
+// (이전엔 전면 금지였으나 문장 흐름을 죽여 한국어가 어색해지는 부작용이 커서 완화.)
+// - 한 문장에 3개 이상(과밀) → 위반
+// - 본문 전체 밀도 과다(대략 60자당 1개 초과) → 위반
 function findFormatViolations(content: string): string[] {
   const violations: string[] = [];
   const prose = getProseBody(content).replace(/\d[,，]\d/g, "00");
   const commaCount = (prose.match(/[,，]/g) ?? []).length;
-  if (commaCount >= 3) {
-    violations.push(`본문 쉼표 ${commaCount}회 사용(금지 규칙 위반)`);
+
+  // 문장당 과다(남발)
+  const sentences = prose.split(/(?<=[.!?]|다|요|죠|까|네|랍니다|거든요)\s+/);
+  const crowded = sentences.filter((s) => (s.match(/[,，]/g) ?? []).length >= 3).length;
+  if (crowded > 0) {
+    violations.push(`한 문장에 쉼표 3개 이상인 문장 ${crowded}개(남발 — 호흡에 필요한 1~2개만)`);
+  }
+
+  // 전체 밀도 과다
+  const densityLimit = Math.max(12, Math.round(prose.replace(/\s/g, "").length / 60));
+  if (commaCount > densityLimit) {
+    violations.push(`본문 쉼표 과다 ${commaCount}회(제한적 허용 — 호흡에 필요한 곳만, 약 ${densityLimit}개 이내)`);
   }
   return violations;
 }
