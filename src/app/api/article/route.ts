@@ -13,12 +13,13 @@ import { fetchBlogTitles } from "@/lib/naver/rssParser";
 import { buildArticleBrief } from "@/lib/briefs/articleBrief";
 import { analyzeCompetitorMorphology } from "@/lib/analysis/competitorMorphology";
 import { inferSmartBlockSubKeywords } from "@/lib/analysis/smartBlock";
+import { fetchKeywordDemandSignals } from "@/lib/naver/searchSignals";
 import { getCategoryDepthDimensions } from "@/lib/keywords/categoryDepth";
 import { analyzeAutocompleteIndex } from "@/lib/analysis/autocompleteIndex";
 import { CATEGORIES } from "@/lib/constants";
 import { getShopById } from "@/lib/data/shops";
 import { lookupGlossary, buildGlossaryHint } from "@/lib/domain/opticalGlossary";
-import type { KeywordOption, ArticleContent } from "@/types";
+import type { KeywordOption, ArticleContent, SearchVolumeSignal } from "@/types";
 
 export const maxDuration = 360;
 
@@ -36,6 +37,10 @@ const ARTICLE_RETRY_TIMEOUT_MS = 75_000;
 // 2000자급 본문 전체 재작성은 60초로 빠듯해 자주 타임아웃됐다. 90초로 상향.
 const ARTICLE_REVISION_TIMEOUT_MS = 70_000;
 const SMARTBLOCK_TIMEOUT_MS = 12_000;
+// 파워링크 클릭률(검색광고 API) 조회. 본문 형식(정보형 vs 공감형) 신호로만 쓰므로 짧게.
+const CTR_SIGNAL_TIMEOUT_MS = 12_000;
+// 파워링크 평균 클릭률 임계치(%). 출처 '팔리는 키워드의 비밀': 평균 1% 상회=정보 탐색 의도.
+const POWERLINK_CTR_INFO_THRESHOLD = 1.0;
 const AUTOCOMPLETE_TIMEOUT_MS = 12_000;
 // G3 자완 보강은 "키워드만 살짝 녹이는" 가벼운 작업이라 본문 재작성보다 짧게 잡는다.
 const AUTOCOMPLETE_AUGMENT_TIMEOUT_MS = 50_000;
@@ -233,7 +238,7 @@ export async function POST(request: NextRequest) {
     // Research, RSS history, and competitor morphology are independent inputs to the
     // brief, so run them concurrently. Serial execution previously stacked their
     // timeouts (research + competitor alone could exceed the route budget).
-    const [researchResponse, rssOutcome, competitorMorphology, smartBlockSignal] = await Promise.all([
+    const [researchResponse, rssOutcome, competitorMorphology, smartBlockSignal, demandSignalOutcome] = await Promise.all([
       // Research keyword via Perplexity using main + both sub keywords + category +
       // glossary context together, then re-search all follow-up questions.
       withTimeout(
@@ -304,6 +309,12 @@ export async function POST(request: NextRequest) {
         recommendedTitleKeyword: keyword.mainKeyword,
         notes: [],
       }),
+      // 파워링크 클릭률(본문 형식 신호). 실패/타임아웃 시 빈 배열 → 형식 미지정(현재 동작 유지).
+      withTimeout(
+        fetchKeywordDemandSignals([keyword.mainKeyword]).catch(() => [] as SearchVolumeSignal[]),
+        CTR_SIGNAL_TIMEOUT_MS,
+        [] as SearchVolumeSignal[]
+      ),
     ]);
 
     const researchData = researchResponse.text;
@@ -320,6 +331,25 @@ export async function POST(request: NextRequest) {
             blockTypeHint: smartBlockSignal.blockTypeHint,
           }
         : undefined;
+
+    // 파워링크 클릭률 → 본문 형식 신호('팔리는 키워드의 비밀'). 메인 키워드의 모바일/PC 평균
+    // CTR이 임계치(1%) 이상이면 정보 탐색 의도(정보형: 핵심 먼저), 미만이면 공감/경험 탐색(공감형).
+    // 신호가 없으면 미지정 → 현재 도입부 동작을 그대로 유지한다.
+    const mainKeyNorm = keyword.mainKeyword.replace(/\s+/g, "");
+    const ctrSignal =
+      demandSignalOutcome.find((s) => s.keyword.replace(/\s+/g, "") === mainKeyNorm) ??
+      demandSignalOutcome[0];
+    const hasCtr =
+      !!ctrSignal &&
+      (ctrSignal.monthlyAverageMobileCtr != null || ctrSignal.monthlyAveragePcCtr != null);
+    const ctrValue = ctrSignal
+      ? Math.max(ctrSignal.monthlyAverageMobileCtr ?? 0, ctrSignal.monthlyAveragePcCtr ?? 0)
+      : 0;
+    const contentFormat: "info-first" | "experience-first" | undefined = hasCtr
+      ? ctrValue >= POWERLINK_CTR_INFO_THRESHOLD
+        ? "info-first"
+        : "experience-first"
+      : undefined;
 
     // 선택·편집된 후보를 진실의 원천으로 삼아 본문 논지축을 도출한다(공유 topic이 stale일
     // 때 옛 주제로 본문이 써지는 문제 방지).
@@ -339,6 +369,7 @@ export async function POST(request: NextRequest) {
       crossBlogTitles,
       competitorMorphology,
       smartBlock,
+      contentFormat,
     });
 
     // Build article prompt and generate via Claude

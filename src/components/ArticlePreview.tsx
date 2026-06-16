@@ -10,6 +10,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { ArticleChat } from "@/components/ArticleChat";
 import { CRankAudit } from "@/components/CRankAudit";
 import { ArticleContent } from "@/types";
+import { splitKoreanParagraph } from "@/lib/naver/contentFormatter";
 import {
   CheckCircle,
   AlertTriangle,
@@ -151,18 +152,23 @@ function renderContent(content: string) {
       elements.push(<div key={i} className="h-3" />);
     } else {
       const { text, isBullet } = stripBulletMark(line);
-      elements.push(
-        <p
-          key={i}
-          className={
-            isBullet
-              ? "text-sm leading-7 text-gray-700 pl-4 before:content-['\\2022'] before:mr-2 before:text-gray-400"
-              : "text-sm leading-7 text-gray-700"
-          }
-        >
-          {renderInline(text)}
-        </p>
-      );
+      // 미리보기도 export와 동일하게 긴 문단을 2문장 단위로 분리해 보여준다(WYSIWYG).
+      // 불릿은 분리하지 않는다.
+      const chunks = isBullet ? [text] : splitKoreanParagraph(text);
+      chunks.forEach((chunk, ci) => {
+        elements.push(
+          <p
+            key={`${i}-${ci}`}
+            className={
+              isBullet
+                ? "text-sm leading-7 text-gray-700 pl-4 before:content-['\\2022'] before:mr-2 before:text-gray-400"
+                : "text-sm leading-7 text-gray-700 mb-2"
+            }
+          >
+            {renderInline(chunk)}
+          </p>
+        );
+      });
     }
     i++;
   }

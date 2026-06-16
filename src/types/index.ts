@@ -337,6 +337,10 @@ export interface ArticleBrief {
     subKeywordCandidates: string[];
     blockTypeHint: "high-volume" | "mid-volume" | "long-tail" | "unknown";
   };
+  // 파워링크 클릭률 기반 본문 형식 신호(출처: '팔리는 키워드의 비밀').
+  // info-first: CTR 높음 → 정보 탐색 의도 → 핵심을 앞쪽에. experience-first: CTR 낮음 → 공감/장면 먼저.
+  // 미정(신호 없음)이면 생략 → 현재 도입부 동작 유지.
+  contentFormat?: "info-first" | "experience-first";
   sources: BlaiSignalSource[];
 }
 

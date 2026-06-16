@@ -26,6 +26,21 @@ async function appendCrashLog(entry: {
   }
 }
 
+// Windows에서 claude.exe 등은 런처가 자식 프로세스를 다시 띄우는 트리 구조라
+// child.kill()로는 자식이 살아남아 "행 걸린 좀비"가 누적되고 동시실행 락을 잡아
+// 다음 호출까지 막는다. 타임아웃 시 프로세스 "트리 전체"를 강제 종료한다.
+function killProcessTree(pid: number | undefined): void {
+  if (!pid) return;
+  if (process.platform === "win32") {
+    try {
+      // 배열 인자 spawn이라 셸 경로변환(/t → F:\) 문제 없음. fire-and-forget.
+      spawn("taskkill", ["/pid", String(pid), "/t", "/f"], { stdio: "ignore" });
+    } catch {
+      // ignore
+    }
+  }
+}
+
 export type CliErrorCode = "not-found" | "timeout" | "non-zero" | "empty";
 
 export class CliError extends Error {
@@ -76,6 +91,7 @@ export function runCli({
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
+      killProcessTree(child.pid);
       try {
         child.kill("SIGKILL");
       } catch {

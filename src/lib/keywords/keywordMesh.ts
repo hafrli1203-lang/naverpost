@@ -130,7 +130,7 @@ const MESH_AXES_BY_CATEGORY: Record<string, MeshCategoryAxes> = {
     heads: ["콘택트렌즈", "원데이렌즈", "난시렌즈", "컬러렌즈", "하드렌즈", "소프트렌즈", "멀티포컬렌즈"],
     targets: ["학생", "청소년", "직장인", "여자", "남자", "초보", "장시간", "운전자"],
     features: ["건조한", "편한", "장시간", "난시용", "원데이", "투명", "자연스러운", "눈이편한"],
-    materials: ["아큐브렌즈", "알콘렌즈", "쿠퍼비전렌즈", "바슈롬렌즈", "토릭렌즈", "실리콘하이드로겔"],
+    materials: ["원데이렌즈", "소프트렌즈", "난시렌즈", "컬러렌즈", "토릭렌즈", "멀티포컬렌즈"],
     situations: ["건조", "충혈", "이물감", "흐림", "착용시간", "착용감", "검사", "관리", "난시", "직경"],
     trendTerms: ["요즘", "2026", "실사용", "초보", "출근", "운동"],
     subCores: ["건조", "착용감", "착용시간", "검사", "난시", "관리"],
@@ -299,9 +299,25 @@ function buildMaterialOptions(axes: MeshCategoryAxes): KeywordOption[] {
   return options;
 }
 
+// 트렌드/시의성 축: "요즘/2026/데일리/신상" 같은 실제 검색 수식어 × head.
+// 어색하거나 0볼륨 조합은 다운스트림 게이트(카테고리 적합·볼륨)가 거른다.
+const REAL_TREND_QUALIFIERS = new Set(["요즘", "2026", "데일리", "신상", "첫"]);
+
 function buildTrendOptions(axes: MeshCategoryAxes): KeywordOption[] {
   const options: KeywordOption[] = [];
-  void axes;
+  const qualifiers = axes.trendTerms
+    .map(compactAxisTerm)
+    .filter((term) => REAL_TREND_QUALIFIERS.has(term));
+  for (const qualifier of qualifiers.slice(0, 4)) {
+    for (const head of axes.heads.slice(0, 4)) {
+      const option = makeQualifiedHeadOption({
+        qualifier,
+        head,
+        subCores: axes.subCores,
+      });
+      if (option) options.push(option);
+    }
+  }
   return options;
 }
 
@@ -324,6 +340,19 @@ function buildShopProductOptions(shop: Shop, category: Category, axes: MeshCateg
     .filter((option): option is KeywordOption => Boolean(option));
 }
 
+// 안경이야기는 관리·수리 군집에 쏠리기 쉽다(mesh head/situation이 관리어 중심).
+// 스타일·경험·상황 군집을 1급 시드로 추가해 후보 풀의 소재 다양성을 확보한다.
+// 중립어만 사용(후기·가격·비교·추천·TOP 배제), 모두 2단어. 어색·0볼륨은 게이트가 거른다.
+const GLASSES_STORY_LIFESTYLE_OPTIONS: KeywordOption[] = [
+  { title: "", mainKeyword: "얼굴형안경 고르기", subKeyword1: "얼굴형안경 스타일", subKeyword2: "얼굴형안경 종류" },
+  { title: "", mainKeyword: "안경코디 스타일", subKeyword1: "안경코디 인상", subKeyword2: "안경코디 얼굴형" },
+  { title: "", mainKeyword: "첫안경 적응", subKeyword1: "첫안경 맞춤", subKeyword2: "첫안경 준비" },
+  { title: "", mainKeyword: "어린이안경 적응", subKeyword1: "어린이안경 관리", subKeyword2: "어린이안경 선택" },
+  { title: "", mainKeyword: "안경맞춤 과정", subKeyword1: "안경맞춤 순서", subKeyword2: "안경맞춤 검안" },
+  { title: "", mainKeyword: "안경교체 시기", subKeyword1: "안경교체 수명", subKeyword2: "안경교체 기준" },
+  { title: "", mainKeyword: "안경트렌드 종류", subKeyword1: "안경트렌드 스타일", subKeyword2: "안경트렌드 데일리" },
+];
+
 export function buildKeywordMeshOptions(params: {
   shop: Shop;
   category: Category;
@@ -338,6 +367,7 @@ export function buildKeywordMeshOptions(params: {
     ...buildTargetHeadOptions(axes),
     ...buildFeatureHeadOptions(axes),
     ...buildTrendOptions(axes),
+    ...(params.category.id === "glasses-story" ? GLASSES_STORY_LIFESTYLE_OPTIONS : []),
   ];
 
   const seen = new Set<string>();

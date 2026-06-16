@@ -7,6 +7,7 @@ import { washImageBuffer } from "@/lib/storage/imageWash";
 import {
   getSceneReferenceImages,
   listScenePhotos,
+  listAllDetailRefPhotos,
   type SceneTag,
 } from "@/lib/data/shopRefs";
 
@@ -41,9 +42,11 @@ export async function POST(request: NextRequest) {
     if (rawPhoto && shopId && scene) {
       // 허용목록 = 그 매장·그 장면의 실제 "공간" 파일만. 사람 사진은 직접 서빙하지 않는다
       // (워싱해도 원본과 동일인이라 금지). 사람은 항상 새로 생성한다.
+      // 허용목록 = 그 매장·그 장면 실제 파일 + (detail이면) 6매장 공유 안경 디테일 풀.
       const allowed = await listScenePhotos(shopId, scene);
+      const sharedAllowed = scene === "detail" ? await listAllDetailRefPhotos() : [];
       const target = path.resolve(rawPhoto);
-      const match = allowed.find((a) => path.resolve(a) === target);
+      const match = [...allowed, ...sharedAllowed].find((a) => path.resolve(a) === target);
       if (match && ALLOWED_PHOTO_EXTS.has(path.extname(match).toLowerCase())) {
         try {
           const raw = await fs.readFile(match);

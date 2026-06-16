@@ -1,7 +1,7 @@
 // Ad-hoc test: 다른 매장 + 다른 어체 본문 생성 → 워싱 흐름 검증
 // 사용자 요청에 따라 임시 작성. 검증 후 삭제 가능.
 
-const BASE = "http://localhost:3100";
+const BASE = "http://localhost:3000";
 
 const keyword = {
   title: "안경렌즈 코팅 종류와 일상에서 살피는 관리 기준",

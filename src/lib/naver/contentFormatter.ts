@@ -110,7 +110,16 @@ export function buildNaverPlainText(params: {
       out.push(text);
       continue;
     }
-    out.push(stripInline(line.replace(/^- /, "• ")));
+    if (/^- /.test(trimmed)) {
+      out.push(stripInline(line.replace(/^- /, "• ")));
+      continue;
+    }
+    // 한 덩어리 문단은 문장 단위로 끊고 사이에 빈 줄을 넣어 네이버에서 바로 읽기 좋게 한다.
+    const paragraphs = splitKoreanParagraph(stripInline(line));
+    paragraphs.forEach((paragraph, paragraphIndex) => {
+      out.push(paragraph);
+      if (paragraphIndex < paragraphs.length - 1) out.push("");
+    });
   }
 
   if (imageCount > 0) {
@@ -299,20 +308,54 @@ function renderHeading(text: string, level: 2 | 3, isFaqTitle = false): string {
   )}</h2><div style="margin-top:10px;width:56px;height:3px;border-radius:999px;background:#14b8a6;"></div></div>`;
 }
 
+// 한 덩어리로 들어온 긴 문단을 문장 단위로 끊어 읽기 좋은 문단들로 나눈다.
+// LLM이 빈 줄 없이 한 소제목 아래를 통째로 써도 네이버에서 빽빽한 블록이 되지 않게 한다.
+// 소수점(1.60), 영문 약어(PD) 등은 끊지 않도록 "한글 + 종결부호 + 공백"만 경계로 본다.
+// 미리보기(ArticlePreview)와 export가 같은 결과를 보이도록 export 한다(WYSIWYG).
+// 분배 규칙: perGroup(기본 2)문장을 넘으면 ceil(n/perGroup)개 문단으로 "균등" 분배.
+//   3문장 → [2,1], 5문장 → [2,2,1], 6문장 → [2,2,2]. 어떤 경우도 한 문단이 perGroup을 넘지 않는다.
+//   (이전 버그: 외톨이 합치기가 3문장을 [3] 한 덩어리로 되돌려 분리가 안 됐음.)
+export function splitKoreanParagraph(text: string, perGroup = 2): string[] {
+  const trimmed = text.trim();
+  if (!trimmed) return [];
+  const sentences = trimmed
+    .split(/(?<=[가-힣][.!?])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter(Boolean);
+  if (sentences.length <= perGroup) return [trimmed];
+
+  const groupCount = Math.ceil(sentences.length / perGroup);
+  const base = Math.floor(sentences.length / groupCount);
+  const extra = sentences.length % groupCount; // 앞쪽 extra개 그룹이 base+1문장
+  const groups: string[] = [];
+  let index = 0;
+  for (let g = 0; g < groupCount; g++) {
+    const size = base + (g < extra ? 1 : 0);
+    groups.push(sentences.slice(index, index + size).join(" "));
+    index += size;
+  }
+  return groups;
+}
+
 function renderParagraphGroup(lines: string[]): string {
   if (lines.length === 0) return "";
 
   const rendered = lines
-    .map((line) => {
+    .flatMap((line) => {
       if (/^- /.test(line)) {
-        return `<p style="margin:0 0 10px;padding-left:16px;text-indent:-16px;font-size:16px;line-height:1.95;color:#374151;">• ${inlineMarkdown(
-          line.replace(/^- /, "")
-        )}</p>`;
+        return [
+          `<p style="margin:0 0 10px;padding-left:16px;text-indent:-16px;font-size:16px;line-height:1.95;color:#374151;">• ${inlineMarkdown(
+            line.replace(/^- /, "")
+          )}</p>`,
+        ];
       }
 
-      return `<p style="margin:0 0 14px;font-size:16px;line-height:1.95;color:#374151;">${inlineMarkdown(
-        line
-      )}</p>`;
+      return splitKoreanParagraph(line).map(
+        (chunk) =>
+          `<p style="margin:0 0 14px;font-size:16px;line-height:1.95;color:#374151;">${inlineMarkdown(
+            chunk
+          )}</p>`
+      );
     })
     .join("");
 

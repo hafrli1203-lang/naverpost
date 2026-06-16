@@ -2,7 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { generateImagePrompts } from "@/lib/ai/claude";
 import { buildImagePrompts, parseScenePrompt } from "@/lib/prompts/imagePrompt";
 import { getShopById } from "@/lib/data/shops";
-import { getShopProfile, listScenePhotos, type SceneTag } from "@/lib/data/shopRefs";
+import {
+  getShopProfile,
+  listScenePhotos,
+  listDetailRefPhotos,
+  pickDetailCategory,
+  type SceneTag,
+} from "@/lib/data/shopRefs";
 
 export const runtime = "nodejs";
 export const maxDuration = 240;
@@ -65,6 +71,18 @@ export async function POST(request: NextRequest) {
     const usedPhotos = new Set<string>();
     const prompts: Array<{ prompt: string; scene: SceneTag | null; rawPhoto?: string }> = [];
     for (const p of disciplined) {
+      // [SCENE:detail]은 안경 부품/제품 디테일 — 매장 무관 일반 컷이라 6매장 공유 풀에서
+      // 주제(코받침/렌즈/테/콘택트)에 맞는 실사진을 우선 서빙한다(gti 안경 매크로 왜곡 회피).
+      if (p.scene === "detail") {
+        const category = pickDetailCategory(`${p.prompt} ${mainKeyword} ${title}`);
+        const sharedPool = await listDetailRefPhotos(category);
+        const sharedFresh = sharedPool.find((x) => !usedPhotos.has(x));
+        if (sharedFresh) {
+          usedPhotos.add(sharedFresh);
+          prompts.push({ ...p, rawPhoto: sharedFresh });
+          continue;
+        }
+      }
       if (shopId && p.scene && RAW_PHOTO_SCENES.has(p.scene)) {
         const pool = await listScenePhotos(shopId, p.scene);
         const fresh = pool.find((x) => !usedPhotos.has(x));

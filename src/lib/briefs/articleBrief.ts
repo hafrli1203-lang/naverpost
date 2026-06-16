@@ -150,6 +150,7 @@ export function buildArticleBrief(params: {
     subKeywordCandidates: string[];
     blockTypeHint: "high-volume" | "mid-volume" | "long-tail" | "unknown";
   };
+  contentFormat?: "info-first" | "experience-first";
 }): ArticleBrief {
   const {
     keyword,
@@ -165,6 +166,7 @@ export function buildArticleBrief(params: {
     crossBlogTitles,
     competitorMorphology,
     smartBlock,
+    contentFormat,
   } = params;
 
   return {
@@ -198,6 +200,7 @@ export function buildArticleBrief(params: {
     },
     competitorMorphology,
     smartBlock,
+    contentFormat,
     sources:
       competitorMorphology?.status === "available"
         ? ["perplexity", "rss-history", "local-content", "document-rule", "naver-search"]

@@ -80,3 +80,12 @@ next-env.d.ts
 data/shop-refs/*/_refs/
 data/shop-refs/_refs-index.json
 data/shop-refs/_people-index.json
+
+# nested omc state (junk, session-scoped)
+**/.omc/
+
+# detail-refs: 안경 디테일 실사진 바이너리는 로컬 보관(shop-refs와 동일 관례). README/.gitkeep만 추적.
+/data/detail-refs/**/*.jpg
+/data/detail-refs/**/*.jpeg
+/data/detail-refs/**/*.png
+/data/detail-refs/**/*.webp

@@ -47,11 +47,55 @@ function stripHtml(text: string): string {
 }
 
 // 광고성·정보성 아닌 제목은 표현 기준으로 부적합하다.
+// + 도메인 필터: 모호한 시드(돋보기/시야/렌즈교체)가 네이버에서 부동산 임장·갤럭시·정수기 등
+//   비안경 제목을 끌어오므로, 수집 단계에서부터 안경 도메인만 캐시에 저장한다(오염 근본 차단).
+//   (OPTICAL_DOMAIN 등은 아래에 선언 — 이 함수는 요청 시점에 호출되므로 참조 안전.)
 function isUsableCorpusTitle(title: string): boolean {
   if (title.length < 8 || title.length > 40) return false;
   if (/이벤트|할인|최저가|특가|세일|문의|예약|증정|쿠폰|개업|오픈|배송/.test(title)) return false;
   if (/[😀-🙏✨💕❤♥★☆]/u.test(title)) return false;
+  if (!OPTICAL_DOMAIN.test(title) || OFF_DOMAIN_CONTEXT.test(title)) return false;
+  if (SHOP_BRANCH_ENDING.test(title.trim())) return false;
   return true;
+}
+
+// 프롬프트 예시로 주입할 때 우리 정책(의료광고·저품질 회피)에 어긋나는 표현을 거른다.
+// 원천 코퍼스에는 후기·가격·지역·매장명이 섞여 있어, 그대로 예시화하면 금지 각도가 역유입된다.
+const NON_COMPLIANT_TITLE = /후기|가격|비용|얼마|추천|순위|TOP|베스트|최고|최저|솔직|내돈내산|협찬|체험단/i;
+
+// 약속 명사로 끝맺는 "완성형" 제목. 생성 모델이 [상황]+[약속어] 구조를 모방하도록 앞세운다.
+// 주의: 바로 "점"을 넣으면 지점명(대청점·안민점)을 완성형으로 오인하므로 의미 명사형만 둔다.
+const PAYLOAD_ENDING = /(차이|차이점|종류|기준|방법|이유|정리|장단점|장점|단점|뜻|순서|포인트|법|가이드)([은는이가을를]?\??)?$/;
+
+// 지점명("~동점/~역점/안경점/대청점")으로 끝나는 매장 나열 제목은 예시로 부적합.
+// 단 의미 명사형(장점/단점/이점/관점/초점/시점/공통점/차이점)은 보존한다.
+const SHOP_BRANCH_ENDING = /(?<![장단이관초시통])점$/;
+
+// 도메인 키워드(시야·돋보기 등)에 우연히 걸리는 비안경 맥락(부동산 임장·스마트폰 등)을 제외.
+const OFF_DOMAIN_CONTEXT = /임장|입지|매물|부동산|아파트|평수|갤럭시|아이폰|정수기|렌탈|화장실|보일러|에어컨|도수치료|화장품/;
+
+// 안경 도메인 제목만 예시로 쓴다. 수집 시드가 광범위해 정수기 렌탈·고양이 화장실·도수치료
+// 같은 도메인 외 제목이 섞여 들어오는데(검증에서 확인), 약속어 정렬이 이를 위로 올려 오염시킨다.
+const OPTICAL_DOMAIN = /안경|선글라스|썬글라스|렌즈|시력|시야|안구|초점|난시|근시|노안|돋보기|누진|다초점|콘택트|블루라이트|변색|편광|고굴절|압축렌즈|코팅렌즈|검안|아이웨어|뿔테|티타늄|메탈테|무테|코받침|코패드|눈\s|눈이|눈을|눈은|눈물|눈부심|눈건강/;
+
+// read-time 정제: 도메인 외·정책 위반 제거 → 완성형(약속어 마무리) 우선 정렬 → limit.
+// 양쪽 호출부(생성·폴리시)가 자동으로 더 나은 in-domain 예시를 받는다.
+function refineCorpusTitles(titles: string[], limit: number): string[] {
+  const clean = titles.filter(
+    (title) =>
+      OPTICAL_DOMAIN.test(title) &&
+      !OFF_DOMAIN_CONTEXT.test(title) &&
+      !NON_COMPLIANT_TITLE.test(title) &&
+      !SHOP_BRANCH_ENDING.test(title.trim())
+  );
+  // 필터가 너무 얇게 남기면(데이터 빈약) 도메인만이라도 지키며 폴백해 어휘 커버리지를 확보한다.
+  const pool =
+    clean.length >= Math.min(20, titles.length)
+      ? clean
+      : titles.filter((title) => OPTICAL_DOMAIN.test(title));
+  const complete = pool.filter((title) => PAYLOAD_ENDING.test(title.trim()));
+  const rest = pool.filter((title) => !PAYLOAD_ENDING.test(title.trim()));
+  return [...complete, ...rest].slice(0, limit);
 }
 
 async function readCorpusFile(): Promise<CorpusFile> {
@@ -148,16 +192,16 @@ export async function getCorpusTitles(params: {
     cached && Date.now() - new Date(cached.harvestedAt).getTime() < CORPUS_TTL_MS;
 
   if (cached && fresh) {
-    return cached.titles.slice(0, limit);
+    return refineCorpusTitles(cached.titles, limit);
   }
 
   if (!hasNaverCredentials()) {
-    return (cached?.titles ?? []).slice(0, limit);
+    return refineCorpusTitles(cached?.titles ?? [], limit);
   }
 
   const titles = await harvestCategoryTitles(seedQueries);
   if (titles.length === 0) {
-    return (cached?.titles ?? []).slice(0, limit);
+    return refineCorpusTitles(cached?.titles ?? [], limit);
   }
 
   await saveCorpusFile({
@@ -167,5 +211,5 @@ export async function getCorpusTitles(params: {
       [categoryId]: { harvestedAt: new Date().toISOString(), titles },
     },
   });
-  return titles.slice(0, limit);
+  return refineCorpusTitles(titles, limit);
 }

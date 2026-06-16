@@ -112,7 +112,9 @@ const KEYWORD_RESULT_CACHE_ENABLED = process.env.KEYWORD_RESULT_CACHE !== "0";
 // v22: 제목 폴리시 자연스러움 강화 — 도식 명사 스택("~순서/~법") 금지, 사람 말투(평서·조건·질문형)로.
 // v23: 개수 안정화 — 부족분을 실볼륨 시드에 제목 생성해 채우는 복구 백필(7~10 변동 해소).
 // v24: 안경렌즈 카테고리에 콘택트렌즈·선글라스 누수 차단 + "이름에 쓰기" 류 비문 제목 거름 — 이전 결과 무효화.
-const KEYWORD_RESULT_CACHE_VERSION = 24;
+// v25: 제목 완성도 복구(v23 프롬프트) — 종속절 단독 종결 금지·중립 약속어(차이/종류/기준/방법 등) 마무리 재허용·끝맺음 계열 분산. "쓰다 만 제목" 해소 — 이전 결과 무효화.
+// v26: 약속어 의미 규율(차이=같은축 두종류만·가짜비교 금지, 기준=막연종결 금지) + 브랜드명/전문수치(베이스커브·함수율·산소투과율) 후보 드롭 + 비변별 직경 드롭 + 코퍼스 시드 정밀화 — 이전 결과 무효화.
+const KEYWORD_RESULT_CACHE_VERSION = 26;
 const KEYWORD_RESULT_CACHE_FILE = path.join(process.cwd(), "data", "keyword-result-cache.json");
 
 type KeywordResultResponseData = {
@@ -815,10 +817,6 @@ const FALLBACK_KEYWORD_SETS: Record<
     { main: "원데이렌즈 위생", sub1: "원데이렌즈 교체", sub2: "원데이렌즈 착용" },
     { main: "콘택트렌즈 검사", sub1: "콘택트렌즈 시력", sub2: "콘택트렌즈 착용" },
     { main: "렌즈건조 관리", sub1: "렌즈건조 착용", sub2: "렌즈건조 습관" },
-    { main: "렌즈직경 차이", sub1: "렌즈직경 착용감", sub2: "렌즈직경 시야" },
-    { main: "베이스커브 선택", sub1: "베이스커브 착용감", sub2: "베이스커브 검사" },
-    { main: "렌즈함수율 차이", sub1: "렌즈함수율 건조", sub2: "렌즈함수율 착용" },
-    { main: "산소투과율 렌즈", sub1: "산소투과율 착용", sub2: "산소투과율 충혈" },
     { main: "렌즈돌아감 원인", sub1: "렌즈돌아감 난시", sub2: "렌즈돌아감 착용" },
     { main: "렌즈흐림 원인", sub1: "렌즈흐림 건조", sub2: "렌즈흐림 세척" },
     { main: "렌즈빠짐 원인", sub1: "렌즈빠짐 착용", sub2: "렌즈빠짐 검사" },
@@ -966,18 +964,6 @@ const BROAD_KEYWORD_HEADS: Record<string, string[]> = {
     "토릭렌즈",
     "투명렌즈",
     "서클렌즈",
-    "아큐브렌즈",
-    "알콘렌즈",
-    "바슈롬렌즈",
-    "쿠퍼비전",
-    "바이오피니티",
-    "데일리스렌즈",
-    "토탈원렌즈",
-    "렌즈직경",
-    "베이스커브",
-    "렌즈함수율",
-    "산소투과율",
-    "실리콘하이드로겔",
     "렌즈건조",
     "렌즈충혈",
     "렌즈이물감",
@@ -1065,10 +1051,6 @@ const BROAD_KEYWORD_TAILS: Record<string, string[]> = {
     "난시",
     "시야",
     "교체",
-    "직경",
-    "베이스커브",
-    "함수율",
-    "산소투과율",
     "돌아감",
     "빠짐",
     "찢어짐",
@@ -1076,6 +1058,35 @@ const BROAD_KEYWORD_TAILS: Record<string, string[]> = {
   "eye-info": ["원인", "증상", "검사", "관리", "습관", "피로", "흐림", "운전", "독서", "스마트폰", "어린이", "근시", "야간"],
   "glasses-story": ["원인", "방법", "관리", "교체", "세척", "보관", "피팅", "수리", "흠집", "얼룩", "코팅", "착용감", "습관", "코디", "스타일", "얼굴형", "인상", "처음", "고르기", "시기", "트렌드", "맞춤"],
 };
+
+// 코퍼스 harvest 시드 정밀화: 카테고리 subcategories는 "교체/도수/소재/시야/코디" 같은
+// 일반어라 단독으로 네이버에 검색하면 정수기 렌탈 교체·도수치료·부동산 임장·패션 코디 등
+// 도메인 외 결과를 끌어온다(오염 뿌리). 광학 앵커를 붙여 안경 도메인 결과만 나오게 한다.
+const CATEGORY_SEED_ANCHOR: Record<string, string> = {
+  frames: "안경테",
+  lenses: "안경렌즈",
+  contacts: "콘택트렌즈",
+  "eye-info": "눈",
+  progressive: "누진",
+  "glasses-story": "안경",
+};
+
+function anchorOpticalSeed(categoryId: string, sub: string): string {
+  const term = sub.trim();
+  if (!term) return term;
+  // 이미 안경/렌즈/콘택트/선글라스를 포함하면 그대로(이미 도메인 특정).
+  if (/안경|렌즈|콘택트|선글라스/.test(term)) return term;
+  const anchor = CATEGORY_SEED_ANCHOR[categoryId] ?? "안경";
+  return `${anchor} ${term}`;
+}
+
+function buildCorpusSeedQueries(category: { id: string; name: string; subcategories: string[] }): string[] {
+  return [
+    category.name,
+    ...category.subcategories.map((sub) => anchorOpticalSeed(category.id, sub)),
+    ...(BROAD_KEYWORD_HEADS[category.id] ?? []),
+  ];
+}
 
 function isCategoryAppropriateCandidate(categoryId: string, option: KeywordOption): boolean {
   const source = `${option.title} ${option.mainKeyword} ${option.subKeyword1} ${option.subKeyword2}`;
@@ -1094,6 +1105,17 @@ function isCategoryAppropriateCandidate(categoryId: string, option: KeywordOptio
     return false;
   }
   if (/자연스러운 제목|2단어 키워드|main_keyword|sub_keyword/.test(source)) {
+    return false;
+  }
+  // 결정론 안전망: 브랜드명·전문수치는 정보성 제목/키워드에 부적합 → 후보 자체 드롭(프롬프트 미준수 대비).
+  if (/아큐브|알콘|쿠퍼비전|바슈롬|바이오피니티|데일리스|토탈원|클라렌|메다폼|오아시스원데이/.test(source)) {
+    return false;
+  }
+  if (/베이스커브|함수율|산소투과율/.test(source)) {
+    return false;
+  }
+  // 소프트/원데이/일반 콘택트 "직경"은 거의 동일해 비변별(컬러·서클렌즈 직경은 변별 있어 허용).
+  if (/직경/.test(source) && !/컬러렌즈|서클렌즈|미용렌즈/.test(source)) {
     return false;
   }
   if (
@@ -2962,11 +2984,7 @@ export async function POST(request: NextRequest) {
         try {
           return await getCorpusTitles({
             categoryId: category.id,
-            seedQueries: [
-              category.name,
-              ...category.subcategories,
-              ...(BROAD_KEYWORD_HEADS[category.id] ?? []),
-            ],
+            seedQueries: buildCorpusSeedQueries(category),
             limit: 40,
           });
         } catch {

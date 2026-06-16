@@ -6,6 +6,8 @@ import { washImageBuffer } from "@/lib/storage/imageWash";
 import {
   getSceneReferenceImages,
   listScenePhotos,
+  listDetailRefPhotos,
+  pickDetailCategory,
   type SceneTag,
 } from "@/lib/data/shopRefs";
 
@@ -37,7 +39,14 @@ export async function POST(request: NextRequest) {
     // 공간 컷(외관/내부/디테일, 사람 없음)만 실제 사진을 워싱해 직접 서빙한다.
     // 사람이 등장하는 fitting은 직접 서빙하지 않는다(원본과 동일인 방지) → 아래에서 새로 생성.
     if (shopId && scene && RAW_PHOTO_SCENES.has(scene)) {
-      const pool = await listScenePhotos(shopId, scene);
+      // detail = 안경 부품/제품 디테일 → 6매장 공유 풀(주제 매칭) 우선, 없으면 매장 detail.
+      let pool =
+        scene === "detail"
+          ? await listDetailRefPhotos(pickDetailCategory(prompt ?? ""))
+          : await listScenePhotos(shopId, scene);
+      if (pool.length === 0 && scene === "detail") {
+        pool = await listScenePhotos(shopId, scene);
+      }
       if (pool.length > 0) {
         const pick = pool[Math.floor(Math.random() * pool.length)];
         try {

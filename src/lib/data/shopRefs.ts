@@ -2,6 +2,8 @@ import fs from "fs/promises";
 import path from "path";
 
 const REFS_ROOT = path.join(process.cwd(), "data", "shop-refs");
+// 6매장 공유 안경 디테일 실사진 풀(gti가 못 그리는 안경 부품 접사를 실사진으로 대체).
+const DETAIL_REFS_ROOT = path.join(process.cwd(), "data", "detail-refs");
 const SCENE_INDEX_FILE = path.join(REFS_ROOT, "_scene-index.json");
 // 체험단 수집 사진 인덱스(공간컷) — _scene-index 와 병합해 직접사용 변형 풀을 넓힌다.
 const REFS_INDEX_FILE = path.join(REFS_ROOT, "_refs-index.json");
@@ -265,4 +267,61 @@ export async function listScenePhotos(shopId: string, scene: SceneTag): Promise<
     }
   }
   return out;
+}
+
+// ── 공유 안경 디테일 풀(data/detail-refs/<category>) ──────────────────────────
+// 매장 무관 일반 안경 디테일 컷. [SCENE:detail] 슬롯에 주제 맞는 실사진을 워싱 서빙한다.
+export type DetailCategory = "nose-pad" | "lens" | "frame" | "contacts" | "general";
+const DETAIL_CATEGORIES: readonly DetailCategory[] = [
+  "nose-pad",
+  "lens",
+  "frame",
+  "contacts",
+  "general",
+];
+
+/** 프롬프트/키워드 텍스트로 디테일 폴더를 고른다(한·영 키워드). 순서 = 우선순위. */
+export function pickDetailCategory(text: string): DetailCategory {
+  const t = text.toLowerCase();
+  if (/contact lens|콘택트|원데이|소프트렌즈|하드렌즈|컬러렌즈|난시렌즈|멀티포컬/.test(t)) {
+    return "contacts";
+  }
+  if (/nose pad|nosepad|nose-pad|nose piece|코받침|코패드|콧등|코 자국|눌림 자국/.test(t)) {
+    return "nose-pad";
+  }
+  if (/lens thickness|refractive|high.?index|coating|photochromic|polari[sz]ed|lens edge|굴절|두께|코팅|변색|편광|블루라이트|안경알|렌즈/.test(t)) {
+    return "lens";
+  }
+  if (/frame|titanium|acetate|temple|hinge|screw|뿔테|메탈|티타늄|울템|무테|하금테|안경테|힌지|나사|안경다리/.test(t)) {
+    return "frame";
+  }
+  return "general";
+}
+
+async function listImagesInDir(dir: string): Promise<string[]> {
+  try {
+    const entries = await fs.readdir(dir, { withFileTypes: true });
+    return entries
+      .filter((e) => e.isFile() && IMAGE_EXTS.has(path.extname(e.name).toLowerCase()))
+      .map((e) => path.join(dir, e.name))
+      .sort();
+  } catch {
+    return [];
+  }
+}
+
+/** 특정 디테일 카테고리 실사진 목록. 비면 general 폴더로 폴백. */
+export async function listDetailRefPhotos(category: DetailCategory): Promise<string[]> {
+  const primary = await listImagesInDir(path.join(DETAIL_REFS_ROOT, category));
+  if (primary.length > 0 || category === "general") return primary;
+  return listImagesInDir(path.join(DETAIL_REFS_ROOT, "general"));
+}
+
+/** 전 카테고리 디테일 실사진(허용목록 검증용 — IDOR/트래버설 차단). */
+export async function listAllDetailRefPhotos(): Promise<string[]> {
+  const all: string[] = [];
+  for (const category of DETAIL_CATEGORIES) {
+    all.push(...(await listImagesInDir(path.join(DETAIL_REFS_ROOT, category))));
+  }
+  return all;
 }
