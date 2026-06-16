@@ -21,7 +21,7 @@ import { getShopById } from "@/lib/data/shops";
 import { lookupGlossary, buildGlossaryHint } from "@/lib/domain/opticalGlossary";
 import type { KeywordOption, ArticleContent, SearchVolumeSignal } from "@/types";
 
-export const maxDuration = 360;
+export const maxDuration = 600;
 
 const MAX_REVISION_ATTEMPTS = 1;
 // Multi-round research (1 main search + re-search of all follow-up questions) needs
@@ -30,10 +30,13 @@ const MAX_REVISION_ATTEMPTS = 1;
 const RESEARCH_TIMEOUT_MS = 40_000;
 // nounExtractor가 Haiku→Sonnet으로 느려져 25초로는 경쟁분석(G1)이 계속 실패했다. 45초로 상향.
 const COMPETITOR_ANALYSIS_TIMEOUT_MS = 45_000;
-// Opus 본문 작성 예산. maxDuration(360초) 안에서 앞단 병렬(~45초)+재수정(70초)까지
-// 들어가도록 220초로 잡는다. 성공경로 45+220+70≈335초, 실패경로 45+220+75≈340초.
-const ARTICLE_WRITE_TIMEOUT_MS = 220_000;
-const ARTICLE_RETRY_TIMEOUT_MS = 75_000;
+// Opus 본문 작성 예산. maxDuration(600초)으로 천장을 올려 재시도에 "실질 예산"을 준다.
+// 기존 결함: 재시도(75초)가 첫 시도(220초)보다 작아, 첫 시도가 느려서 초과되면 더 빡빡한
+// 75초 재시도도 거의 항상 같이 초과돼 구조적으로 실패가 예정돼 있었다(실측 220+75≈310초 동반 실패).
+// 이제 첫 시도 240초 + (압축)재시도 200초. 실패경로 45+240+200≈485초 < 600.
+// 성공경로 45+240+(재수정70+보강50+다듬기60)≈465초 < 600 — 여유 확보.
+const ARTICLE_WRITE_TIMEOUT_MS = 240_000;
+const ARTICLE_RETRY_TIMEOUT_MS = 200_000;
 // 2000자급 본문 전체 재작성은 60초로 빠듯해 자주 타임아웃됐다. 90초로 상향.
 const ARTICLE_REVISION_TIMEOUT_MS = 70_000;
 const SMARTBLOCK_TIMEOUT_MS = 12_000;
