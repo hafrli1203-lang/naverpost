@@ -63,6 +63,17 @@ function extractJsonBlock(text: string): string | null {
   return null;
 }
 
+// 권위 낮은 출처(언론/앱/블로그/웹커뮤니티)는 인용에서 제외한다. 이유: (1) AI 검색 인용·
+// E-E-A-T 목적상 기관·제조사·학술·표준이 적합하고, (2) body-side extractCitationsFromContent가
+// 이런 언론사명을 어차피 인식하지 못해 "넣는 쪽/잡는 쪽" 범위가 어긋났다(실측: 동아일보·닥터나우).
+// 의료기관 단어(안과·병원·의원)는 정식 학회명(대한안과학회 등)과 겹치므로 넣지 않는다.
+const LOW_AUTHORITY_SOURCE =
+  /(일보|신문|뉴스|방송|매거진|블로그|블로거|카페|위키|나무위키|지식인|티스토리|브런치|유튜브|인스타|페이스북|닥터나우|판다랭크|블랙키위)/;
+
+function isLowAuthoritySource(institution: string): boolean {
+  return LOW_AUTHORITY_SOURCE.test(institution);
+}
+
 function parseCitations(raw: unknown): ResearchCitation[] {
   if (!Array.isArray(raw)) return [];
   const results: ResearchCitation[] = [];
@@ -73,6 +84,7 @@ function parseCitations(raw: unknown): ResearchCitation[] {
       typeof record.institution === "string" ? record.institution.trim() : "";
     const fact = typeof record.fact === "string" ? record.fact.trim() : "";
     if (!institution || !fact) continue;
+    if (isLowAuthoritySource(institution)) continue;
     const year = typeof record.year === "string" ? record.year.trim() : undefined;
     const url = typeof record.url === "string" ? record.url.trim() : undefined;
     results.push({ institution, fact, year, url });
@@ -167,10 +179,64 @@ ${subject}
   }
 }
 
+/** 1차 조회에서 인용이 이 개수 미만이면 인용 전용 2차 조회로 보강한다. */
+const MIN_CITATIONS_BEFORE_SUPPLEMENT = 3;
+
+/** 기관명을 키로 인용을 중복 제거하며 병합한다(앞선 것 우선, 최대 6건). */
+function dedupeCitations(
+  primary: ResearchCitation[],
+  secondary: ResearchCitation[]
+): ResearchCitation[] {
+  const seen = new Set<string>();
+  const merged: ResearchCitation[] = [];
+  for (const entry of [...primary, ...secondary]) {
+    const key = entry.institution.trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    merged.push(entry);
+    if (merged.length >= 6) break;
+  }
+  return merged;
+}
+
+/**
+ * 인용 전용 2차 조회. 1차 요약 프롬프트가 요약·질문에 집중하다 보면 citations를 자주 비운다
+ * (실측). AI 검색 인용 최적화의 실효는 본문에 귀속 가능한 기관·수치가 있느냐에 달려 있으므로,
+ * 기관명+수치만 노린 별도 질의로 보강한다. 실패/타임아웃 시 빈 배열(graceful).
+ */
+async function researchAdditionalCitations(subject: string): Promise<ResearchCitation[]> {
+  const prompt = `아래 안경 도메인 주제에 대해, 블로그 본문에 인용할 수 있는 "기관/제조사가 발표한 구체적 수치·기준" 만 조사하세요.
+요약·설명·질문은 하지 말고 citations JSON만 반환합니다.
+
+${subject}
+
+{
+  "citations": [
+    { "institution": "공공기관/협회/학회 또는 자이스·에실로 같은 제조사 기술자료", "year": "연도(있으면)", "fact": "발표한 구체 수치·비율·기준 한 줄", "url": "원문 URL(있으면)" }
+  ]
+}
+
+규칙:
+- 실제 검색으로 확인된 것만, 최대 5개. 확인 안 되면 빈 배열([]).
+- ★ 기관명·연도·수치·URL을 절대 지어내지 말 것. 그럴듯하게 채우는 건 금지.
+- 수치/비율/기준이 없는 일반 진술은 넣지 말 것.`;
+
+  try {
+    const content = await callPerplexity(prompt);
+    const jsonText = extractJsonBlock(content);
+    if (!jsonText) return [];
+    const parsed = JSON.parse(jsonText) as Record<string, unknown>;
+    return parseCitations(parsed.citations);
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Researches a keyword for blog writing.
  * 1) First search uses main + both sub keywords + category + glossary context together.
  * 2) Re-searches all returned follow-up questions in parallel to build richer material.
+ * 3) If first-pass citations are sparse, supplements with a citation-only query (parallel).
  */
 export async function researchKeyword(params: ResearchParams): Promise<ResearchResponse> {
   const subject = buildSearchSubject(params);
@@ -261,15 +327,23 @@ citations 작성 규칙:
     summary = content.trim();
   }
 
-  // Re-search every follow-up question in parallel to build richer material.
+  // Re-search every follow-up question, and (if citations are sparse) run a citation-only
+  // supplement query — all in parallel so the supplement adds no serial latency.
   const followUps: ResearchFollowUp[] = [];
-  if (questions.length > 0) {
-    const settled = await Promise.all(
-      questions.map((question) => researchFollowUpQuestion(question, subject))
-    );
-    for (const item of settled) {
-      if (item) followUps.push(item);
-    }
+  const needsMoreCitations = citations.length < MIN_CITATIONS_BEFORE_SUPPLEMENT;
+  const [followUpSettled, extraCitations] = await Promise.all([
+    questions.length > 0
+      ? Promise.all(questions.map((question) => researchFollowUpQuestion(question, subject)))
+      : Promise.resolve([] as (ResearchFollowUp | null)[]),
+    needsMoreCitations
+      ? researchAdditionalCitations(subject)
+      : Promise.resolve([] as ResearchCitation[]),
+  ]);
+  for (const item of followUpSettled) {
+    if (item) followUps.push(item);
+  }
+  if (extraCitations.length > 0) {
+    citations = dedupeCitations(citations, extraCitations);
   }
 
   const result: ResearchResult = { summary, questions, citations, followUps };

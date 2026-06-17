@@ -49,6 +49,8 @@ export function CadenceTracker() {
   }, []);
 
   useEffect(() => {
+    // 마운트 시 1회 발행 일관성 로드(fetch-on-mount). setIsLoading 동기 호출은 의도된 동작이다.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
   }, [load]);
 

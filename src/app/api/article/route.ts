@@ -9,6 +9,7 @@ import {
   buildNaturalnessPolishPrompt,
 } from "@/lib/prompts/revisionPrompt";
 import { validateContent } from "@/lib/validation/contentValidator";
+import { extractCitationsFromContent } from "@/lib/ai/citationExtractor";
 import { fetchBlogTitles } from "@/lib/naver/rssParser";
 import { buildArticleBrief } from "@/lib/briefs/articleBrief";
 import { analyzeCompetitorMorphology } from "@/lib/analysis/competitorMorphology";
@@ -583,6 +584,12 @@ export async function POST(request: NextRequest) {
       // 자연어 다듬기 실패는 본문 결과에 영향을 주지 않는다(직전 본문 유지).
     }
 
+    // AI 검색 인용 신호: 최종 본문에 실제로 귀속된 기관·수치 인용을 추출해 surface한다.
+    // 하드 게이트가 아니다(인용이 없어도 통과) — 날조를 막기 위해 본문에 이미 들어간 것만
+    // 측정하며, 부족하면 운영자가 보고 판단한다. extractCitationsFromContent는 기관 패턴 +
+    // 수치가 한 문장에 같이 있는 경우만 잡으므로 "AI가 인용하기 좋은 단위"의 근사치다.
+    const citations = extractCitationsFromContent(content);
+
     const article: ArticleContent = {
       title: keyword.title,
       content,
@@ -594,6 +601,7 @@ export async function POST(request: NextRequest) {
       validation,
       researchStatus,
       brief,
+      citations,
       washingTone: tone,
       generationNote: revisionError
         ? [

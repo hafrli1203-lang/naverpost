@@ -517,6 +517,34 @@ export function ArticlePreview({
                   </div>
                 </>
               )}
+
+              {(article.citations?.length ?? 0) > 0 && (
+                <>
+                  <Separator />
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-medium text-muted-foreground">AI 검색 인용 신호</p>
+                      <span className="text-[11px] text-muted-foreground">
+                        기관 인용 {article.citations?.length ?? 0}건
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">
+                      본문에 출처(기관·연도·수치)가 붙은 문장입니다. AI 요약·검색이 인용하기 좋은 단위예요.
+                    </p>
+                    <div className="space-y-1">
+                      {article.citations?.map((citation) => (
+                        <p
+                          key={`${citation.institution}-${citation.fact}`}
+                          className="text-xs leading-5 text-muted-foreground"
+                        >
+                          - {citation.institution}
+                          {citation.year ? ` (${citation.year})` : ""}: {citation.fact}
+                        </p>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
             </CardContent>
           </Card>
 

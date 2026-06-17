@@ -92,6 +92,8 @@ export function CRankAudit({
   }, [title, body, mainKeyword, subKeyword1, subKeyword2]);
 
   useEffect(() => {
+    // 마운트 시 1회 사전 점검(fetch-on-mount). setIsLoading은 동기 호출되지만 의도된 동작이다.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     runAudit();
   }, [runAudit]);
 

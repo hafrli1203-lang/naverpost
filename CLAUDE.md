@@ -295,10 +295,12 @@ npx -y @smithery/cli@latest install @isnow890/naver-search-mcp --client claude
 | `lib/ai/cli/claudeCli.ts` | `claude -p` 호출 (OAuth 구독) | `runClaude({ prompt, model, timeoutMs?, systemPrompt? })` |
 | `lib/ai/cli/codexCli.ts` | `codex exec` 호출 (ChatGPT 구독) | `runCodex({ prompt, model?, timeoutMs? })` |
 | `lib/ai/cli/gtiCli.ts` | `gti` 호출 (gpt-image-2, ChatGPT 구독) | `runGti({ prompt, timeoutMs?, provider?, model? })` |
-| `lib/ai/claude.ts` | (CLI 위임 래퍼, SDK 미사용) | `generateKeywords()`, `writeArticle()`, `reviseArticle()`, `rewriteArticleForGeo()`, `generateImagePrompts()` |
+| `lib/ai/claude.ts` | (CLI 위임 래퍼, SDK 미사용) | `generateKeywords()`, `reviseKeywordTitles()`, `selectCategoryFitIndices()`, `writeArticle()`, `reviseArticle()`, `generateImagePrompts()` (※ `rewriteArticleForGeo()`는 제거됨 — GEO 재작성이 `articlePrompt.ts`에 내장됨) |
 | `lib/ai/imageGen.ts` | (CLI 위임 래퍼) | `generateBlogImage(prompt)` |
-| `lib/ai/perplexity.ts` | Perplexity 클라이언트 (REST 직접) | `researchKeyword()` |
+| `lib/ai/perplexity.ts` | Perplexity 클라이언트 (REST 직접) | `researchKeyword()` (citations 포함 반환) |
+| `lib/ai/citationExtractor.ts` | 없음 (순수함수) | `extractCitationsFromContent()`, `mergeCitations()` — 본문에서 기관·수치 인용 추출(AI 검색 인용 신호). article 라우트에서 `article.citations`로 surface |
 | `lib/nlp/nounExtractor.ts` | (CLI 위임 래퍼, Haiku) | `extractContentNouns()`, `generateRelatedKeywords()`, `extractCompetitorNouns()` |
+| `lib/keywords/spellingVariants.ts` | 없음 (순수함수) | `expandSpellingVariants()` — 안경 도메인 표기/오타/띄어쓰기 변형 생성. keywords 라우트에서 discoverySeeds에 합류 → 실볼륨 게이트가 거름 |
 | `lib/naver/contentFormatter.ts` | 없음 (순수함수) | `formatForNaver()`, `formatForNaverExport()`, `buildNaverPlainText()` (붙여넣기 export) |
 | `lib/blogops/*` | 없음 (BlogOps REST 호출) | `registerPostToBlogOps()`, `trackExposureForShops()`, `backfillPublishedPosts()`, `getTopExposedKeywordKeys()` |
 | `lib/naver/tokenManager.ts` | (미사용 — writePost.json 종료로 발행 토큰 불필요) | `withTokenRetry()`, `loadTokens()` |

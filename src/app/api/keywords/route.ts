@@ -35,6 +35,7 @@ import {
 import { analyzeCompetitorMorphology } from "@/lib/analysis/competitorMorphology";
 import { analyzeTitleSimilarity } from "@/lib/analysis/titleSimilarity";
 import { combineKeywords } from "@/lib/keywords/keywordCombiner";
+import { expandSpellingVariants } from "@/lib/keywords/spellingVariants";
 import {
   buildKeywordMeshOptions,
   buildKeywordMeshSeeds,
@@ -2921,7 +2922,7 @@ export async function POST(request: NextRequest) {
       ...category.subcategories.slice(0, 3),
     ].filter(Boolean);
 
-    const discoverySeeds = Array.from(
+    const baseDiscoverySeeds = Array.from(
       new Set([
         ...buildKeywordDiscoverySeeds({
           shop,
@@ -2935,6 +2936,12 @@ export async function POST(request: NextRequest) {
         }),
         ...productHeads,
       ])
+    );
+    // 표기 변형·오타 키워드를 시드에 합류시킨다(근거: blog-monetization-alster 4장).
+    // 변형도 같은 검색광고 볼륨 조회에 함께 측정되고, 실볼륨 없는 변형은 기존 볼륨 게이트가
+    // 그대로 걸러낸다 — 추가 네트워크 호출 없이 안전하게 변형 수요만 포착한다.
+    const discoverySeeds = Array.from(
+      new Set([...baseDiscoverySeeds, ...expandSpellingVariants(baseDiscoverySeeds)])
     );
 
     // RSS 이력, 경쟁 제목, 검색량 신호는 서로 독립적이므로 동시에 수집한다.
