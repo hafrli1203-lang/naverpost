@@ -366,6 +366,35 @@ export function ArticlePreview({
                 </Alert>
               )}
 
+              {/* Repeated morphemes advisory (8회+ ~ 20회 미만): 자동수정 대상은 아니지만
+                  키워드 스터핑/뷰누락의 사전 신호로 참고. ≥20회는 위 '반복어 발견'이 하드 게이트. */}
+              {(() => {
+                const repeated = (validation.morphology?.repeatedBodyMorphemes ?? [])
+                  .filter((m) => m.count >= 8 && m.count < 20)
+                  .slice(0, 5);
+                if (repeated.length === 0) return null;
+                return (
+                  <div className="rounded-md border border-slate-200 bg-slate-50 p-2">
+                    <p className="text-[11px] font-medium text-slate-600">
+                      반복 많은 형태소 (참고 · 자동수정 대상 아님)
+                    </p>
+                    <p className="mb-1 text-[11px] text-slate-500">
+                      20회 이상이면 뷰누락 위험이라 자동 보정합니다. 아래는 그 전 단계 신호예요.
+                    </p>
+                    <div className="flex flex-wrap gap-1">
+                      {repeated.map((m) => (
+                        <span
+                          key={m.token}
+                          className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-700"
+                        >
+                          {m.token} ({m.count}회)
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+
               {/* Caution phrases */}
               {validation.cautionPhrases.length > 0 && (
                 <Alert className="py-2 border-orange-300 bg-orange-50">

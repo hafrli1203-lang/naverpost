@@ -27,10 +27,13 @@
 1. **citation 인식 범위 비대칭 정리** — research-side(`parseCitations`)는 언론/앱까지 넓게 받는데 body-side(`extractCitationsFromContent`)는 기관/제조사만 인식. 둘의 기준을 맞출지(언론사 패턴 추가 vs research에서 언론 배제) 결정 필요. 라이브에서 동아일보/닥터나우 반환으로 드러남.
 2. **pre-existing lint 실패 정리(내 변경 아님)** — `CRankAudit.tsx:95`·`CadenceTracker.tsx:52` `react-hooks/set-state-in-effect`. 세션 이전부터 존재. `pnpm lint`가 빨간 상태라 DoD의 "lint clean"을 막음.
 3. **운영자용 발행 후 반응 관리 가이드(선택)** — export 산출물에 "발행 후 1~2시간 반응 관리" 한 줄 동봉 여부 결정. 자동화 불가 영역.
-4. **(미정·증거대기) 키워드 밀도 게이트 마진** — 아래 검증으로 "갭 없음" 확인됨. 다만 게이트가 정확히 20회에서만 발동(마진 0)이고 8~19회 구간은 자문 신호만 있음(`morphologyAnalyzer` ≥8, 게이트 미연결). 마진을 둘지/키워드 전용 카운터를 둘지는 **실발생 증거가 모이면** 판단. 지금 변경 안 함.
+4. ~~키워드 밀도 게이트 마진~~ → 완료(advisory 표면화). 8~19회 구간을 UI 참고신호로 노출. 하드게이트(8회+ 자동수정)는 오탐 위험이라 실발생 증거 모이면 별도 판단.
 
 ## 완료 (Done)
 
+- ✅ **키워드 밀도 마진 advisory 표면화** (2026-06-17)
+  - `ArticlePreview.tsx`: `validation.morphology.repeatedBodyMorphemes` 중 8회+~20회 미만 형태소를 "반복 많은 형태소(참고)" 블록으로 표시. 하드게이트 아님(오탐 없음) — 20회+ 자동보정 전 단계 신호를 운영자에게 가시화해 8~19회 사각지대 해소.
+  - 검증: type-check 0에러 / eslint 0. (UI 렌더는 dev 서버 필요 — 데이터는 needsHardRevision이 쓰는 동일 필드라 존재 확인됨.)
 - ✅ **품질 라운드 2: 제조사 인용 패턴 + 테스트 인프라 + Perplexity 인용 보강** (2026-06-17)
   - **(2) 제조사·표준 인용 패턴**: `citationExtractor.ts`에 자이스/에실로/호야 등 제조사 + ISO/ANSI 패턴 추가(브랜드+자료유형 접미사 요구로 제품명 오탐 방지). 기존엔 "렌즈" 없는 제조사명을 못 잡아 본문이 제조사를 인용해도 신호 0이었음.
   - **(3) 테스트 인프라**: vitest 도입(`vitest.config.ts`, `pnpm test`). 순수함수 단위테스트 20개(citationExtractor 9 / spellingVariants 7 / repetitionCheck 4) 전부 통과. 회귀가드 확보(이번 세션에 발견한 드리프트류 재발 방지).
