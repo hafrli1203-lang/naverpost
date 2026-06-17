@@ -18,6 +18,12 @@ describe("expandSpellingVariants", () => {
     expect(expandSpellingVariants(["선글라스 관리"])).toContain("썬글라스 관리");
   });
 
+  it("흔한 오타/표기 변형을 생성한다(도수→돗수, 난시→란시, 컬러렌즈→칼라렌즈)", () => {
+    expect(expandSpellingVariants(["도수 안경"])).toContain("돗수 안경");
+    expect(expandSpellingVariants(["난시 렌즈"])).toContain("란시 렌즈");
+    expect(expandSpellingVariants(["컬러렌즈 추천"])).toContain("칼라렌즈 추천");
+  });
+
   it("도메인 밖 키워드는 변형을 만들지 않는다(시드 오염 방지)", () => {
     expect(expandSpellingVariants(["노트북 추천"])).toEqual([]);
   });
