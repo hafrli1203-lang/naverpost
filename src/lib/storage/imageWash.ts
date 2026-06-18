@@ -45,19 +45,21 @@ export async function washImageBuffer(
     const rW = rotated.info.width;
     const rH = rotated.info.height;
 
-    // 2) 팬 크롭: 원본 대비 3~6% 작은 박스를 중앙±약간 이동해서 추출(회전 쐐기도 함께 제거)
-    const cropFrac = rand(0.03, 0.06);
+    // 2) 팬 크롭: 원본 대비 6~14% 작은 박스를 중앙±크게 이동해서 추출(회전 쐐기도 함께 제거).
+    // 같은 실사진이 글마다 똑같이 보이지 않도록 크롭 폭·이동량을 키워 프레이밍에 변화를 준다
+    // (단 과하지 않게 — 매장 간판 등 핵심 피사체는 대체로 남는 14% 이내).
+    const cropFrac = rand(0.06, 0.14);
     const cw = Math.max(160, Math.floor(W * (1 - cropFrac)));
     const ch = Math.max(160, Math.floor(H * (1 - cropFrac)));
     const maxLeft = Math.max(0, rW - cw);
     const maxTop = Math.max(0, rH - ch);
     const left = Math.min(
       maxLeft,
-      Math.max(0, Math.floor((rW - cw) / 2) + Math.round(rand(-W * 0.02, W * 0.02)))
+      Math.max(0, Math.floor((rW - cw) / 2) + Math.round(rand(-W * 0.05, W * 0.05)))
     );
     const top = Math.min(
       maxTop,
-      Math.max(0, Math.floor((rH - ch) / 2) + Math.round(rand(-H * 0.02, H * 0.02)))
+      Math.max(0, Math.floor((rH - ch) / 2) + Math.round(rand(-H * 0.05, H * 0.05)))
     );
 
     // 3) 약한 스케일

@@ -31,6 +31,13 @@
 
 ## 완료 (Done)
 
+- ✅ **실사진 활용 전략: 매칭+다양화 (verbatim 유지, AI 생성 안 함)** (2026-06-18, 검증됨, 사용자 결정)
+  - 배경: 사용자가 "실사진을 참조로 새로 생성"을 원했으나, 참조 생성 샘플(매장·코받침)을 보고 **실사진 유지 + 매칭/다양화**를 택함(이유: 생성본은 매장 간판=신뢰 신호를 잃고 AI티가 남). reference-guided generation은 채택 안 함(one/regenerate route 미변경).
+  - **(1) 빈 풀 detail 드롭**: `shopRefs.ts`에 `listDetailCategoryPhotos()`(general 폴백 없음) 추가. `image/prompts/route.ts`가 주제별 실사진만 서빙, 없으면(lens·contacts 0장) 무관한 general 공통컷·AI 왜곡생성으로 때우지 않고 detail 컷을 드롭. 검증: nose-pad 2·frame 17·general 5 서빙 / lens·contacts 0 드롭.
+  - **(2) 실제 다양화**: prompts route가 풀에서 정렬상 첫 장 대신 미사용 풀 무작위 선택(`pickFreshPhoto`) → 글마다 다른 실제 사진(풀>1일 때).
+  - **(3) 크롭 변화 강화**: `imageWash.ts` 팬크롭 3~6%→6~14%, 이동 ±2%→±5%. 검증: 같은 사진 2회 워싱 → 프레이밍 확연히 다름(넓게 vs 당겨서), 실제 간판은 둘 다 보존.
+  - 게이트: type-check 0 / eslint 0 / vitest 24/24.
+  - 후속(사용자 몫): lens·contacts·nose-pad 풀에 실사진 추가하면 그 주제 detail이 드롭 대신 서빙됨. 매칭·다양화 품질은 풀 크기에 비례.
 - ✅ **detail 씬 누락 회귀 수정 — 프롬프트 화해** (2026-06-18, 라이브 검증됨, 사용자 승인)
   - **진단**: `imagePrompt.ts`가 [SCENE:detail]을 "안경테 진열 적당한 거리"로만 정의하고 부품 초접사(코받침·힌지)를 "사람 콧등 만지는 컷으로 대체"하라고 막음(line 197·216). 그런데 코드+`detail-refs/`(README)는 [SCENE:detail]을 **실제 부품 매크로 사진 서빙**으로 만들어 둠 → 프롬프트가 실사진 경로를 죽여, 큐레이션 실사진 24장(frame 17·nose-pad 2·general 5)이 버려지고 코받침 글이 AI 대체컷만 받음(라이브 detail 0개 관측).
   - **수정**: `imagePrompt.ts` line 197·216 — 부품 디테일(코받침/렌즈/테 소재)이 주제면 [SCENE:detail] 쓰도록 허용(실사진 서빙이라 왜곡 없음 명시), AI 생성 매크로 금지는 태그 없는 컷에만 적용으로 분리. 이미지 프롬프트는 캐시 없음(매번 생성) → 버전업 불필요.

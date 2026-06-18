@@ -6,6 +6,7 @@ import {
   getShopProfile,
   listScenePhotos,
   listDetailRefPhotos,
+  listDetailCategoryPhotos,
   pickDetailCategory,
   detailScenePrompt,
   type SceneTag,
@@ -70,26 +71,33 @@ export async function POST(request: NextRequest) {
     // 인물/개념 컷(scene=null)도 그대로 생성. 컷마다 다른 사진을 배정해 중복을 피한다.
     const RAW_PHOTO_SCENES = new Set<SceneTag>(["exterior", "interior", "detail"]);
     const usedPhotos = new Set<string>();
+    // 같은 실사진이 글마다 똑같이 반복되지 않도록, 정렬상 첫 장이 아니라 미사용 풀에서 무작위로 고른다.
+    const pickFreshPhoto = (pool: string[]): string | undefined => {
+      const fresh = pool.filter((x) => !usedPhotos.has(x));
+      return fresh.length === 0 ? undefined : fresh[Math.floor(Math.random() * fresh.length)];
+    };
     const prompts: Array<{ prompt: string; scene: SceneTag | null; rawPhoto?: string }> = [];
     for (const p of disciplined) {
-      // [SCENE:detail]은 안경 부품/제품 디테일 — 매장 무관 일반 컷이라 6매장 공유 풀에서
-      // 주제(코받침/렌즈/테/콘택트)에 맞는 실사진을 우선 서빙한다(gti 안경 매크로 왜곡 회피).
+      // [SCENE:detail]은 안경 부품/제품 디테일 — 6매장 공유 풀에서 주제 맞는 "실사진"만 서빙한다.
+      // 주제 풀이 비면 무관한 general 공통컷으로 때우거나 AI로 왜곡 생성하지 않고 이 컷을 드롭한다
+      // (사용자 결정: 실제 매칭 사진만, 가짜/무관 사진 금지).
       if (p.scene === "detail") {
         const category = pickDetailCategory(`${p.prompt} ${mainKeyword} ${title}`);
-        const sharedPool = await listDetailRefPhotos(category);
-        const sharedFresh = sharedPool.find((x) => !usedPhotos.has(x));
+        const sharedPool =
+          category === "general"
+            ? await listDetailRefPhotos("general")
+            : await listDetailCategoryPhotos(category);
+        const sharedFresh = pickFreshPhoto(sharedPool);
         if (sharedFresh) {
           usedPhotos.add(sharedFresh);
-          // 실사진을 그대로 서빙하므로 저장 프롬프트를 서빙 카테고리에 맞는 사실 캡션으로
-          // 교체한다. LLM이 만든 엉뚱한 묘사("진열대")가 서빙 사진(코받침 매크로)과 충돌하던
-          // 것을 없애고, 재생성 폴백 생성 때도 주제에 맞는 컷이 나오게 한다.
+          // 실사진을 그대로 서빙하므로 저장 프롬프트를 서빙 카테고리 사실 캡션으로 교체(메타 일치).
           prompts.push({ ...p, prompt: detailScenePrompt(category), rawPhoto: sharedFresh });
-          continue;
         }
+        // 서빙했든 드롭이든 detail은 여기서 종결 — 일반 매장/AI 경로로 넘기지 않는다.
+        continue;
       }
       if (shopId && p.scene && RAW_PHOTO_SCENES.has(p.scene)) {
-        const pool = await listScenePhotos(shopId, p.scene);
-        const fresh = pool.find((x) => !usedPhotos.has(x));
+        const fresh = pickFreshPhoto(await listScenePhotos(shopId, p.scene));
         if (fresh) {
           usedPhotos.add(fresh);
           prompts.push({ ...p, rawPhoto: fresh });

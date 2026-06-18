@@ -338,6 +338,15 @@ export async function listDetailRefPhotos(category: DetailCategory): Promise<str
   return listImagesInDir(path.join(DETAIL_REFS_ROOT, "general"));
 }
 
+/**
+ * 주제별 디테일 실사진만 (general 폴백 없음). 비면 빈 배열.
+ * 사용처: 특정 주제(렌즈/코받침 등) detail 컷에 무관한 general 공통사진을 때우지 않고,
+ * 주제 맞는 실사진이 없으면 그 컷을 아예 드롭하기 위함.
+ */
+export async function listDetailCategoryPhotos(category: DetailCategory): Promise<string[]> {
+  return listImagesInDir(path.join(DETAIL_REFS_ROOT, category));
+}
+
 /** 전 카테고리 디테일 실사진(허용목록 검증용 — IDOR/트래버설 차단). */
 export async function listAllDetailRefPhotos(): Promise<string[]> {
   const all: string[] = [];
