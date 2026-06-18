@@ -316,3 +316,18 @@ npx -y @smithery/cli@latest install @isnow890/naver-search-mcp --client claude
 - 봇 개발 규칙 원본: `bot_created_rule.md`
 - 설계 문서: `docs/designs/` (새 기능 추가 시 필수 작성)
 - 변경 이력: `CHANGELOG.md`
+
+---
+
+## 워크스페이스 운영구조 연결 (2026-06-18 추가)
+
+> 위 기존 규칙(3단계 파이프라인, 발행 금지·붙여넣기 export, 한국어 전용, 금지어 필터, 쉼표 정책, 모듈 상태 경계, bot_created_rule 5단계 플로우)은 **그대로 우선 적용**한다. 아래는 충돌 없이 추가되는 워크스페이스 공통 운영 절차다.
+
+- 작업 전 `AGENTS.md`와 `docs/ai/` 문서(`PROJECT_BRIEF`, `RULES`, `WORKFLOW`, `TASKS` 등)를 먼저 읽는다.
+- TASK는 **하나씩만** 처리한다. 여러 개를 동시에 벌이지 않는다. 첫 세션은 구조 파악/문서 정리만.
+- 테스트(`pnpm test` / `pnpm dev` 실행 + 화면·출력 확인) **없이 "완료"라고 말하지 않는다**. 증거(스크린샷·로그·테스트 출력)를 남긴다.
+- 민감정보(`.env.local`, API 키·토큰·쿠키, 네이버 계정/블로그 자격증명, 고객·매장 정보)를 **읽거나 출력하지 않는다**. 보이면 즉시 마스킹한다.
+- 기존 기능·모듈·API 라우트를 **삭제하지 않는다**. 위 "현재 모듈 상태 경계"를 침범하지 않는다.
+- UI 작업이면 `docs/ai/UIUX_RULES.md`·`DESIGN_AUDIT.md`·`UI_TASKS.md`를 읽고 **한 화면씩** 수정·검수한다.
+- 작업 후 `docs/ai/TASKS.md`, `ERROR_LOG.md`, `DECISIONS.md`(+ UI면 `DESIGN_AUDIT.md`)를 갱신하고 결과를 보고한다.
+- 워크스페이스 최상위 공통 규칙: **`C:\project\_AGENCY_OS\MASTER_RULES.md`** (프로젝트 문서와 충돌 시 이 문서가 우선).
