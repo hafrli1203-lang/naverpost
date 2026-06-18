@@ -298,6 +298,27 @@ export function pickDetailCategory(text: string): DetailCategory {
   return "general";
 }
 
+// 서빙되는 디테일 실사진에 맞춘 사실 캡션. detail 씬은 실사진을 그대로 서빙하고
+// 텍스트 프롬프트는 생성에 쓰지 않으므로, LLM이 만든 엉뚱한 묘사(예: "진열대")가
+// 서빙 사진(예: 코받침 매크로)과 충돌하던 것을 이 캡션으로 일치시킨다.
+// 실사진이 소진돼 재생성이 폴백 생성할 때도 주제에 맞는 컷이 나오게 generation-ready로 둔다.
+const DETAIL_SCENE_PROMPTS: Record<DetailCategory, string> = {
+  "nose-pad":
+    "Realistic close-up macro photo of the nose pads and bridge of a pair of modern eyeglasses resting on a clean light-grey surface, true-to-life color, sharp focus, NOT film, NOT vintage, no text, no letters, no logos --ar 4:3",
+  lens: "Realistic close-up photo of a clear modern eyeglass lens showing its surface and coating reflection detail, eyewear with correct undistorted geometry, true-to-life color, sharp focus, NOT film, NOT vintage, no text, no letters, no logos --ar 4:3",
+  frame:
+    "Realistic close-up photo of an eyeglass frame detail showing the temple, hinge and rim of a pair of modern glasses on a clean light-grey surface, correct undistorted geometry, true-to-life color, sharp focus, NOT film, NOT vintage, no text, no letters, no logos --ar 4:3",
+  contacts:
+    "Realistic close-up photo of a soft contact lens on a fingertip next to a clean lens case, true-to-life color, sharp focus, NOT film, NOT vintage, no text, no letters, no logos --ar 4:3",
+  general:
+    "Realistic clean close-up photo of a pair of modern eyeglasses on a light-grey surface, correct undistorted geometry, true-to-life color, sharp focus, NOT film, NOT vintage, no text, no letters, no logos --ar 4:3",
+};
+
+/** 서빙되는 디테일 카테고리에 맞는 사실 캡션(텍스트↔참조 일치용). */
+export function detailScenePrompt(category: DetailCategory): string {
+  return DETAIL_SCENE_PROMPTS[category];
+}
+
 async function listImagesInDir(dir: string): Promise<string[]> {
   try {
     const entries = await fs.readdir(dir, { withFileTypes: true });

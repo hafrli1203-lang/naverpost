@@ -31,6 +31,13 @@
 
 ## 완료 (Done)
 
+- ✅ **품질 라운드 3: 키워드 3중복 붕괴(A) + detail 씬 텍스트↔참조(B)** (2026-06-18, 라이브 검증됨)
+  - **(A) 키워드 붕괴 수정**: `keywords/route.ts`에 `deriveDistinctSubKeywords()` 추가 → `subKeyword1: main, subKeyword2: main` 폴백 2곳(`buildRealQuerySeedOptions` 1292·`buildFallbackKeywordOptions` 1332) 교체. 같은 head 큐레이션 → 같은 head 실검색어(지역어 제외) → 카테고리 큐레이션 순으로 distinct 실제 2단어만 채움(날조 없음).
+    - **라이브검증(검색광고+생성 전체)**: lenses/eye-info 재생성 → 6/16에 3중복이던 변색렌즈 도수×3·근시 증상×3·눈부심 원인×3·노안 검사×3가 전부 distinct로 정상화, **3중복 0/10 (양 카테고리)**. 본문에도 침투: "변색렌즈 자외선 노출이 많은 한낮", "변색렌즈 실내 사용도" 식으로 그물망 작동(missingKw=[]).
+  - **(B) detail 씬 충돌 수정**: `shopRefs.ts`에 `detailScenePrompt(category)` + `image/prompts/route.ts`가 detail 실사진 서빙 시 저장 프롬프트를 서빙 카테고리 캡션으로 교체. LLM "진열대" 묘사 ↔ 코받침 매크로 충돌 해소, 재생성 폴백도 주제 일치. regenerate는 `pickDetailCategory`가 새 캡션과 self-consistent.
+    - **검증**: vitest 3종(캡션 generation-ready / pickDetailCategory round-trip / 불일치 회귀가드) 추가 → 24/24 통과. 라이브에선 현재 LLM이 detail 씬을 거의 안 만들어(이번 2글 모두 0개) end-to-end 트리거 불가 → 결정론 핵심을 단위테스트로 잠금.
+  - **6항목 라이브 점검 결과**: ① 제목 자연 문장 ✅ ② 키워드 3중복 0 ✅ ③ 본문 취지적합·2129자·상담톤 ✅ ④ 이미지 실사 자연 ✅(cut_0/1 AI, cut_9 실매장) ⑤ 손가락 뭉개짐 없음 ✅(본 3장) ⑥ 매장사진=실제 매장·중복가드 ✅. citation: ⑤지시로 본문에 "대한안경사협회" 귀속되나 수치 없어 citations[] 빈값(설계대로).
+  - 게이트 전부 통과: type-check 0 / eslint(변경파일) 0 / vitest 24/24.
 - ✅ **키워드 밀도 마진 advisory 표면화** (2026-06-17)
   - `ArticlePreview.tsx`: `validation.morphology.repeatedBodyMorphemes` 중 8회+~20회 미만 형태소를 "반복 많은 형태소(참고)" 블록으로 표시. 하드게이트 아님(오탐 없음) — 20회+ 자동보정 전 단계 신호를 운영자에게 가시화해 8~19회 사각지대 해소.
   - 검증: type-check 0에러 / eslint 0. (UI 렌더는 dev 서버 필요 — 데이터는 needsHardRevision이 쓰는 동일 필드라 존재 확인됨.)

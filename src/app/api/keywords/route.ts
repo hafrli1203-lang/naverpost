@@ -1253,6 +1253,57 @@ function splitCompactDemandKeyword(
   return [head, core];
 }
 
+// 실볼륨 단일 검색어를 시드로 쓸 때 sub1=sub2=main으로 3중복되어 키워드 그물망이
+// 1개로 붕괴하는 것을 막는다(고볼륨 키워드일수록 손해가 컸다). 날조를 피하려고
+// (1) 같은 head 큐레이션 조합, (2) 같은 head 실검색어(지역어 제외), (3) 카테고리 큐레이션
+// 세트 순으로 distinct한 실제 2단어 조합만 채운다. 끝까지 못 채우면 graceful하게 main 유지.
+function deriveDistinctSubKeywords(
+  main: string,
+  categoryId: string,
+  demandSignals: SearchVolumeSignal[]
+): [string, string] {
+  const head = main.trim().split(/\s+/)[0] ?? main;
+  const seen = new Set<string>([main.replace(/\s+/g, "")]);
+  const candidates: string[] = [];
+  const push = (kw: string | undefined): void => {
+    if (!kw) return;
+    const norm = kw.replace(/\s+/g, "");
+    if (!norm || seen.has(norm) || candidates.length >= 2) return;
+    seen.add(norm);
+    candidates.push(kw);
+  };
+
+  const sets = FALLBACK_KEYWORD_SETS[categoryId] ?? [];
+  // 1) 같은 head를 가진 큐레이션 조합 (검증된 안전·동일 소재)
+  for (const set of sets) {
+    if (set.main.startsWith(`${head} `)) {
+      push(set.sub1);
+      push(set.sub2);
+    }
+  }
+  // 2) 같은 head 실검색어 (실제 수요·지역어/비관련 제외)
+  if (candidates.length < 2) {
+    for (const signal of demandSignals) {
+      const parts = signal.keyword.trim().split(/\s+/);
+      if (parts.length < 2 || parts[0] !== head) continue;
+      const combo = `${head} ${parts.slice(1).join("")}`;
+      if (startsWithRegionWord(combo)) continue;
+      if (!isDemandKeywordRelevantForCategory(categoryId, signal.keyword)) continue;
+      push(combo);
+      if (candidates.length >= 2) break;
+    }
+  }
+  // 3) 그래도 부족하면 카테고리 큐레이션 세트 아무 항목으로 보충 (실제 키워드)
+  if (candidates.length < 2) {
+    for (const set of sets) {
+      push(set.main);
+      if (candidates.length >= 2) break;
+    }
+  }
+
+  return [candidates[0] ?? main, candidates[1] ?? main];
+}
+
 // 검색광고 연관 키워드(실제 사람들이 치는 검색어 + 실측 볼륨)를 후보 시드로 역주입한다.
 // 생성형 롱테일은 그럴듯해도 아무도 안 치는 조합이 많다. 실검색어를 시드 최앞단에 두면
 // LLM 확장이 실제 수요가 있는 소재에 앵커링된다.
@@ -1289,7 +1340,8 @@ function buildRealQuerySeedOptions(
       if (!inferred) return null;
       const main = `${inferred[0]} ${inferred[1]}`;
       if (startsWithRegionWord(main)) return null;
-      return { title: "", mainKeyword: main, subKeyword1: main, subKeyword2: main };
+      const [sub1, sub2] = deriveDistinctSubKeywords(main, categoryId, demandSignals);
+      return { title: "", mainKeyword: main, subKeyword1: sub1, subKeyword2: sub2 };
     })
     .filter((option): option is KeywordOption => Boolean(option));
 }
@@ -1326,11 +1378,16 @@ function buildFallbackKeywordOptions(params: {
       if (!inferred) return null;
       const [head, core] = inferred;
       const main = `${head} ${core}`;
+      const [sub1, sub2] = deriveDistinctSubKeywords(
+        main,
+        params.categoryId,
+        params.demandSignals
+      );
       return {
         title: "",
         mainKeyword: main,
-        subKeyword1: main,
-        subKeyword2: main,
+        subKeyword1: sub1,
+        subKeyword2: sub2,
       };
     })
     .filter((option): option is KeywordOption => Boolean(option));

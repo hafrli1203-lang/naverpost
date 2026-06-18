@@ -7,6 +7,7 @@ import {
   listScenePhotos,
   listDetailRefPhotos,
   pickDetailCategory,
+  detailScenePrompt,
   type SceneTag,
 } from "@/lib/data/shopRefs";
 
@@ -79,7 +80,10 @@ export async function POST(request: NextRequest) {
         const sharedFresh = sharedPool.find((x) => !usedPhotos.has(x));
         if (sharedFresh) {
           usedPhotos.add(sharedFresh);
-          prompts.push({ ...p, rawPhoto: sharedFresh });
+          // 실사진을 그대로 서빙하므로 저장 프롬프트를 서빙 카테고리에 맞는 사실 캡션으로
+          // 교체한다. LLM이 만든 엉뚱한 묘사("진열대")가 서빙 사진(코받침 매크로)과 충돌하던
+          // 것을 없애고, 재생성 폴백 생성 때도 주제에 맞는 컷이 나오게 한다.
+          prompts.push({ ...p, prompt: detailScenePrompt(category), rawPhoto: sharedFresh });
           continue;
         }
       }
