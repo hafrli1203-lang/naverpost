@@ -31,6 +31,12 @@
 
 ## 완료 (Done)
 
+- ✅ **detail 씬 누락 회귀 수정 — 프롬프트 화해** (2026-06-18, 라이브 검증됨, 사용자 승인)
+  - **진단**: `imagePrompt.ts`가 [SCENE:detail]을 "안경테 진열 적당한 거리"로만 정의하고 부품 초접사(코받침·힌지)를 "사람 콧등 만지는 컷으로 대체"하라고 막음(line 197·216). 그런데 코드+`detail-refs/`(README)는 [SCENE:detail]을 **실제 부품 매크로 사진 서빙**으로 만들어 둠 → 프롬프트가 실사진 경로를 죽여, 큐레이션 실사진 24장(frame 17·nose-pad 2·general 5)이 버려지고 코받침 글이 AI 대체컷만 받음(라이브 detail 0개 관측).
+  - **수정**: `imagePrompt.ts` line 197·216 — 부품 디테일(코받침/렌즈/테 소재)이 주제면 [SCENE:detail] 쓰도록 허용(실사진 서빙이라 왜곡 없음 명시), AI 생성 매크로 금지는 태그 없는 컷에만 적용으로 분리. 이미지 프롬프트는 캐시 없음(매번 생성) → 버전업 불필요.
+  - **라이브검증**: 코받침 글 프롬프트 재생성 → [SCENE:detail] #8 생성됨, rawPhoto=nose-pad 실사진 서빙(realPhoto=true), 캡션이 Fix B 캡션과 일치, 생성 이미지=깔끔한 실제 코받침 클로즈업(왜곡 0).
+  - **환경 메모**: claude CLI spawn이 node 프로세스 누적(naverpost 1.2GB + naverkey + 세션) 시 `3221225794`(0xC0000142 DLL init)로 즉시 실패 → dev 서버 재시작으로 해소. 코드 무관.
+  - 후속 후보: lens·contacts 디테일 풀 0장(general로 폴백). 풀 보강 시 주제 일치도↑.
 - ✅ **품질 라운드 3: 키워드 3중복 붕괴(A) + detail 씬 텍스트↔참조(B)** (2026-06-18, 라이브 검증됨)
   - **(A) 키워드 붕괴 수정**: `keywords/route.ts`에 `deriveDistinctSubKeywords()` 추가 → `subKeyword1: main, subKeyword2: main` 폴백 2곳(`buildRealQuerySeedOptions` 1292·`buildFallbackKeywordOptions` 1332) 교체. 같은 head 큐레이션 → 같은 head 실검색어(지역어 제외) → 카테고리 큐레이션 순으로 distinct 실제 2단어만 채움(날조 없음).
     - **라이브검증(검색광고+생성 전체)**: lenses/eye-info 재생성 → 6/16에 3중복이던 변색렌즈 도수×3·근시 증상×3·눈부심 원인×3·노안 검사×3가 전부 distinct로 정상화, **3중복 0/10 (양 카테고리)**. 본문에도 침투: "변색렌즈 자외선 노출이 많은 한낮", "변색렌즈 실내 사용도" 식으로 그물망 작동(missingKw=[]).
