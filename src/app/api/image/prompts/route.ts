@@ -82,7 +82,13 @@ export async function POST(request: NextRequest) {
       // 주제 풀이 비면 무관한 general 공통컷으로 때우거나 AI로 왜곡 생성하지 않고 이 컷을 드롭한다
       // (사용자 결정: 실제 매칭 사진만, 가짜/무관 사진 금지).
       if (p.scene === "detail") {
-        const category = pickDetailCategory(`${p.prompt} ${mainKeyword} ${title}`);
+        // detail 컷은 "글 주제"의 부품을 보여줘야 하므로 카테고리를 원고 주제(mainKeyword+title)로
+        // 먼저 정한다. LLM 프롬프트 문구를 우선하면 렌즈 글인데 "브릿지" 한 단어로 nose-pad가
+        // 잡히는 오분류가 난다(실측). 원고 주제가 일반적일 때만 프롬프트 문구로 보완한다.
+        let category = pickDetailCategory(`${mainKeyword} ${title}`);
+        if (category === "general") {
+          category = pickDetailCategory(`${p.prompt} ${mainKeyword} ${title}`);
+        }
         const sharedPool =
           category === "general"
             ? await listDetailRefPhotos("general")
