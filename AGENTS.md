@@ -33,3 +33,18 @@
 - **P0/P1은 반드시 수정** 후 재검수. 테스트 통과 전 "완료"라고 하지 않는다.
 - **Codex 외부 리뷰(GitHub PR)**: `docs/ai/CODE_REVIEW.md` + `_AGENCY_OS/CODEX_REVIEW.md` 참조(Claude 내부 자동 실행 아님).
 - 공통 리뷰 기준: `_AGENCY_OS/CODE_REVIEW_STANDARD.md`(6대 항목 + P0~P3).
+
+
+<!-- ===== 하네스 레이어 연결 (2026-06-18 추가) ===== -->
+
+## 하네스(검문소) 규칙
+
+자세한 기준: `docs/ai/HARNESS.md`, `QUALITY_GATES.md`, `METRICS.md`, `TRIGGERS.md` + `C:\project\_AGENCY_OS\HARNESS_STANDARD.md`.
+
+- 모든 작업은 `HARNESS.md`와 `QUALITY_GATES.md`를 확인해야 한다.
+- 완료 전 반드시 **BeforeComplete 하네스**를 통과해야 한다(P0/P1 FAIL = 완료 불가).
+- 하네스 실패 시 "완료"라고 하지 말고 수정 루프(Loop Pattern)를 진행한다.
+- 숫자로 증명할 수 없는 판단은 **"판단 필요"**로 표시하고 사용자 승인을 요청한다.
+- 테스트를 실행하지 못했으면 **"미검증"**으로 표시한다.
+- 하네스 결과는 `docs/ai/HARNESS_RESULTS.md`에 기록한다.
+- 검수 subagent: `harness-reviewer`(게이트 판정), `metrics-auditor`(숫자 측정), `ux-harness-reviewer`(UI), `test-runner`/`code-reviewer`. 모두 읽기/안전실행만.

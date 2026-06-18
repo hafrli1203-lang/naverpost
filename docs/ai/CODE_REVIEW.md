@@ -33,3 +33,16 @@ Please review this PR for security regressions, broken data flow, report generat
 ## 안전
 - 리뷰/실행 중 `.env`/키/토큰/쿠키/고객·광고계정 정보 미열람·미출력.
 - 기존 기능 삭제 금지. 검수자(subagent)는 코드 수정 금지 — 수정은 메인 작업자(Claude)가 한다.
+
+
+---
+
+## 하네스 연계 (2026-06-18 추가)
+
+Codex 외부 리뷰와 내부 검수는 **하네스 게이트**(`docs/ai/QUALITY_GATES.md` + `_AGENCY_OS/HARNESS_STANDARD.md`)를 함께 본다.
+- BeforePR: 내부 `code-reviewer` + `harness-reviewer` 통과(P0/P1 0) 후 PR.
+- Codex PR 리뷰 요청 문구(하네스 포함):
+```
+@codex review
+Please review this PR for security regressions, broken data flow, report generation errors, missing tests, UI/UX regressions, accidental deletion of existing features, and violations of AGENTS.md / docs/ai/HARNESS.md / docs/ai/CODE_REVIEW.md.
+```

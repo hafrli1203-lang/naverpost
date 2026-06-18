@@ -331,3 +331,15 @@ npx -y @smithery/cli@latest install @isnow890/naver-search-mcp --client claude
 - UI 작업이면 `docs/ai/UIUX_RULES.md`·`DESIGN_AUDIT.md`·`UI_TASKS.md`를 읽고 **한 화면씩** 수정·검수한다.
 - 작업 후 `docs/ai/TASKS.md`, `ERROR_LOG.md`, `DECISIONS.md`(+ UI면 `DESIGN_AUDIT.md`)를 갱신하고 결과를 보고한다.
 - 워크스페이스 최상위 공통 규칙: **`C:\project\_AGENCY_OS\MASTER_RULES.md`** (프로젝트 문서와 충돌 시 이 문서가 우선).
+
+
+<!-- ===== 하네스 레이어 연결 (2026-06-18 추가) ===== -->
+
+## 하네스 작업 지침
+
+- 작업 전 `docs/ai/HARNESS.md`, `QUALITY_GATES.md`, `METRICS.md`, `TRIGGERS.md`를 읽어라.
+- TASK 하나를 처리한 뒤 `harness-reviewer`와 `metrics-auditor` subagent로 검수해라.
+- UI 작업이면 `ux-harness-reviewer`도 사용해라.
+- P0/P1 실패는 반드시 수정해라(수정 루프).
+- 하네스 통과 전 "완료"라고 하지 마라. 측정 못 한 항목은 "미검증", 숫자로 못 가르는 판단은 "판단 필요"로 표시.
+- 결과는 `docs/ai/HARNESS_RESULTS.md`에 기록. PR 직전엔 `docs/ai/CODE_REVIEW.md` 기준 내부 리뷰 후 Codex 준비.
