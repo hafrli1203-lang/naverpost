@@ -6,6 +6,8 @@
     "dev": "next dev -p 3100",
     "build": "next build",
     "type-check": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "start": "next start -p 3100",
     "lint": "eslint",
     "build:icon": "node scripts/build-icon.cjs",
@@ -48,6 +50,7 @@
     "png-to-ico": "^3.0.1",
     "sharp": "^0.34.5",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.9"
   }
 }
