@@ -118,9 +118,13 @@ export function CRankAudit({
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm flex items-center gap-2">
-          <Gauge className="w-4 h-4 text-indigo-500" />
-          <span className="flex-1">C-Rank 사전 점검</span>
+        <CardTitle className="text-sm flex flex-wrap items-center gap-2">
+          <Gauge aria-hidden className="w-4 h-4 text-indigo-500" />
+          <span>C-Rank 사전 점검</span>
+          <span className="rounded-full border border-slate-300 bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium text-slate-600 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300">
+            로컬 점검 · 무비용
+          </span>
+          <span className="flex-1" />
           <button
             onClick={runAudit}
             disabled={isLoading}

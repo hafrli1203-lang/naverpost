@@ -213,3 +213,24 @@
 - 미검증/제외: 전체 워크플로우 통한 실제 export 화면 스크린샷(도달엔 AI 본문 생성 필요 → 비용 회피, 컴파일+API+정적검수로 대체). coverage % 표시는 사용자 지시로 backlog.
 - 안전/제외: CRankAudit·SeoSignalChecklist(미생성)·app/page·ArticlePreview·API route·postingAudit(.ts/.types)·contentFormatter 무수정. package/lock 0, 패키지설치 0. `.claude/settings.local.json`·OPERATING_STANDARD·WIKI_INDEX·COMMANDS·백업·`_verify/` 무수정. 커밋/push 0(승인 대기).
 - 검수자: 메인 직접(type-check/test/dev curl + 핸들러 diff grep) + ux-harness-reviewer(UI 정적).
+
+### 2026-06-20 S3-a — UX 위험 경고 강화(표시 전용) (feature/naverpost-ux-safety-warnings)
+- Change-Fingerprint: efca6ab82d78c431
+- Gate Result: **PASS** (type-check + test + dev + UI 하네스 통과, P0/P1 = 0)
+- 프로파일: UI(표시 전용 배지/문구). Trigger: BeforeComplete. 사용자 S3-a 승인(표시 전용, 핸들러·fetch·workflow 무변경). 브랜치: PR #3 tip a6dd5bf에서 stacked 분기.
+- 범위(허용 파일만): `KeywordOptions.tsx`·`ArticlePreview.tsx`·`ImagePreview.tsx`(각 "AI 호출 · 비용 발생 가능" 그룹 안내 1개), `CRankAudit.tsx`("로컬 점검 · 무비용" 배지), `FinalConfirm.tsx`("자동 발행 없음" 배지), `docs/ai/HARNESS_RESULTS.md`(기록). **app/page.tsx 무변경**(고위험 회피, child로 해결).
+- UI/UX 게이트:
+  - 기존 라우팅/기능 영향 0 | P0 | 핸들러/onClick/fetch/state/workflow **추가·삭제 라인 0**(diff grep 확인), page.tsx 무변경 | PASS
+  - 금지 표현 0 | P0 | "무료/자동 발행 완료/네이버 발행 완료/상위노출 보장/공식 점수/최적화 완료" 미사용(로컬엔 "무비용"만) | PASS
+  - 색상 단독 의존 금지 | P2 | 배지 모두 텍스트 병기, 아이콘 aria-hidden(Gauge/Copy) | PASS
+  - 반응형 | P1 | flex-wrap + w-full sm:w-auto로 좁은 화면 줄바꿈 안전 | PASS
+  - 다크모드 | P1 | amber/slate에 dark: 변형, teal은 카드 톤 유지 | PASS
+- 검증:
+  - type-check `pnpm type-check` exit 0 | PASS
+  - test `pnpm test` 5 files / **34 passed / 0 fail / 0 skip**(표시 전용, 신규 단위테스트 없음) | PASS
+  - dev :3100 `/` 200(컴파일 OK, AI 버튼 미클릭) | PASS
+  - 외부/AI 호출 0: CRankAudit/FinalConfirm은 로컬 `/api/analysis`만(+ FinalConfirm 기존 이미지 blob 다운로드 fetch는 내 변경 아님·무수정) | PASS
+  - UI 하네스: ux-harness-reviewer **PASS(P0/P1 없음, P2 2건=개선 제안)** | PASS
+- 미검증/제외: 전체 워크플로우 통한 실제 화면 스크린샷(각 단계 도달엔 AI 생성 필요 → 비용 회피, 컴파일+정적검수로 대체). app/page.tsx의 초기 생성 트리거 버튼 배지는 미적용(page.tsx 고위험 회피 → S3-a 후속 또는 S3-b 판단).
+- 안전/제외: page.tsx·API route·핸들러·fetch·workflow·package/lock 무변경. AI CLI 0·외부 API write 0·네이버 실발행 0·commit/push 0. `.claude/settings.local.json`·OPERATING_STANDARD·WIKI_INDEX·COMMANDS·백업·`_verify/` 무수정.
+- 검수자: 메인 직접(type-check/test/dev/diff grep) + ux-harness-reviewer(UI 정적).

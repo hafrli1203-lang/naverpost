@@ -905,7 +905,10 @@ export function KeywordOptions({
       </RadioGroup>
 
       <div className="sticky bottom-0 z-10 -mx-4 border-t bg-background/95 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/85 sm:mx-0 sm:rounded-t-lg sm:border sm:shadow-lg">
-        <div className="mx-auto flex max-w-3xl items-center justify-end gap-3">
+        <div className="mx-auto flex max-w-3xl flex-wrap items-center justify-end gap-3">
+          <p className="w-full text-[11px] leading-4 text-amber-700 dark:text-amber-300 sm:mr-auto sm:w-auto">
+            <span className="font-medium">AI 호출 · 비용 발생 가능</span> — 생성·수정 시 구독 AI를 호출합니다.
+          </p>
           <Button variant="outline" onClick={onRegenerate} disabled={isLoading} className="gap-2">
             {isLoading ? (
               <Loader2 className="h-4 w-4 animate-spin" />
