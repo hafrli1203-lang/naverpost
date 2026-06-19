@@ -282,9 +282,12 @@ export function FinalConfirm({ state, onStartOver }: FinalConfirmProps) {
 
       <Card className="border-teal-200 bg-teal-50/60">
         <CardHeader className="pb-3">
-          <CardTitle className="flex items-center gap-2 text-base text-teal-900">
-            <Copy className="h-4 w-4 text-teal-600" />
-            네이버에 올리기 (복사 → 붙여넣기)
+          <CardTitle className="flex flex-wrap items-center gap-2 text-base text-teal-900">
+            <Copy aria-hidden className="h-4 w-4 text-teal-600" />
+            <span>네이버에 올리기 (복사 → 붙여넣기)</span>
+            <span className="rounded-full border border-teal-300 bg-white px-2 py-0.5 text-[11px] font-medium text-teal-800">
+              자동 발행 없음
+            </span>
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">

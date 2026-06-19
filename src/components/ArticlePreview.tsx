@@ -541,7 +541,10 @@ export function ArticlePreview({
       <Separator />
 
       {/* Action buttons */}
-      <div className="flex flex-wrap gap-3 justify-end">
+      <div className="flex flex-wrap items-center gap-3 justify-end">
+        <p className="w-full text-[11px] leading-4 text-amber-700 dark:text-amber-300 sm:mr-auto sm:w-auto">
+          <span className="font-medium">AI 호출 · 비용 발생 가능</span> — 워싱·재작성은 구독 AI를 호출합니다.
+        </p>
         {onSave && (
           <Button
             variant="outline"

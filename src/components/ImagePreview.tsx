@@ -280,6 +280,9 @@ export function ImagePreview({
       <div className="text-center space-y-1">
         <h2 className="text-xl font-semibold">이미지 생성</h2>
         <p className="text-sm text-muted-foreground">블로그에 사용될 이미지를 확인하세요</p>
+        <p className="text-[11px] leading-4 text-amber-700 dark:text-amber-300">
+          <span className="font-medium">AI 호출 · 비용 발생 가능</span> — 이미지 생성·재생성 시 구독 AI를 호출합니다.
+        </p>
       </div>
 
       {/* 원고 소스 선택 */}
