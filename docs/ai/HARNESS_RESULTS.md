@@ -174,3 +174,20 @@
 - 미검증/제외: 전체 워크플로우 통과 후의 실제 화면 스크린샷(ArticlePreview 도달엔 AI 본문 생성 필요 → 비용 회피로 미트리거. 컴파일+API데이터+정적 UI검수로 대체). S2-b(FinalConfirm/export 연결) 미진행.
 - 안전: FinalConfirm/export·app/page·API route·postingAudit·keywordRules/morphologyAnalyzer/repetitionCheck·contentFormatter 무수정. package/lock 0, 패키지설치 0, AI CLI 0, 외부 API write 0, 네이버 실발행 0, commit/push 0. `.claude/settings.local.json`·OPERATING_STANDARD·COMMANDS·백업·`_verify/` 무수정.
 - 검수자: 메인 직접(type-check/test/dev curl) + ux-harness-reviewer(UI 정적).
+
+### 2026-06-19 타입 정리 — PostingAuditResult 공유 타입 추출 (feature/naverpost-functional-upgrade)
+- Change-Fingerprint: aac14c06379eba7d
+- Gate Result: **PASS** (type-check + test 통과, 중복 정의 단일화, P0/P1 = 0)
+- 프로파일: 코드(리팩토링 — 타입 단일화만). Trigger: BeforeComplete. 런타임/UI/API 무변경.
+- 범위(허용 파일만): 신규 `src/lib/analysis/postingAudit.types.ts`(PostingAuditResult 정의 이동), 수정 `src/lib/analysis/postingAudit.ts`(import type + 하위호환 재노출), `src/components/CRankAudit.tsx`(로컬 중복 타입 제거 → 공유 타입 import), `docs/ai/HARNESS_RESULTS.md`(기록).
+- 구현: `PostingAuditResult` 인터페이스를 순수 타입 모듈로 이동(import 0 → 순환참조 없음). postingAudit.ts는 `import type` + `export type { PostingAuditResult } from "./postingAudit.types"`로 기존 import 경로 보존. CRankAudit는 `import type { PostingAuditResult } from "@/lib/analysis/postingAudit.types"`.
+- 게이트 결과:
+  - 타입/컴파일 에러 0 | P0 | `pnpm type-check` exit 0(필드 동일 → 차이 없음) | PASS
+  - 테스트 성공 | P1 | `pnpm test` 5 files / **34 passed / 0 fail / 0 skip**(기대값 무변경) | PASS
+  - 중복 정의 제거 | P0 | `grep "interface/type PostingAuditResult ="` → 정의 **1곳(postingAudit.types.ts)만** | PASS
+  - 순환참조 0 | P0 | 타입파일 import 0 | PASS
+  - 런타임/API/UI 변경 0 | P0 | interface/import type은 컴파일 시 소거, route·렌더 무변경 | PASS
+  - 패키지/lockfile 변경 0 | P1 | 무변경 | PASS
+  - 외부 API/AI CLI/네이버 실발행 0 | P0 | 타입 전용 | PASS
+- 안전/제외: FinalConfirm/export·app/page·API route·posting-audit 응답구조·auditPosting 런타임·CRankAudit 렌더 무변경. `.claude/settings.local.json`·OPERATING_STANDARD·COMMANDS·WIKI_INDEX(내 작업 아님)·백업·`_verify/` 무수정.
+- 검수자: 메인 직접(type-check/test exit code + 중복정의 grep). 커밋/push 0(승인 대기).

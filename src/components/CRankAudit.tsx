@@ -6,35 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { CheckCircle, AlertTriangle, Loader2, Gauge, RefreshCw } from "lucide-react";
 
-type PostingAuditResult = {
-  status: "ok" | "review";
-  charCount: number;
-  imageCount: number;
-  commaCount: number;
-  queryIntentFocus: {
-    titleMorphemes: string[];
-    activatedInBody: string[];
-    missingInBody: string[];
-    coverageRatio: number;
-    // Phase 2 가법적 검수 신호(비차단, 참고용). 미제공 시 undefined → 표시 생략.
-    mainKeywordInIntro?: boolean;
-    mainKeywordInSubheading?: boolean;
-  };
-  // Phase 2: 보조 키워드 본문 단순 포함 여부(참고용). 없으면 섹션 숨김.
-  subKeywordCoverage?: Array<{ keyword: string; present: boolean }>;
-  topRepeatedMorphemes: Array<{ token: string; count: number }>;
-  uniqueBodyMorphemeCount: number;
-  overusedWords: Array<{ word: string; count: number }>;
-  languageFlags: {
-    profanity: string[];
-    abuse: string[];
-    adult: string[];
-    commercial: string[];
-    emphasis: string[];
-    advertising: string[];
-  };
-  warnings: string[];
-};
+import type { PostingAuditResult } from "@/lib/analysis/postingAudit.types";
 
 interface CRankAuditProps {
   title: string;
