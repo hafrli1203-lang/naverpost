@@ -191,3 +191,25 @@
   - 외부 API/AI CLI/네이버 실발행 0 | P0 | 타입 전용 | PASS
 - 안전/제외: FinalConfirm/export·app/page·API route·posting-audit 응답구조·auditPosting 런타임·CRankAudit 렌더 무변경. `.claude/settings.local.json`·OPERATING_STANDARD·COMMANDS·WIKI_INDEX(내 작업 아님)·백업·`_verify/` 무수정.
 - 검수자: 메인 직접(type-check/test exit code + 중복정의 grep). 커밋/push 0(승인 대기).
+
+### 2026-06-19 S2-b — FinalConfirm export 직전 SEO 검수 신호 노출 (A-min, feature/naverpost-functional-upgrade)
+- Change-Fingerprint: dbb2b9d04ccff337
+- Gate Result: **PASS** (type-check + test + dev 데이터흐름 + UI 하네스 모두 통과, P0/P1 = 0)
+- 프로파일: UI(표시 추가만). Trigger: BeforeComplete. 사용자 A-min 승인(FinalConfirm 단일 파일, 공유 컴포넌트 추출·CRankAudit 수정 안 함).
+- 범위(허용 파일만): `src/components/FinalConfirm.tsx`(posting-audit 읽기전용 호출 + "발행 전 SEO 검수 신호" 소카드 + SeoSignalRow 헬퍼), `docs/ai/HARNESS_RESULTS.md`(기록).
+- 구현: FinalConfirm에서 `POST /api/analysis`(mode posting-audit, 순수 로컬·무비용) 읽기전용 호출 → shared `PostingAuditResult` 타입으로 수신 → 3신호(본문 초반/소제목 메인키워드·보조키워드 반영) 컴팩트 체크리스트. 로딩/실패 시 audit=null로 섹션만 숨김(export 미차단). 위치=‘발행 전 점검 리포트’ 카드 아래·‘요약 정보’ 위.
+- UI/UX 게이트:
+  - 기존 export 흐름 회귀 0 | P0 | 복사(handleCopyBody)·이미지저장(handleDownloadAllImages)·미리보기·붙여넣기 안내·처음부터다시 핸들러 **무변경**(diff grep로 추가/삭제 0 확인) | PASS
+  - audit 실패가 export 미차단 | P0 | seoSignals 빈 배열/실패 시 섹션 숨김, 복사·저장 정상 | PASS
+  - 상태 색상 단독 의존 금지 | P2 | SeoSignalRow 아이콘(aria-hidden)+"통과/확인필요" 텍스트+설명 병기 | PASS
+  - 금지 표현 0 | P0 | "보장/공식점수/상위노출확정/최적화완료/키워드 더 넣기" 미사용. "검색 노출을 보장하지 않는다"는 부정 안전문구(허용) | PASS
+  - 다크모드/반응형 | P1 | 기존 카드 패턴·색 토큰 재사용, max-w-3xl 내 자연 배치 | PASS
+- 검증:
+  - type-check: `pnpm type-check` exit 0 | PASS
+  - test: `pnpm test` 5 files / **34 passed / 0 fail / 0 skip**(FinalConfirm은 컴포넌트, 신규 단위테스트 없음) | PASS
+  - dev/데이터: 기존 :3100 `/` 200 + posting-audit(FinalConfirm 동일 호출)이 Phase2 필드 반환(intro/subheading=true·subCov present×2) | PASS
+  - UI 하네스: ux-harness-reviewer 정적 검수 **PASS(P0/P1 없음)** | PASS
+  - 비용/외부/실발행: posting-audit·export 순수 로컬, AI CLI 0·외부 API write 0·네이버 실발행 0 | PASS
+- 미검증/제외: 전체 워크플로우 통한 실제 export 화면 스크린샷(도달엔 AI 본문 생성 필요 → 비용 회피, 컴파일+API+정적검수로 대체). coverage % 표시는 사용자 지시로 backlog.
+- 안전/제외: CRankAudit·SeoSignalChecklist(미생성)·app/page·ArticlePreview·API route·postingAudit(.ts/.types)·contentFormatter 무수정. package/lock 0, 패키지설치 0. `.claude/settings.local.json`·OPERATING_STANDARD·WIKI_INDEX·COMMANDS·백업·`_verify/` 무수정. 커밋/push 0(승인 대기).
+- 검수자: 메인 직접(type-check/test/dev curl + 핸들러 diff grep) + ux-harness-reviewer(UI 정적).
