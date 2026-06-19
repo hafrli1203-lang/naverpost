@@ -14,6 +14,7 @@
 
 import { analyzeMorphology } from "@/lib/validation/morphologyAnalyzer";
 import { findOverusedWords } from "@/lib/validation/repetitionCheck";
+import { titleContainsMainKeyword } from "@/lib/validation/keywordRules";
 import {
   findProfanityWords,
   findAbuseWords,
@@ -22,40 +23,41 @@ import {
   findEmphasisWords,
   findAdvertisingWords,
 } from "@/lib/validation/blaiLanguageRules";
+import type { PostingAuditResult } from "./postingAudit.types";
 
-export interface PostingAuditResult {
-  status: "ok" | "review";
-  charCount: number;
-  imageCount: number;
-  commaCount: number;
-  /** 질의 의도 집중: 제목 형태소가 본문에 얼마나 깔렸는가 */
-  queryIntentFocus: {
-    titleMorphemes: string[];
-    activatedInBody: string[];
-    missingInBody: string[];
-    /** 0~1, 제목 형태소 중 본문 활성화 비율 */
-    coverageRatio: number;
-  };
-  /** 본문 반복 상위 형태소(비중) */
-  topRepeatedMorphemes: Array<{ token: string; count: number }>;
-  uniqueBodyMorphemeCount: number;
-  /** 20회 이상 과다 반복 단어(스팸 위험) */
-  overusedWords: Array<{ word: string; count: number }>;
-  languageFlags: {
-    profanity: string[];
-    abuse: string[];
-    adult: string[];
-    commercial: string[];
-    emphasis: string[];
-    advertising: string[];
-  };
-  warnings: string[];
-}
+// 하위 호환: 기존 `import { PostingAuditResult } from "@/lib/analysis/postingAudit"` 경로 보존.
+export type { PostingAuditResult } from "./postingAudit.types";
 
 function countMarkdownImages(body: string): number {
   const md = (body.match(/!\[[^\]]*\]\([^)]*\)/g) ?? []).length;
   const placeholder = (body.match(/\(이미지[^)]*\)|\[이미지[^\]]*\]/g) ?? []).length;
   return md + placeholder;
+}
+
+/** 본문 초반으로 간주하는 글자 수 창(검수 신호 기준). 테스트에서 고정한다. */
+const INTRO_WINDOW = 200;
+
+/**
+ * 소제목으로 간주하는 라인 텍스트만 추출한다.
+ *  - 마크다운 ATX 헤딩(#, ##, ###)
+ *  - 한 줄 전체가 굵게 처리된 라인(**소제목**) — 흔한 소제목 표기
+ * 평문 본문이면 빈 배열 → 메인 키워드 소제목 배치는 false가 된다.
+ */
+function extractSubheadingTexts(body: string): string[] {
+  const texts: string[] = [];
+  for (const rawLine of body.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    const heading = line.match(/^#{1,3}\s+(.*\S)\s*$/);
+    if (heading) {
+      texts.push(heading[1]);
+      continue;
+    }
+    const bold = line.match(/^\*\*(.+?)\*\*$/);
+    if (bold) {
+      texts.push(bold[1]);
+    }
+  }
+  return texts;
 }
 
 export function auditPosting(params: {
@@ -77,6 +79,21 @@ export function auditPosting(params: {
   const missingInBody = morphology.missingTitleMorphemesInBody;
   const coverageRatio =
     titleMorphemes.length > 0 ? activatedInBody.length / titleMorphemes.length : 1;
+
+  // Phase 2 검수 신호(가법적, 비차단): 메인 키워드 배치 + 보조 키워드 충족도.
+  const mainKeyword = (params.mainKeyword ?? "").trim();
+  const introText = body.replace(/\r/g, "").trimStart().slice(0, INTRO_WINDOW);
+  const subheadingTexts = extractSubheadingTexts(body);
+  const mainKeywordInIntro = mainKeyword
+    ? titleContainsMainKeyword(introText, mainKeyword)
+    : undefined;
+  const mainKeywordInSubheading = mainKeyword
+    ? subheadingTexts.some((text) => titleContainsMainKeyword(text, mainKeyword))
+    : undefined;
+  const subKeywordCoverage = [params.subKeyword1, params.subKeyword2]
+    .map((k) => (k ?? "").trim())
+    .filter(Boolean)
+    .map((keyword) => ({ keyword, present: body.includes(keyword) }));
 
   const overusedWords = findOverusedWords(body);
 
@@ -158,7 +175,10 @@ export function auditPosting(params: {
       activatedInBody,
       missingInBody,
       coverageRatio,
+      mainKeywordInIntro,
+      mainKeywordInSubheading,
     },
+    subKeywordCoverage,
     topRepeatedMorphemes: topRepeated,
     uniqueBodyMorphemeCount: morphology.uniqueBodyMorphemeCount,
     overusedWords,

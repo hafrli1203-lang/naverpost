@@ -35,3 +35,34 @@ C:/project/naverpost/docs/ai/TASKS.md
 - [ ] P2-F2. detail photo pool 없을 때 detail prompt drop 문제 (이미지 프롬프트 누락 처리)
 - [ ] P2-F3. ArticlePreview citations stale 문제 (본문 변경 후 인용 갱신)
 - [x] P2-F4. export test / vitest 인프라 도입 (2026-06-19 완료: package.json test+vitest devDep, pnpm-lock, export 테스트 2 passed). clean PR FULL PASS.
+
+## Codex 리뷰 후속(P2/P3) — 2026-06-20 (PR #3)
+> PR #3(feature/naverpost-functional-upgrade, SEO 검수 신호 업그레이드)의 Codex 앱 리뷰 결과. **P0/P1 = 0(merge 차단 없음)**. 아래는 후속 backlog로만 분리. 실제 수정은 항목별 승인 후.
+
+### P2 — FinalConfirm fail-open 테스트 도입
+- [ ] 배경: FinalConfirm에서 posting-audit 실패 시 export/copy 흐름이 막히지 않는 계약을 테스트로 고정 필요.
+  - 현재 상태: 구현상 `seoAudit` 실패는 copy/download 핸들러에 연결되지 않아 **구조적으로 fail-open**이나, 컴포넌트 테스트 인프라 부재로 자동 테스트 미고정.
+  - 선택지 A: `@testing-library/react` + `jsdom`/`happy-dom` 도입 후 컴포넌트 테스트(→ package.json/lockfile 변경).
+  - 선택지 B: FinalConfirm의 audit signal 조립 로직(seoAudit→seoSignals, 실패→null)을 순수 함수로 추출 후 무패키지 단위 테스트(→ FinalConfirm 소량 리팩터, 런타임 불변).
+  - 우선순위: ready 전환 전 검토 권장. **별도 TASK로 분리**(패키지 또는 리팩터 필요).
+
+### P2 — PR #3 remote CI 부재 명시
+- [ ] 배경: PR #3 head(`97be2cd`)에 원격 GitHub check/status 없음. 현재 검증 근거는 local type-check/test/HARNESS.
+  - 처리 방향: ready 전환 전 PR 본문에 "remote CI 없음 / local harness 검증 근거" 명시 판단.
+  - 주의: PR 본문 수정 = GitHub write → **별도 승인 필요**.
+
+### P3 — SignalRow/SeoSignalRow 공유 컴포넌트 추출
+- [ ] 배경: CRankAudit·FinalConfirm에 유사 SEO 신호 표시 로직(SignalRow/SeoSignalRow) 중복.
+  - 처리 방향: 3번째 소비자 발생 또는 문구 정책 변경 시 shared presentational component 추출. 우선순위 낮음.
+
+### P3 — subKeywordCoverage 한국어 변형 허용 matcher
+- [ ] 배경: `subKeywordCoverage`가 `body.includes` 기반이라 조사·띄어쓰기 변형에 false-negative 가능.
+  - 처리 방향: `titleContainsMainKeyword`식 완화 matcher 또는 형태소 기반 present 판정으로 개선. 비차단 참고 신호라 우선순위 낮음.
+
+### P3 — GitHub Actions 원격 CI 도입
+- [ ] 배경: 외부 리뷰 관점에서 원격 검증 증거 없음.
+  - 처리 방향: type-check/test를 GitHub Actions로 자동화. workflow 파일·권한·원격 실행 환경 필요 → **별도 TASK**.
+
+### P3 — CRankAudit/FinalConfirm 컴포넌트 테스트
+- [ ] 배경: UI 회귀 안전망 부족.
+  - 처리 방향: 컴포넌트 테스트 인프라(위 P2 선택지 A) 도입 후 단계적 보강. 우선순위 낮음.

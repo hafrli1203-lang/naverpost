@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
+  AlertTriangle,
   Check,
   CheckCircle,
   ChevronDown,
@@ -9,6 +10,7 @@ import {
   Copy,
   Download,
   FileText,
+  Gauge,
   Key,
   RotateCcw,
   Store,
@@ -24,11 +26,41 @@ import {
   formatForNaver,
   formatForNaverExport,
 } from "@/lib/naver/contentFormatter";
+import type { PostingAuditResult } from "@/lib/analysis/postingAudit.types";
+import { buildSeoSignals } from "./finalConfirmSignals";
 import { WorkflowState } from "@/types";
 
 interface FinalConfirmProps {
   state: WorkflowState;
   onStartOver: () => void;
+}
+
+// 발행 전 SEO 검수 신호 한 줄. 색상만으로 상태를 구분하지 않도록
+// 아이콘(aria-hidden) + "통과/확인필요" 텍스트 + 설명을 함께 제공한다.
+function SeoSignalRow({
+  status,
+  label,
+  detail,
+}: {
+  status: "pass" | "check";
+  label: string;
+  detail: string;
+}) {
+  const isPass = status === "pass";
+  const Icon = isPass ? CheckCircle : AlertTriangle;
+  const tone = isPass ? "text-green-600" : "text-orange-600";
+  const statusText = isPass ? "통과" : "확인필요";
+  return (
+    <li className="flex items-start gap-2">
+      <Icon aria-hidden className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${tone}`} />
+      <span className="text-[12px] leading-5">
+        <span className={`font-medium ${tone}`}>
+          {label} · {statusText}
+        </span>
+        <span className="block text-muted-foreground">{detail}</span>
+      </span>
+    </li>
+  );
 }
 
 function buildFinalReport(state: WorkflowState) {
@@ -130,6 +162,45 @@ export function FinalConfirm({ state, onStartOver }: FinalConfirmProps) {
   }, [article, successImages]);
 
   const finalReport = useMemo(() => buildFinalReport(state), [state]);
+
+  // 발행 전 SEO 검수 신호(읽기 전용). posting-audit는 순수 로컬 분석이라
+  // AI/외부 API/네이버 write를 유발하지 않는다. 로딩/실패는 export를 막지 않고
+  // 섹션만 조용히 숨긴다(audit=null).
+  const [seoAudit, setSeoAudit] = useState<PostingAuditResult | null>(null);
+  useEffect(() => {
+    if (!article?.title?.trim() || !article?.content?.trim()) {
+      setSeoAudit(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/analysis", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            mode: "posting-audit",
+            title: article.title,
+            body: article.content,
+            mainKeyword: selectedKeyword?.mainKeyword,
+            subKeyword1: selectedKeyword?.subKeyword1,
+            subKeyword2: selectedKeyword?.subKeyword2,
+          }),
+        });
+        const json = await res.json();
+        if (!cancelled) {
+          setSeoAudit(res.ok && json.success ? (json.data as PostingAuditResult) : null);
+        }
+      } catch {
+        if (!cancelled) setSeoAudit(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [article?.title, article?.content, selectedKeyword?.mainKeyword, selectedKeyword?.subKeyword1, selectedKeyword?.subKeyword2]);
+
+  const seoSignals = useMemo(() => buildSeoSignals(seoAudit), [seoAudit]);
 
   // 네이버 스마트에디터에 서식이 살아서 붙도록 리치(text/html) + 평문 폴백을 함께 복사한다.
   // 이미지는 src 상대경로가 깨지므로 [사진 N 자리] 마커로 위치만 표시한다.
@@ -317,6 +388,35 @@ export function FinalConfirm({ state, onStartOver }: FinalConfirmProps) {
                 ))}
               </div>
             </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {seoSignals.length > 0 && (
+        <Card className="border-slate-200">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Gauge className="h-4 w-4 text-indigo-500" />
+              발행 전 SEO 검수 신호
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-xs leading-5 text-muted-foreground">
+              검색 노출을 보장하지 않는 참고용 점검이에요.
+            </p>
+            <ul className="space-y-1.5">
+              {seoSignals.map((signal) => (
+                <SeoSignalRow
+                  key={signal.label}
+                  status={signal.status}
+                  label={signal.label}
+                  detail={signal.detail}
+                />
+              ))}
+            </ul>
+            <p className="text-[11px] leading-5 text-muted-foreground">
+              검색 노출을 보장하지 않으며, 글 흐름을 해치면서까지 키워드를 넣지 마세요.
+            </p>
           </CardContent>
         </Card>
       )}

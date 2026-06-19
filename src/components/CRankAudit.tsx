@@ -6,30 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { CheckCircle, AlertTriangle, Loader2, Gauge, RefreshCw } from "lucide-react";
 
-type PostingAuditResult = {
-  status: "ok" | "review";
-  charCount: number;
-  imageCount: number;
-  commaCount: number;
-  queryIntentFocus: {
-    titleMorphemes: string[];
-    activatedInBody: string[];
-    missingInBody: string[];
-    coverageRatio: number;
-  };
-  topRepeatedMorphemes: Array<{ token: string; count: number }>;
-  uniqueBodyMorphemeCount: number;
-  overusedWords: Array<{ word: string; count: number }>;
-  languageFlags: {
-    profanity: string[];
-    abuse: string[];
-    adult: string[];
-    commercial: string[];
-    emphasis: string[];
-    advertising: string[];
-  };
-  warnings: string[];
-};
+import type { PostingAuditResult } from "@/lib/analysis/postingAudit.types";
 
 interface CRankAuditProps {
   title: string;
@@ -49,6 +26,34 @@ function coverageTone(ratio: number): { label: string; className: string } {
   if (ratio >= 0.8) return { label: "좋음", className: "text-green-600" };
   if (ratio >= 0.6) return { label: "보통", className: "text-yellow-600" };
   return { label: "낮음", className: "text-orange-600" };
+}
+
+// 발행 전 SEO 검수 신호 한 줄. 색상만으로 상태를 구분하지 않도록
+// 아이콘(aria-hidden) + "통과/확인필요" 텍스트 + 설명을 함께 제공한다.
+function SignalRow({
+  status,
+  label,
+  detail,
+}: {
+  status: "pass" | "check";
+  label: string;
+  detail: string;
+}) {
+  const isPass = status === "pass";
+  const Icon = isPass ? CheckCircle : AlertTriangle;
+  const tone = isPass ? "text-green-600" : "text-orange-600";
+  const statusText = isPass ? "통과" : "확인필요";
+  return (
+    <li className="flex items-start gap-2">
+      <Icon aria-hidden className={`w-3.5 h-3.5 mt-0.5 shrink-0 ${tone}`} />
+      <span className="text-[11px] leading-4">
+        <span className={`font-medium ${tone}`}>
+          {label} · {statusText}
+        </span>
+        <span className="block text-muted-foreground">{detail}</span>
+      </span>
+    </li>
+  );
 }
 
 export function CRankAudit({
@@ -175,6 +180,57 @@ export function CRankAudit({
                 </p>
               )}
             </div>
+
+            {/* 발행 전 SEO 검수 신호 (참고용 체크리스트) */}
+            {(audit.queryIntentFocus.mainKeywordInIntro !== undefined ||
+              audit.queryIntentFocus.mainKeywordInSubheading !== undefined ||
+              (audit.subKeywordCoverage?.length ?? 0) > 0) && (
+              <>
+                <Separator />
+                <div className="space-y-1.5">
+                  <p className="text-[11px] font-medium text-slate-600">발행 전 SEO 검수 신호</p>
+                  <p className="text-[11px] leading-4 text-muted-foreground">
+                    검색 노출을 보장하지 않는 참고용 점검이에요.
+                  </p>
+                  <ul className="space-y-1">
+                    {audit.queryIntentFocus.mainKeywordInIntro !== undefined && (
+                      <SignalRow
+                        status={audit.queryIntentFocus.mainKeywordInIntro ? "pass" : "check"}
+                        label="본문 초반 메인키워드"
+                        detail={
+                          audit.queryIntentFocus.mainKeywordInIntro
+                            ? "본문 초반에 메인키워드가 자연스럽게 포함되어 있어요."
+                            : "첫 문단에서 메인키워드를 자연스럽게 한 번 언급할 수 있는지 확인해보세요."
+                        }
+                      />
+                    )}
+                    {audit.queryIntentFocus.mainKeywordInSubheading !== undefined && (
+                      <SignalRow
+                        status={audit.queryIntentFocus.mainKeywordInSubheading ? "pass" : "check"}
+                        label="소제목 메인키워드"
+                        detail={
+                          audit.queryIntentFocus.mainKeywordInSubheading
+                            ? "소제목에 메인키워드가 들어가 있어요."
+                            : "소제목 한 곳에 메인키워드를 자연스럽게 넣을 수 있는지 확인해보세요."
+                        }
+                      />
+                    )}
+                    {audit.subKeywordCoverage && audit.subKeywordCoverage.length > 0 && (
+                      <SignalRow
+                        status={audit.subKeywordCoverage.every((s) => s.present) ? "pass" : "check"}
+                        label="보조 키워드 반영"
+                        detail={`보조 키워드 ${audit.subKeywordCoverage.length}개 중 ${
+                          audit.subKeywordCoverage.filter((s) => s.present).length
+                        }개가 본문에 반영되어 있어요.`}
+                      />
+                    )}
+                  </ul>
+                  <p className="text-[10px] leading-4 text-muted-foreground">
+                    검색 노출을 보장하지 않으며, 글 흐름을 해치면서까지 키워드를 넣지 마세요.
+                  </p>
+                </div>
+              </>
+            )}
 
             {/* 형태소 다양성 / 반복 */}
             {audit.topRepeatedMorphemes.length > 0 && (
