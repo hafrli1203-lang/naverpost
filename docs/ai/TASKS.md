@@ -34,4 +34,4 @@ C:/project/naverpost/docs/ai/TASKS.md
 - [ ] P2-F1. keyword cache version bump 필요 가능성 점검 (캐시 무효화/버전 키)
 - [ ] P2-F2. detail photo pool 없을 때 detail prompt drop 문제 (이미지 프롬프트 누락 처리)
 - [ ] P2-F3. ArticlePreview citations stale 문제 (본문 변경 후 인용 갱신)
-- [ ] P2-F4. export test / vitest 인프라 도입 (package.json test 스크립트 + vitest devDep) — clean PR 범위 밖, 별도 승인 TASK.
+- [x] P2-F4. export test / vitest 인프라 도입 (2026-06-19 완료: package.json test+vitest devDep, pnpm-lock, export 테스트 2 passed). clean PR FULL PASS.

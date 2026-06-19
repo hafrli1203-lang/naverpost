@@ -86,3 +86,11 @@ Focus: security regressions, missing tests, data-flow, external/AI-CLI cost-call
 - **P1(혼합 PR)**: PR #1이 기존 기능 커밋 + 운영체계 커밋 혼합 → "no source change"가 PR diff 기준 부정확. **clean 브랜치(`chore/naverpost-agency-ai-os-clean`)로 분리** 대응. PR #1은 merge 안 함(superseded, draft 유지).
 - **WIKI analysis route 수정**: `analysis`를 단일 "로컬"에서 mode별(posting-audit=로컬 / smart-block·autocomplete-index=외부 네이버 호출·credentials 필요)로 정정.
 - **기능 이슈 → P2 backlog 분리(이번 PR 미수정)**: keyword cache version bump / detail photo pool 없을 때 detail prompt drop / ArticlePreview citations stale. (TASKS.md P2-F1~F3)
+
+---
+
+## PR #2 2차 리뷰 요청 (2026-06-19, P2-F4 반영)
+- 변경: test 인프라 추가(package.json test/vitest devDep, pnpm-lock.yaml, export 테스트). 기능 소스 로직 0.
+- clean PR 기준 **FULL PASS**: type-check src 0 + pnpm test 2 passed. 자동검증 레벨2가 type-check+test 모두 실행(PARTIAL→FULL).
+- PR #2에 추가 commit push 후 **@codex review 2차 요청**(test infra/lockfile/package regression 포커스).
+- merge/deploy/main push 금지 유지.

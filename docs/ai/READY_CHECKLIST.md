@@ -35,3 +35,7 @@ echo '{}' | bash .claude/hooks/harness-stop-check.sh        # exit 0 = pass
 - 완료 직전 자동검증: ✅ `.claude/hooks/validate-stop-check.sh` (감지경로 소스 변경 시 type-check+test, 실패 시 block)
 - PASS 경로 검증: ✅ ~12s, exit 0 · BLOCK 경로 검증: ✅ 실패 테스트 주입→block→제거 확인
 - build: 자동검증 제외(수동) · docs-only 변경: 자동검증 skip
+
+## P2-F4 test 인프라 반영 (2026-06-19) — FULL PASS
+- test 스크립트/vitest devDep 추가(clean PR). `pnpm test` 2 passed, `pnpm run type-check` src 0.
+- 자동검증 레벨2: 이제 type-check + test **둘 다 실행**(이전 'test 미검증' 해소).

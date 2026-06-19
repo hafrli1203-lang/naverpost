@@ -90,3 +90,15 @@
 - Stop hook: fingerprint 훅 + validate 훅 통과(감지경로 소스 변경 0 / type-check PASS).
 - 종합 판정: PARTIAL (type-check PASS, test 미검증). P0/P1 = 0.
 - 검수자: 메인 직접(type-check) + Codex(외부, clean PR).
+
+### 2026-06-19 P2-F4 test 인프라 도입 — clean PR FULL PASS (naverpost)
+- Change-Fingerprint: 9db032f8d64bae89
+- Gate Result: PASS
+- 범위: package.json(test/test:watch 스크립트 + vitest devDep), pnpm-lock.yaml(vitest 트리), src/lib/naver/contentFormatter.export.test.ts(export 테스트). **기능 소스 로직 변경 0**(src/app·components·lib/ai·api 미변경). agency-os-setup에서 경로단위로 가져와 일관성 보장(package.json diff = test/vitest만, frozen-lockfile 검증 통과).
+- type-check: `pnpm run type-check` src 에러 0 (PASS)
+- test: `pnpm test` (vitest run) **1 file / 2 passed** (export: rich HTML + 평문 폴백, 외부 호출 0) (PASS)
+- 자동검증 레벨2: validate-stop-check.sh가 이제 type-check + test **둘 다 실행** → PASS (이전 PARTIAL=type-check중심 해소)
+- Stop hook: fingerprint 미기록 시 BLOCK 확인 → 본 지문 기록으로 통과.
+- 외부 API/AI CLI 비용 호출 0, 네이버 실발행 0, lockfile frozen 일관.
+- 종합 판정: **FULL PASS** (type-check PASS + test PASS, P0/P1 = 0)
+- 검수자: 메인 직접(pnpm test/type-check) + Codex(2차 리뷰 요청 예정).

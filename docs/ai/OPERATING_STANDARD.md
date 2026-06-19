@@ -49,3 +49,7 @@
 - **LEVEL 3**: 외부 리뷰 준비(EXTERNAL_REVIEW.md + PR/@codex 문구) — 준비됨.
 - **LEVEL 4**: 외부 리뷰 실제 실행 — 보류(commit/push·AI CLI 호출 1회 승인 필요).
 - 자동검증은 외부 API/AI CLI/네트워크 호출 없음(type-check·vitest 오프라인). 측정 소요: type-check ~7.5s + test ~6.4s(합 ~12s, 완료 시 1회).
+
+## 8. 자동검증 레벨2 FULL (2026-06-19, P2-F4)
+- test 인프라 도입(package.json test + vitest devDep + lockfile)으로 validate-stop-check.sh가 type-check + test 모두 실행 → 레벨2 **FULL**(이전 type-check 중심 PARTIAL 해소).
+- 여전히 build는 자동검증 제외(수동), naverpost 전용(전체 미확장).
