@@ -27,6 +27,7 @@ import {
   formatForNaverExport,
 } from "@/lib/naver/contentFormatter";
 import type { PostingAuditResult } from "@/lib/analysis/postingAudit.types";
+import { buildSeoSignals } from "./finalConfirmSignals";
 import { WorkflowState } from "@/types";
 
 interface FinalConfirmProps {
@@ -199,40 +200,7 @@ export function FinalConfirm({ state, onStartOver }: FinalConfirmProps) {
     };
   }, [article?.title, article?.content, selectedKeyword?.mainKeyword, selectedKeyword?.subKeyword1, selectedKeyword?.subKeyword2]);
 
-  const seoSignals = useMemo(() => {
-    if (!seoAudit) return [];
-    const rows: Array<{ status: "pass" | "check"; label: string; detail: string }> = [];
-    const intro = seoAudit.queryIntentFocus.mainKeywordInIntro;
-    if (intro !== undefined) {
-      rows.push({
-        status: intro ? "pass" : "check",
-        label: "본문 초반 메인키워드",
-        detail: intro
-          ? "본문 초반에 메인키워드가 자연스럽게 포함되어 있어요."
-          : "첫 문단에서 메인키워드를 자연스럽게 한 번 언급할 수 있는지 확인해보세요.",
-      });
-    }
-    const sub = seoAudit.queryIntentFocus.mainKeywordInSubheading;
-    if (sub !== undefined) {
-      rows.push({
-        status: sub ? "pass" : "check",
-        label: "소제목 메인키워드",
-        detail: sub
-          ? "소제목에 메인키워드가 반영되어 있어요."
-          : "소제목 중 한 곳에 메인키워드를 자연스럽게 반영할 수 있는지 확인해보세요.",
-      });
-    }
-    const coverage = seoAudit.subKeywordCoverage;
-    if (coverage && coverage.length > 0) {
-      const present = coverage.filter((item) => item.present).length;
-      rows.push({
-        status: present === coverage.length ? "pass" : "check",
-        label: "보조 키워드 반영",
-        detail: `보조 키워드 ${coverage.length}개 중 ${present}개가 본문에 반영되어 있어요.`,
-      });
-    }
-    return rows;
-  }, [seoAudit]);
+  const seoSignals = useMemo(() => buildSeoSignals(seoAudit), [seoAudit]);
 
   // 네이버 스마트에디터에 서식이 살아서 붙도록 리치(text/html) + 평문 폴백을 함께 복사한다.
   // 이미지는 src 상대경로가 깨지므로 [사진 N 자리] 마커로 위치만 표시한다.

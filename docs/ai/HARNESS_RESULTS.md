@@ -213,3 +213,22 @@
 - 미검증/제외: 전체 워크플로우 통한 실제 export 화면 스크린샷(도달엔 AI 본문 생성 필요 → 비용 회피, 컴파일+API+정적검수로 대체). coverage % 표시는 사용자 지시로 backlog.
 - 안전/제외: CRankAudit·SeoSignalChecklist(미생성)·app/page·ArticlePreview·API route·postingAudit(.ts/.types)·contentFormatter 무수정. package/lock 0, 패키지설치 0. `.claude/settings.local.json`·OPERATING_STANDARD·WIKI_INDEX·COMMANDS·백업·`_verify/` 무수정. 커밋/push 0(승인 대기).
 - 검수자: 메인 직접(type-check/test/dev curl + 핸들러 diff grep) + ux-harness-reviewer(UI 정적).
+
+### 2026-06-20 P2 B안 — FinalConfirm fail-open 순수 함수 테스트 (feature/naverpost-functional-upgrade)
+- Change-Fingerprint: 706720083517fb79
+- Gate Result: **PASS** (type-check + test 통과, fail-open 데이터 계약 고정, P0/P1 = 0)
+- 프로파일: 코드(순수 함수 추출 + 단위 테스트, 무패키지). Trigger: BeforeComplete. 사용자 B안 승인. Codex 리뷰 P2① 대응.
+- 범위(허용 파일만): 신규 `src/components/finalConfirmSignals.ts`(buildSeoSignals 추출), `src/components/FinalConfirm.tsx`(useMemo 본문→`buildSeoSignals(seoAudit)` 호출 치환 + import), 신규 `src/components/finalConfirmSignals.test.ts`(5케이스), `docs/ai/HARNESS_RESULTS.md`(기록).
+- 구현: `seoSignals` useMemo 본문(audit→신호배열, null→[])을 모듈 레벨 순수 함수 `buildSeoSignals(audit: PostingAuditResult|null): SeoSignalRow[]`로 추출. FinalConfirm은 `useMemo(() => buildSeoSignals(seoAudit), [seoAudit])`로 호출만. **런타임 동작·렌더·문구 불변**(동일 입력→동일 출력). FinalConfirm diff = +2/-34(import 1 + 치환 1, 본문 이동).
+- 고정한 fail-open 계약: `buildSeoSignals(null) === []` — posting-audit 실패/미수신 시 신호 없음 → SEO 카드 숨김 → copy/download 핸들러는 seoAudit 미참조(구조적 독립)라 export 미차단.
+- 게이트 결과:
+  - 타입/컴파일 에러 0 | P0 | `pnpm type-check` exit 0 | PASS
+  - 테스트 성공 | P1 | `pnpm test` **6 files / 39 passed / 0 fail / 0 skip**(기존 34 + 신규 5) | PASS
+  - 기존 34 유지 | P0 | 전부 통과(회귀 0) | PASS
+  - FinalConfirm 핸들러/fetch/문구 변경 0 | P0 | diff grep로 handleCopyBody·handleDownloadAllImages·fetch·useEffect·문구 추가·삭제 0 | PASS
+  - 패키지/lockfile 0·설치 0 | P1 | 무변경(기존 vitest로 무패키지 실행) | PASS
+  - 외부 API/AI CLI/네이버 실발행 0 | P0 | 순수 함수 단위 테스트 | PASS
+- 테스트 케이스(5): null→[] / 전부 pass / intro false·subheading true·보조 일부(check·pass·check) / intro·subheading undefined→행 생략 / subKeywordCoverage undefined·[]→보조행 생략.
+- 미검증/제외(backlog): A안 컴포넌트 렌더 테스트(testing-library/jsdom 도입), copy/download 버튼 활성 상태 렌더 단언, fetch 실패→null effect 런타임 테스트. (B안은 데이터 계약 고정까지)
+- 안전/제외: CRankAudit·app/page·API route·posting-audit fetch/useEffect·copy/download/preview/export 핸들러·postingAudit(.ts/.types)·contentFormatter 무수정. S3-a 브랜치(fb34f29) 미접촉. `.claude/settings.local.json`·OPERATING_STANDARD·WIKI_INDEX·COMMANDS·백업·`_verify/` 무수정. 커밋/push 0(승인 대기).
+- 검수자: 메인 직접(type-check/test exit code + FinalConfirm diff grep).
