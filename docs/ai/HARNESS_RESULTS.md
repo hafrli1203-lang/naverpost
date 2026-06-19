@@ -102,3 +102,75 @@
 - 외부 API/AI CLI 비용 호출 0, 네이버 실발행 0, lockfile frozen 일관.
 - 종합 판정: **FULL PASS** (type-check PASS + test PASS, P0/P1 = 0)
 - 검수자: 메인 직접(pnpm test/type-check) + Codex(2차 리뷰 요청 예정).
+
+### 2026-06-19 S1 Phase 1 — SEO 검수 엔진 테스트 추가 (feature/naverpost-functional-upgrade)
+- Change-Fingerprint: 2fb03ed38f960927 (확정 — 지문은 감지경로 변경분=테스트 4파일로 산정. vitest.config.ts는 PATHS_RE 비매칭, docs/.claude는 제외라 동일값 유지)
+- Gate Result: **PASS** (type-check + test 모두 통과, P0/P1 = 0)
+- 프로파일: 코드(테스트 추가 + vitest alias config. src/lib 로직·UI·생성흐름 무변경). Trigger: BeforeComplete.
+- 범위: 테스트 4파일 신규(`src/lib/validation/repetitionCheck.test.ts`, `morphologyAnalyzer.test.ts`, `keywordRules.test.ts`, `src/lib/analysis/postingAudit.test.ts`) + `vitest.config.ts`(resolve.alias `@`→`./src`, 사용자 A안 승인). 기존 6개 순수함수의 현재 계약을 고정(희망동작 아님).
+- 게이트 결과:
+  - 타입/컴파일 에러 0 | P0 | `pnpm type-check`(tsc --noEmit) exit 0 | **PASS**
+  - 테스트 성공 | P1 | vitest **5 files / 26 passed / 0 fail / 0 skip** (신규 24 + 기존 export 2) | **PASS**
+  - 기존 핵심 기능 삭제 0 | P0 | 소스 로직 무변경(테스트 + alias config만) | PASS
+  - 민감정보 접근 0 | P0 | .env.local 미열람 | PASS
+  - 패키지/lockfile 변경 0 | P1 | package.json/pnpm-lock 무변경, 패키지 설치 0 | PASS
+  - 외부 API/AI CLI 비용 호출 0 | P0 | 순수함수 단위테스트(동기 휴리스틱)만 | PASS
+  - 네이버 실발행 0 | P0 | write 경로 무관 | PASS
+- 인프라 블로커 해소: 직전 FAIL은 vitest `@/` 별칭 부재로 `postingAudit.ts`/`morphologyAnalyzer.ts`의 `@/lib/...` import가 로드 실패한 것(단언 실패 아님). `vitest.config.ts` alias 1파일 추가로 해소 → 단언 실패 0(기대값이 현재 계약과 일치함을 입증).
+- 고정한 계약(주요): findOverusedWords 20회 임계·내림차순 / analyzeMorphology 표면토큰·STOPWORD·키워드 미활성 high이슈 / auditPosting coverage·쉼표·금지어·이미지0 항상경고 계약 / validateKeywordOption rule5 12~32 경계·rule9 쉼표·이모지·목록·rule8 금칙어·rule6 키워드소진 / titleContainsMainKeyword 조사허용·순서엄수 / titleSimilarity 동일1·무관<0.5.
+- 미검증/제외: Phase 2 휴리스틱 보강(미승인). competitorMorphology·keywordMesh·smartBlock 등 외부/AI 의존 모듈 테스트(별도 backlog).
+- 제외 파일: `.claude/settings.local.json`(이번 TASK 무관, 무수정), untracked 백업/`_verify/`(무수정).
+- 검수자: 메인 직접(pnpm type-check/test exit code). 커밋/push 0.
+
+### [2026-06-19] 명령어 레이어 적용 — 운영체계 이식(기능 코드 0)
+- 프로파일: 문서(명령어/디자인 운영 레이어). 코드 변경 0(docs/ai만 — Stop hook 감지경로 무변경).
+- 생성/갱신: COMMANDS.md(+DESIGN_REFERENCE/UI_TASKS 없으면 생성). 전역 `/agency-*` 명령 사용 가능.
+- 외부 API/AI 호출 0, package/lock/DB 변경 0, commit/push 0.
+- 종합: PASS(문서 이식). 실행 판정은 기존 상태 유지(`/agency-run-local`로 재점검 시 갱신).
+
+### 2026-06-19 S1 Phase 2 — auditPosting 가법적 검수 신호 추가 (feature/naverpost-functional-upgrade)
+- Change-Fingerprint: c2e0447e800392bd
+- Gate Result: **PASS** (type-check + test 모두 통과, P0/P1 = 0)
+- 프로파일: 코드(검수 데이터 산출 + 테스트만. UI/export/생성흐름 무변경). Trigger: BeforeComplete. 사용자 Phase 2 승인(데이터 산출+테스트까지, UI 노출 미승인).
+- 범위(허용 파일만): `src/lib/analysis/postingAudit.ts`(가법적 옵셔널 필드 + 헬퍼), `src/lib/analysis/postingAudit.test.ts`(테스트 +8), `docs/ai/HARNESS_RESULTS.md`(기록).
+- 추가 필드(전부 backward-compatible 옵셔널, 차단 아님·검수 신호만):
+  - `queryIntentFocus.mainKeywordInIntro?: boolean` — 본문 초반 첫 INTRO_WINDOW(200)자 내 메인키워드 등장(titleContainsMainKeyword 재사용, 조사 허용). mainKeyword 미제공 시 undefined.
+  - `queryIntentFocus.mainKeywordInSubheading?: boolean` — 마크다운 헤딩(#/##/###) 또는 굵은 단독 라인(**...**)에 메인키워드 등장. 평문이면 false. 미제공 시 undefined.
+  - `subKeywordCoverage?: {keyword,present}[]` — sub1/sub2 본문 단순 포함 여부(억지 삽입·자동수정 없음).
+- 시그니처/원본 로직: `auditPosting` 시그니처 불변, 기존 반환 필드 불변(추가만). keywordRules/morphologyAnalyzer/repetitionCheck 원본 무수정(titleContainsMainKeyword는 import 재사용). PostingAuditResult는 postingAudit.ts 정의만 갱신, CRankAudit 중복타입은 구조적 타이핑상 무영향(미수정).
+- 게이트 결과:
+  - 타입/컴파일 에러 0 | P0 | `pnpm type-check` exit 0(중복타입 불일치 없음) | **PASS**
+  - 테스트 성공 | P1 | vitest **5 files / 34 passed / 0 fail / 0 skip**(기존 26 + Phase 2 +8) | **PASS**
+  - 기존 26 테스트 유지 | P0 | 전부 통과(회귀 0) | PASS
+  - 기존 반환 구조 보존 | P0 | 옵셔널 필드만 추가(파괴 0) | PASS
+  - 패키지/lockfile 변경 0 / 패키지 설치 0 | P1 | 무변경 | PASS
+  - 외부 API/AI CLI 비용 호출 0 | P0 | 순수함수만 | PASS
+  - 네이버 실발행 0 | P0 | write 경로 무관 | PASS
+  - UI 수정 0 | P0 | app/CRankAudit/FinalConfirm/export 미변경 | PASS
+- 미검증/제외: UI 노출(미승인, Phase 2 범위 밖) · 본문 초반 N=200자는 검수 신호 기준값(공식 알고리즘 아님). C-Rank/D.I.A를 공식 알고리즘으로 단정하지 않음(검수 신호로만).
+- 주의(내 작업 아님): `docs/ai/OPERATING_STANDARD.md`(M)·`docs/ai/COMMANDS.md`(??)는 "명령어 레이어 적용"(위 블록)에서 생긴 변경으로 이번 Phase 2와 무관·무수정. `.claude/settings.local.json`·untracked 백업·`_verify/`도 무수정.
+- 검수자: 메인 직접(pnpm type-check/test exit code). 커밋/push 0.
+
+### 2026-06-19 S2 — CRankAudit에 Phase 2 SEO 검수 신호 최소 노출 (feature/naverpost-functional-upgrade)
+- Change-Fingerprint: a5909c9bb57c4dea
+- Gate Result: **PASS** (type-check + test + dev 렌더/데이터 흐름 + UI 하네스 모두 통과, P0/P1 = 0)
+- 프로파일: UI(컴포넌트 표시만). Trigger: BeforeComplete. 사용자 S2 승인(CRankAudit 최소 노출까지. FinalConfirm/export 연결=S2-b 분리, 미진행).
+- 범위(허용 파일만): `src/components/CRankAudit.tsx`(로컬 타입에 Phase2 옵셔널 필드 + "발행 전 SEO 검수 신호" 섹션 + SignalRow 헬퍼), `docs/ai/HARNESS_RESULTS.md`(기록). API/route/postingAudit/page 추가수정 0.
+- 표시 내용(체크리스트 3항목, 비차단·참고용):
+  - 본문 초반 메인키워드(mainKeywordInIntro) — 통과/확인필요
+  - 소제목 메인키워드(mainKeywordInSubheading) — 통과/확인필요
+  - 보조 키워드 반영(subKeywordCoverage) — N개 중 M개. 옵셔널 undefined/빈배열이면 섹션 숨김(기존 렌더 영향 0).
+- UI/UX 게이트:
+  - 기존 라우팅/기능 영향 0 | P0 | 기존 섹션·로딩/오류 상태 보존, 옵셔널이라 데이터 없으면 숨김 | PASS
+  - 상태 색상 단독 의존 금지 | P2 | 아이콘(aria-hidden)+"통과/확인필요" 텍스트+설명 병기 | PASS
+  - 금지 표현 0 | P0 | "검색노출 보장/공식 점수/상위노출 확정" 미사용, "키워드 더 넣기" 강요 없음. 하단에 "검색 노출 보장 안 함·흐름 해치며 키워드 넣지 말 것" 명시 | PASS
+  - 다크모드 대비 | P1 | 기존 토큰(text-green-600/orange-600/muted-foreground) 재사용 | PASS
+  - 반응형 | P1 | 기존 카드/리스트 패턴 유지(신규 컴포넌트 없음) | PASS
+- 검증:
+  - type-check: `pnpm type-check` exit 0 (중복 타입 불일치 없음) | PASS
+  - test: `pnpm test` 5 files / **34 passed / 0 fail / 0 skip**(S2는 컴포넌트라 신규 단위테스트 없음; 로직은 Phase2 테스트가 커버) | PASS
+  - dev 렌더/데이터: 기존 :3100 서버(현재 코드 재컴파일)에서 `/` 200 + `POST /api/analysis`(posting-audit, 순수 로컬·무비용)이 Phase2 필드 반환 확인(mainKeywordInIntro=true·mainKeywordInSubheading=true·subKeywordCoverage present×2) → CRankAudit가 소비하는 데이터 흐름 입증 | PASS
+  - UI 하네스: ux-harness-reviewer 정적 검수 **PASS(P0/P1 없음)** | PASS
+- 미검증/제외: 전체 워크플로우 통과 후의 실제 화면 스크린샷(ArticlePreview 도달엔 AI 본문 생성 필요 → 비용 회피로 미트리거. 컴파일+API데이터+정적 UI검수로 대체). S2-b(FinalConfirm/export 연결) 미진행.
+- 안전: FinalConfirm/export·app/page·API route·postingAudit·keywordRules/morphologyAnalyzer/repetitionCheck·contentFormatter 무수정. package/lock 0, 패키지설치 0, AI CLI 0, 외부 API write 0, 네이버 실발행 0, commit/push 0. `.claude/settings.local.json`·OPERATING_STANDARD·COMMANDS·백업·`_verify/` 무수정.
+- 검수자: 메인 직접(type-check/test/dev curl) + ux-harness-reviewer(UI 정적).
