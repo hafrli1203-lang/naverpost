@@ -426,3 +426,10 @@
 - 변경: networkDuplicateAnalyzer.test.ts 6건(analyzeNetworkDuplicateRisk 공개 API). 핵심 제품가치(자기잠식/과잉탈락 방지) 고정: 빈 히스토리 0위험 · 같은매장 메인조합 중복=high · 다른소재 미탐 · 조사무시(적응에=적응) 매칭 · 다른블로그 메인+서브 관점겹침 검출 · 제목패턴 토큰공유 검출. 순수(CLI 0).
 - 게이트: tsc 0 | P0 | PASS · test 142 | P1 | PASS · lint 0 | P2 | PASS.
 - 검수자: 메인 직접.
+
+### 2026-06-21 검색량 게이트 테스트 (검증 인프라)
+- Change-Fingerprint: volume-gate-tests
+- Gate Result: PASS — type-check 0 + test 148(+6) + lint 0.
+- 변경: volumeGate.test.ts 6건(normalizeKeywordKey + applyVolumeGate). searchAdEnabled가 env(NAVER_SEARCHAD_*)의존이라 테스트에서 설정/복원(afterEach)해 무비용 검증(fetch 0, 제공 signals만). 자격증명 없으면 graceful OFF(unknown+노트) · 충분수요+낮은포화=pass · 실측저수요=weak · **정확일치만(부분일치 신호상속 차단=환각키워드 weak)** · pass가 weak/unknown보다 상위 정렬. env 복원으로 스위트 오염 0 확인.
+- 게이트: tsc 0 | P0 | PASS · test 148 | P1 | PASS · lint 0 | P2 | PASS.
+- 검수자: 메인 직접.
