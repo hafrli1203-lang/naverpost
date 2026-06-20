@@ -94,3 +94,50 @@ Focus: security regressions, missing tests, data-flow, external/AI-CLI cost-call
 - clean PR 기준 **FULL PASS**: type-check src 0 + pnpm test 2 passed. 자동검증 레벨2가 type-check+test 모두 실행(PARTIAL→FULL).
 - PR #2에 추가 commit push 후 **@codex review 2차 요청**(test infra/lockfile/package regression 포커스).
 - merge/deploy/main push 금지 유지.
+
+---
+
+## 이미지 파이프라인 수정 리뷰 요청 준비 (2026-06-20)
+### 범위 (origin/master..HEAD, 2 commits, clean)
+- `1609d1a` fix: 1:1 강제(sharp 센터크롭) + 워싱 회전 제거 + 프롬프트 누수 필터 + 참조 충실도 + 진단옵션
+- `c40a79e` docs: AGENCY-OS COMMANDS.md + 포인터 (운영문서, 기능과 분리됨)
+- 진짜 diff: 14파일(+289/−33). 코드 6 + 신규필터/참조/테스트 4 + 문서 4. **로컬 master(e2c63c1)는 stale — origin/master=98084a3 기준.**
+
+### 내부 하네스 (PASS)
+- type-check src 0 · vitest 49 passed(8 files) · fp 4afa7fc12e939016(회전제거) / 0958173d72ae64c5(누적).
+- 라이브 1회 실측: /api/image/one 순수생성 → 1024x1024 정사각·회전없음 확인(AI 비용 1회 승인됨).
+
+### PR 본문 (draft 전용, 준비됨)
+```
+## What changed
+이미지 파이프라인 결함 수정: (1) 백엔드가 --size를 무시해 ~4:3 출력 → sharp로 1024x1024 센터크롭 강제,
+(2) 워싱 ±1.1° 미세 회전 제거(사진 기울어짐), (3) Claude가 흘리는 한국어 설명문이 gti에 새어 실패하던 것을
+hangulRatio 필터로 차단, (4) 참조 사진 첨부 시 설비 복제·증식 금지 지시, (5) gti --dry-run/--debug 진단 + 실패코드 노출.
+운영문서(COMMANDS.md)는 별도 커밋으로 분리.
+
+## Internal harness (passed)
+- type-check src 0 · vitest 49 passed (8 files) · 라이브 1회 1024x1024 1:1 확인.
+
+## Review focus
+- sharp cover-crop이 비정사각 입력에서 콘텐츠 손실/원본 폴백 경로 타당성
+- imageWash 회전 제거 시 .removeAlpha() 동반 삭제 → 투명 PNG 입력의 JPEG 배경 처리(워싱 경로는 매장 JPEG 전용이나 확인)
+- 보안 회귀(rawPhoto IDOR 허용목록), 데이터 흐름, 기존 export/생성 동작 삭제 위험, 테스트 누락
+- AI CLI 비용 호출 누락/중복, 네이버 발행 금지 정책 위반 여부
+
+## Constraints
+내부 사용 단계. naverpost AGENTS.md + docs/ai/CODE_REVIEW.md, P0~P3. merge/deploy 금지(draft only).
+
+@codex review
+Focus: sharp square-crop content loss & fallback, imageWash removeAlpha drop on transparent PNG→JPEG, rawPhoto IDOR allowlist, data-flow, export/generation regression, missing tests, AI-CLI cost-call risk, Naver live-publish policy. Standard: AGENTS.md + docs/ai/CODE_REVIEW.md. P0~P3.
+```
+
+### 실행 경로 (1회 명시 승인 필요)
+- **A안(draft PR)**: `git push origin feature/naverpost-image-fixes` → `gh pr create --draft --base master` → PR 댓글 @codex. merge 금지.
+- **B안(codex 로컬 diff)**: `codex`로 origin/master..HEAD diff 리뷰(푸시 없음, AI 비용).
+- **현재: 준비 완료·실행 보류(C안)**. 승인 시 즉시 실행.
+
+### Codex 리뷰 결과 (2026-06-20, B안 로컬 diff)
+실행: `codex exec review --base origin/master` (codex-cli 0.141.0). Build/type-check/test PASS 전제 확인. **P0/P1 없음.**
+- **[P2-1] 워싱(실사진) 경로도 1:1 크롭 필요** — `src/lib/storage/imageWash.ts:58-60`. gtiCli의 1:1 센터크롭은 *생성* 경로에만 적용됨. exterior/interior/detail에서 rawPhoto가 붙으면 one/regenerate가 `washImageBuffer`의 JPEG(원본 비율, width만 리사이즈)를 그대로 반환 → **실사진 슬롯은 ~4:3, 생성 슬롯은 1:1로 불일치**. 1:1 계약이면 워싱 경로도 동일 cover 정사각 크롭 적용.
+- **[P2-2] `gh pr *` 권한 과대** — `.claude/settings.local.json:172`. `Bash(gh pr *)`가 merge/close/edit/comment까지 무프롬프트 허용 → draft-only·승인 원칙과 충돌. 정확한 read/draft-create로 좁히거나 제거.
+판정/반영: 아래 HARNESS_RESULTS + 사용자 승인 흐름. merge/deploy 안 함.

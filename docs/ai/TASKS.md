@@ -66,3 +66,8 @@ C:/project/naverpost/docs/ai/TASKS.md
 ### P3 — CRankAudit/FinalConfirm 컴포넌트 테스트
 - [ ] 배경: UI 회귀 안전망 부족.
   - 처리 방향: 컴포넌트 테스트 인프라(위 P2 선택지 A) 도입 후 단계적 보강. 우선순위 낮음.
+
+### P2 — settings.local.json gh pr 권한 좁히기 (Codex 외부 리뷰 2026-06-20)
+- [ ] 배경: `.claude/settings.local.json`의 `Bash(gh pr *)`가 merge/close/edit/comment까지 무프롬프트 허용 → draft-only·승인 원칙과 충돌(Codex P2-2).
+  - 처리 방향: `gh pr create`·`gh pr view`·`gh pr list`만 허용으로 축소(merge/close 제거).
+  - 사용자 결정(2026-06-20): **현행 유지** — 당장 미수정. 안전 의식하되 권한 좁힘은 추후.
