@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import fs from "fs/promises";
 import path from "path";
 import { generateBlogImage } from "@/lib/ai/imageGen";
+import { appendReferenceAdherence } from "@/lib/prompts/imageRefPrompt";
+import { CliError } from "@/lib/ai/cli/spawnCli";
 import { saveImage } from "@/lib/storage/imageStore";
 import { washImageBuffer } from "@/lib/storage/imageWash";
 import {
@@ -78,7 +80,11 @@ export async function POST(request: NextRequest) {
     // 매장 밖/개념 이미지(scene=null)는 빈 배열 → 묘사 기반 생성.
     const refImages = scene && shopId ? await getSceneReferenceImages(shopId, scene) : [];
 
-    const result = await generateBlogImage(prompt, refImages);
+    // IMG-D: 참조 사진이 붙으면 "실제 환경 충실 재현 + 설비 복제 금지" 지시를 덧붙인다.
+    const result = await generateBlogImage(
+      appendReferenceAdherence(prompt, refImages.length),
+      refImages
+    );
     const saved = await saveImage(sessionId, index, result.base64Data, result.mimeType);
 
     return NextResponse.json({
@@ -94,6 +100,8 @@ export async function POST(request: NextRequest) {
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "이미지 생성 중 오류";
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
+    // IMG-G: 실패 원인(타임아웃/비정상종료/빈응답/미설치)을 구분해 노출한다.
+    const code = err instanceof CliError ? err.code : undefined;
+    return NextResponse.json({ success: false, error: message, code }, { status: 500 });
   }
 }

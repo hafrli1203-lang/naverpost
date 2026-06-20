@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateImagePrompts } from "@/lib/ai/claude";
 import { buildImagePrompts, parseScenePrompt } from "@/lib/prompts/imagePrompt";
+import { isLikelyImagePrompt } from "@/lib/prompts/imagePromptFilter";
 import { getShopById } from "@/lib/data/shops";
 import {
   getShopProfile,
@@ -12,6 +13,16 @@ import {
 
 export const runtime = "nodejs";
 export const maxDuration = 240;
+
+/**
+ * 아직 안 쓴 사진 중 하나를 무작위로 고른다(IMG-A).
+ * 기존 pool.find(첫 미사용)은 항상 알파벳 첫 장을 골라 "매번 같은 매장 사진"이 되었다.
+ */
+function pickFreshRandom(pool: string[], used: Set<string>): string | undefined {
+  const fresh = pool.filter((x) => !used.has(x));
+  if (fresh.length === 0) return undefined;
+  return fresh[Math.floor(Math.random() * fresh.length)];
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -50,7 +61,9 @@ export async function POST(request: NextRequest) {
       .map((p) => (p.startsWith("(") && p.endsWith(")") ? p.slice(1, -1).trim() : p))
       .map((p) => (p.startsWith("(") ? p.slice(1).trim() : p))
       .map((line) => parseScenePrompt(line))
-      .filter((p) => p.prompt.length > 20)
+      // 영어 이미지 프롬프트만 통과. "...순서로 구성했습니다." 같은 한국어 설명/머리말이
+      // gti에 전달돼 매번 생성 실패하던 누수를 차단한다(IMG-1).
+      .filter((p) => isLikelyImagePrompt(p.prompt))
       .slice(0, 10);
 
     // 결정론적 안전망: 원고가 시력검사/검안 '과정'을 실제로 다루지 않으면
@@ -76,7 +89,7 @@ export async function POST(request: NextRequest) {
       if (p.scene === "detail") {
         const category = pickDetailCategory(`${p.prompt} ${mainKeyword} ${title}`);
         const sharedPool = await listDetailRefPhotos(category);
-        const sharedFresh = sharedPool.find((x) => !usedPhotos.has(x));
+        const sharedFresh = pickFreshRandom(sharedPool, usedPhotos);
         if (sharedFresh) {
           usedPhotos.add(sharedFresh);
           prompts.push({ ...p, rawPhoto: sharedFresh });
@@ -85,7 +98,7 @@ export async function POST(request: NextRequest) {
       }
       if (shopId && p.scene && RAW_PHOTO_SCENES.has(p.scene)) {
         const pool = await listScenePhotos(shopId, p.scene);
-        const fresh = pool.find((x) => !usedPhotos.has(x));
+        const fresh = pickFreshRandom(pool, usedPhotos);
         if (fresh) {
           usedPhotos.add(fresh);
           prompts.push({ ...p, rawPhoto: fresh });

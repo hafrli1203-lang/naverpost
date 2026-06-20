@@ -232,3 +232,54 @@
 - 미검증/제외(backlog): A안 컴포넌트 렌더 테스트(testing-library/jsdom 도입), copy/download 버튼 활성 상태 렌더 단언, fetch 실패→null effect 런타임 테스트. (B안은 데이터 계약 고정까지)
 - 안전/제외: CRankAudit·app/page·API route·posting-audit fetch/useEffect·copy/download/preview/export 핸들러·postingAudit(.ts/.types)·contentFormatter 무수정. S3-a 브랜치(fb34f29) 미접촉. `.claude/settings.local.json`·OPERATING_STANDARD·WIKI_INDEX·COMMANDS·백업·`_verify/` 무수정. 커밋/push 0(승인 대기).
 - 검수자: 메인 직접(type-check/test exit code + FinalConfirm diff grep).
+
+### 2026-06-20 이미지 생성 결함 1차 수정 (IMG-1/F/A/B/C) (feature/naverpost-image-fixes)
+- Change-Fingerprint: 68a7c1bc4233e565
+- Gate Result: **PASS (코드 검증)** — type-check 0 + test 46. 단 실제 이미지 생성 결과는 AI 비용 호출 필요라 미검증(아래 명시).
+- 프로파일: 코드(이미지 파이프라인). Trigger: BeforeComplete. 사용자 "진행" 승인. 브랜치: master(98084a3)에서 분기.
+- 근거: `data/cli-crash.log`에 한국어 설명문("...순서로 구성했습니다.")이 gti 프롬프트로 전달돼 매번 exit1 / `--ar 4:3`은 미드저니 문법(gpt-image 무시) / 매장 사진이 `pool.find(첫 장)`이라 매번 동일.
+- 변경(허용 파일만):
+  - IMG-1+3: 신규 `src/lib/prompts/imagePromptFilter.ts`(isLikelyImagePrompt, 한글비중>0.3 드롭) + `.test.ts`(7케이스). `prompts/route.ts`가 length필터→영어프롬프트 필터로 교체.
+  - IMG-F: `gtiCli.ts` `--size`(기본 1024x1024=1:1) 추가. `imagePrompt.ts`에서 "프롬프트에 --ar 넣지 말 것"으로 교정(잡음 제거).
+  - IMG-A: `prompts/route.ts` `pickFreshRandom()` — 매장/디테일 사진을 미사용분 중 무작위 선택(동일사진 해소).
+  - IMG-B: `imagePrompt.ts` "마무리에 매장 와이드 의무 배치" 지시 제거 → 원고가 매장 안내·방문을 다룰 때만(조건화).
+  - IMG-C: `imagePrompt.ts` 전역 "no logos" 완화 → "읽히는 글자 금지, 글자 없는 브랜드 심볼 형태는 허용"(지니스 심볼 무차별 삭제 교정).
+- 게이트: type-check 0 | P0 | PASS · test 46 passed(기존 39 + 필터 7) | P1 | PASS · 패키지/lock 변경 0 | P1 | PASS · AI/외부 호출 0(코드 검증만) | P0 | PASS.
+- **미검증(중요)**: 실제 gti 생성 결과(이미지 품질·1:1 적용·심볼 보존·참조 충실도)는 AI 비용 호출이라 미실행. 코드/프롬프트 레벨 수정만 검증. 라이브 검증은 사용자 승인 후 1회 생성으로 확인 필요.
+- 미해결(모델 한계, 별도 TASK): IMG-D(참조 캡셔닝+--image 충실도 강화)·IMG-G(--dry-run/--debug 진단 루프). gpt-image-2 참조 충실도는 프롬프트로 "개선"만 가능.
+- 검수자: 메인 직접(type-check/test). 커밋/push 0.
+
+### 2026-06-20 이미지 생성 결함 2차 수정 (IMG-D 참조충실도 / IMG-G 진단루프) (feature/naverpost-image-fixes)
+- Change-Fingerprint: 45471f70afb2073c (이미지 1차+2차 누적 변경 묶음)
+- Gate Result: **PASS (코드 검증)** — type-check 0 + test 49(46 + 참조헬퍼 3). 실제 생성 결과는 AI 비용이라 미검증.
+- 프로파일: 코드(이미지 파이프라인). Trigger: BeforeComplete. 사용자 "IMG-D/G 계속" 승인.
+- 변경:
+  - IMG-D: 신규 `src/lib/prompts/imageRefPrompt.ts`(appendReferenceAdherence — 참조 첨부 시 "실제 환경 충실 재현 + 설비 복제·증식 금지(모빌 1개면 1개)" 지시) + `.test.ts`(3). `one/route.ts`·`regenerate/route.ts`가 생성 직전 적용.
+  - IMG-G: `gtiCli.ts` `--dry-run`(무비용 요청형태 출력, env GTI_DRY_RUN=1) + `--debug --debug-dir`(요청/응답 덤프, env GTI_DEBUG_DIR) 추가. `one`·`regenerate` 라우트가 실패 시 `CliError.code`(timeout/non-zero/empty/not-found)를 응답에 노출.
+  - IMG-F 잔여: `regenerate/route.ts` 폴백 프롬프트의 "4:3 aspect ratio" 텍스트 제거.
+- 게이트: type-check 0 | P0 | PASS · test 49 passed | P1 | PASS · 패키지/lock 0 | P1 | PASS · AI/외부 호출 0(코드 검증만) | P0 | PASS.
+- **미검증(중요)**: 참조 충실도 실제 개선폭은 gpt-image-2 능력에 달림(프롬프트로 "개선"만, 완전 보장 불가) — 라이브 1회 생성으로만 확인 가능. dry-run 진단 경로도 라이브로 1회 확인 권장.
+- 검수자: 메인 직접(type-check/test + 누수 grep). 커밋/push 0.
+
+### 2026-06-20 이미지 1:1 강제 — 백엔드 --size 무시 → sharp 센터크롭 (feature/naverpost-image-fixes)
+- Change-Fingerprint: 0958173d72ae64c5 (이미지 수정 전체 누적 + 크롭)
+- Gate Result: **PASS** — type-check 0 + test 49. 1:1 크롭은 실제 생성물에 무비용 적용으로 검증.
+- 라이브 발견: `/api/image/one` 1회 생성 → 산출이 1536x1024(stale 서버) / 재기동 후 1448x1086(4:3). dry-run엔 `"size":"1024x1024"` 정상 포함 → **백엔드(private-codex/gpt-image)가 --size를 무시하고 ~4:3 출력**. `--size`만으론 1:1 불가.
+- 수정: `gtiCli.ts`가 출력 PNG를 `sharp().resize(1024,1024,{fit:cover,position:centre})`로 **1:1 센터크롭**(sharp는 기존 dep, 설치 0). 크롭 실패 시 원본 폴백.
+- 무비용 검증: 기존 생성물(cc540182, 1448x1086)에 동일 sharp 로직 적용 → **1024x1024 확인 ✅**. type-check 에러(Buffer/NonSharedBuffer)는 base64 문자열만 다루도록 구조 정리해 해소.
+- 미검증: 재기동+크롭 반영 후 end-to-end 라이브 1장(비용)으로 최종 눈확인은 미실행(무비용 크롭 검증으로 대체). dev 서버는 다음 요청 시 새 gtiCli 재컴파일.
+- 검수자: 메인 직접(라이브 1회 + dry-run + sharp 무비용 크롭 검증 + type-check/test). 커밋/push 0.
+
+### 2026-06-20 이미지 워싱 회전 제거 (사용자 지시) (feature/naverpost-image-fixes)
+- Change-Fingerprint: 4afa7fc12e939016
+- Gate Result: **PASS** — type-check 0 + 워싱 무비용 실측(회전 없음·해시 변경 유지).
+- 프로파일: 코드(이미지 워싱). Trigger: BeforeComplete. 사용자 지시 "회전 제거".
+- 변경: `src/lib/storage/imageWash.ts` — ±1.1° 미세 회전 단계 삭제. 원본에서 바로 팬 크롭/추출(회전 버퍼 경유 제거로 한 단계 단순화). 팬 크롭·스케일·밝기/채도 지터·JPEG 재압축(mozjpeg)은 유지 → 중복 회피 그대로. 주석도 회전 비적용으로 갱신.
+- 게이트 결과:
+  - 타입 에러 0 | P0 | tsc --noEmit exit 0 | PASS
+  - 회전 미적용 | P0 | 실제 이미지(1254x1254) 워싱 → 출력 1206x1206, 기울기 없음 | PASS
+  - 중복 회피 유지 | P1 | md5 5e879ea9 → e6a96753 (해시 변경 확인) | PASS
+  - 패키지/lock 변경 0 | P1 | 변경 없음 | PASS
+  - AI/외부 호출 0 | P0 | sharp 로컬 처리만 | PASS
+- 미검증: 워싱 전용 유닛 테스트는 부재(기능 자체에 테스트 파일 없음) — 무비용 1회 실측으로 대체.
+- 검수자: 메인 직접(type-check + sharp 무비용 실측). 커밋/push 0.

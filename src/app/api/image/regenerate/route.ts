@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import fs from "fs/promises";
 import { generateBlogImage } from "@/lib/ai/imageGen";
+import { appendReferenceAdherence } from "@/lib/prompts/imageRefPrompt";
+import { CliError } from "@/lib/ai/cli/spawnCli";
 import { saveImage } from "@/lib/storage/imageStore";
 import { washImageBuffer } from "@/lib/storage/imageWash";
 import {
@@ -72,12 +74,16 @@ export async function POST(request: NextRequest) {
 
     const imagePrompt =
       prompt ||
-      "A clean realistic photo of modern eyeglasses in a bright, modern present-day Korean optical shop with wall-mounted backlit display shelves. Sharp, true-to-life color, not film, not vintage. 4:3 aspect ratio.";
+      "A clean realistic photo of modern eyeglasses in a bright, modern present-day Korean optical shop with wall-mounted backlit display shelves. Sharp, true-to-life color, not film, not vintage.";
 
     // 장면 태그가 있는 매장 장면에 그 장면의 실제 "매장 사진"을 참조로 첨부(사람 사진 미투입).
     const refImages = scene && shopId ? await getSceneReferenceImages(shopId, scene) : [];
 
-    const result = await generateBlogImage(imagePrompt, refImages);
+    // IMG-D: 참조가 붙으면 실제 환경 충실 재현 지시 추가.
+    const result = await generateBlogImage(
+      appendReferenceAdherence(imagePrompt, refImages.length),
+      refImages
+    );
 
     const saved = await saveImage(sessionId, index, result.base64Data, result.mimeType);
     const imageUrl = `/api/image/file/${saved.imageId}`;
@@ -96,8 +102,10 @@ export async function POST(request: NextRequest) {
       err instanceof Error
         ? err.message
         : "이미지 재생성 중 오류가 발생했습니다.";
+    // IMG-G: 실패 원인 코드 노출.
+    const code = err instanceof CliError ? err.code : undefined;
     return NextResponse.json(
-      { success: false, error: message },
+      { success: false, error: message, code },
       { status: 500 }
     );
   }
