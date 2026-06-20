@@ -433,3 +433,10 @@
 - 변경: volumeGate.test.ts 6건(normalizeKeywordKey + applyVolumeGate). searchAdEnabled가 env(NAVER_SEARCHAD_*)의존이라 테스트에서 설정/복원(afterEach)해 무비용 검증(fetch 0, 제공 signals만). 자격증명 없으면 graceful OFF(unknown+노트) · 충분수요+낮은포화=pass · 실측저수요=weak · **정확일치만(부분일치 신호상속 차단=환각키워드 weak)** · pass가 weak/unknown보다 상위 정렬. env 복원으로 스위트 오염 0 확인.
 - 게이트: tsc 0 | P0 | PASS · test 148 | P1 | PASS · lint 0 | P2 | PASS.
 - 검수자: 메인 직접.
+
+### 2026-06-21 제목 유사도 분석 테스트 (검증 인프라)
+- Change-Fingerprint: title-similarity-tests
+- Gate Result: PASS — type-check 0 + test 156(+8) + lint 0.
+- 변경: titleSimilarity.test.ts 8건(tokenizeMeaningfulTitle + analyzeTitleSimilarity). 불용어/조사/중복 토큰화 + 비교대상 없음=low/0% · 동일=100%/high · 핵심토큰 전겹침=high · 무관주제=low · 다중대상 최유사 반환. 순수(CLI 0).
+- 게이트: tsc 0 | P0 | PASS · test 156 | P1 | PASS · lint 0 | P2 | PASS.
+- 검수자: 메인 직접.
