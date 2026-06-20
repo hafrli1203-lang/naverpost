@@ -367,3 +367,12 @@
   - lint 0 | P2 | 유지 | PASS
 - **P1 완료**: body-as 14라우트 전부 zod 적용(image 4 + 단순 6 + 복잡 4). request.json만 하던 나머지는 대부분 입력 없음/SSE.
 - 검수자: 메인 직접(type-check/test/lint/재기동 라이브). 커밋 예정.
+
+### 2026-06-20 keywords 핵심 로직 테스트 추출 #1 — 제목 결정론 게이트
+- Change-Fingerprint: keywords-titlegate-extract
+- Gate Result: PASS — type-check 0 + test 92(+14) + lint 0 + 동작 불변(라우트 16곳 사용 유지).
+- 배경: keywords/route.ts(3594줄)에 핵심 결정론 게이트가 내부 함수로만 있어 전용 테스트 0이던 고위험 지점. 밥줄 핵심이라 회귀 안전망 우선.
+- 변경: isAwkwardGeneratedTitle를 src/lib/keywords/titleGate.ts로 추출(순수 함수, MECHANICAL_TITLE_PATTERNS만 의존). 라우트는 import로 교체(바이트 동일 동작). titleGate.test.ts 14건: v27 전 규칙(쉼표·이모지·번호·반복·나열·슬래시·막연끝맺음·미완성조건절·비문오타·전문용어) 차단 + 오탐0 불변식(고굴절≠굴절률, 누진≠누진대, ~보는 법 통과).
+- route 3594→3554줄. 게이트: tsc 0 | P0 | PASS · test 92 | P1 | PASS · lint 0 | P2 | PASS.
+- 다음: 카테고리 게이트(isCategoryAppropriateCandidate) + 헬퍼 체인 추출/테스트.
+- 검수자: 메인 직접(type-check/test/lint).
