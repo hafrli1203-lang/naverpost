@@ -71,3 +71,25 @@ C:/project/naverpost/docs/ai/TASKS.md
 - [ ] 배경: `.claude/settings.local.json`의 `Bash(gh pr *)`가 merge/close/edit/comment까지 무프롬프트 허용 → draft-only·승인 원칙과 충돌(Codex P2-2).
   - 처리 방향: `gh pr create`·`gh pr view`·`gh pr list`만 허용으로 축소(merge/close 제거).
   - 사용자 결정(2026-06-20): **현행 유지** — 당장 미수정. 안전 의식하되 권한 좁힘은 추후.
+
+## 품질 스캔 후보 (/agency-quality-sweep 2026-06-20)
+
+### P1 — API 라우트 입력 경계 검증(zod) 도입
+- [~] 배경: 23개 route.ts 중 zod 사용 0건, 14곳이 `body as {...}` 무검증 단언(CLAUDE "Zod at boundaries" 위반). 잘못된/누락 입력이 런타임 깊숙이 전파.
+  - 처리 방향: 라우트별 작은 zod 스키마로 `request.json()` 파싱 후 safeParse → 400 응답. 고위험·고빈도부터(image/*, keywords, article/*).
+  - 단위: 라우트 1~2개씩 분리 TASK. 런타임 동작 불변(검증만 추가).
+  - ✅ **image/* 4개 완료(22fb61d)**: `imageRequestSchemas.ts` + 라이브 400 검증. **남음: keywords, article/*(chat·validate·wash), blogops/*, topics/*, title-similarity 등 ~15개.**
+
+### P2 — react-hooks set-state-in-effect 3건 정리
+- [x] **완료(069ab26)**: `CRankAudit`·`CadenceTracker`·`FinalConfirm`의 effect 내 동기 setState를 async 경로(IIFE)로 감싸 캐스케이드 렌더 경고 제거. 동작 불변. lint 해당 3건 제거.
+
+### P2 — keywords/route.ts 3594줄 모듈 분리
+- [ ] 배경: 단일 파일 3594줄(800 규칙 4.5배). 가독성·변경 위험.
+  - 처리 방향: 핸들러는 얇게, fan-out/검증/지역부착 등 헬퍼를 lib/keywords로 추출. 동작 불변 리팩터.
+
+### P3 — as 캐스팅 71건 점진 축소
+- [ ] 배경: CLAUDE "no as casting"인데 src에 71건. 타입 안전 구멍.
+  - 처리 방향: 타입가드/`satisfies`로 점진 치환. 신규 코드 우선 차단, 기존은 접촉 시 정리.
+
+### P3 — 잡파일 제거 + eslintignore 보강
+- [x] **완료(eca297a)**: eslint.config.mjs ignores에 `.codex-review/**`·`.tmp-*` 추가 → lint 노이즈 4건 제거, **전체 lint 0건 달성**. `.tmp-test-export.mjs`는 이미 gitignore라 삭제 불요(파일 삭제 0).
