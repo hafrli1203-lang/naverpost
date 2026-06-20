@@ -403,3 +403,12 @@
 - 눈확인: 평문 골든이 제목→문장분리 문단→표 변환→[사진 N]→불릿(•) 순으로 붙여넣기 적합.
 - 게이트: tsc 0 | P0 | PASS · test 111 | P1 | PASS · lint 0 | P2 | PASS.
 - 검수자: 메인 직접(스냅샷 생성+재실행 안정성+눈확인).
+
+### 2026-06-20 의료법/광고법 금지어 필터 테스트 (검증 인프라 강화)
+- Change-Fingerprint: prohibited-filter-tests
+- Gate Result: PASS — type-check 0 + test 131(+20) + lint 0.
+- 배경: 금지어 필터(의료법/광고법)는 미검증 모듈 중 법적 리스크 최고(버그=고객 안경원 위법 글). prohibitedWords.ts는 데이터뿐, 실제 탐지로직은 contentValidator.ts(251줄, 테스트 0)에 있었음.
+- 변경: isProhibitedWordPresent를 export(스마트 복합어 매칭) + contentValidator.test.ts 20건. (1)미탐 방지: 진짜 금지어(수술·치료·할인·100%) 검출. (2)오탐 방지: ALLOWED_COMPOUNDS 13개 전부(가장자리·예방접종·확실하지않·정확하지않·안전한지·추천하지·최대한·전문가적·질병관리청·의료기기안전·대학병원·치료권고·의사소통)가 정상 통과. (3)복합어+바깥 금지어 동시 검출. (4)validateContent 통합(무비용 fast 모드: sync analyzeMorphology만 써 CLI 0): 위반/정상/주의표현/키워드누락.
+- 무비용 근거: validateContent fast 경로의 서브분석기(contentSignal·titleBodyAlignment·networkDuplicate·repetition·analyzeMorphology sync) 전부 CLI/fetch 0 확인.
+- 게이트: tsc 0 | P0 | PASS · test 131 | P1 | PASS · lint 0 | P2 | PASS.
+- 검수자: 메인 직접(type-check/test/lint + 무비용 경로 grep 확인).
