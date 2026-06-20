@@ -168,12 +168,14 @@ export function FinalConfirm({ state, onStartOver }: FinalConfirmProps) {
   // 섹션만 조용히 숨긴다(audit=null).
   const [seoAudit, setSeoAudit] = useState<PostingAuditResult | null>(null);
   useEffect(() => {
-    if (!article?.title?.trim() || !article?.content?.trim()) {
-      setSeoAudit(null);
-      return;
-    }
     let cancelled = false;
     (async () => {
+      // 빈 본문 리셋도 effect 본문 동기 setState가 아니라 async 경로에서 처리
+      // (캐스케이드 렌더 방지). 동작 동일.
+      if (!article?.title?.trim() || !article?.content?.trim()) {
+        if (!cancelled) setSeoAudit(null);
+        return;
+      }
       try {
         const res = await fetch("/api/analysis", {
           method: "POST",

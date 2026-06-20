@@ -49,7 +49,11 @@ export function CadenceTracker() {
   }, []);
 
   useEffect(() => {
-    load();
+    // 동기 setState(setIsLoading 등)가 effect 본문에서 바로 호출되지 않도록
+    // async 경로로 감싼다(캐스케이드 렌더 방지). 동작은 동일(마운트/의존 변경 시 load).
+    void (async () => {
+      await load();
+    })();
   }, [load]);
 
   return (
