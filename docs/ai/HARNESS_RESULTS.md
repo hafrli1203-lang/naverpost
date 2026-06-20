@@ -440,3 +440,10 @@
 - 변경: titleSimilarity.test.ts 8건(tokenizeMeaningfulTitle + analyzeTitleSimilarity). 불용어/조사/중복 토큰화 + 비교대상 없음=low/0% · 동일=100%/high · 핵심토큰 전겹침=high · 무관주제=low · 다중대상 최유사 반환. 순수(CLI 0).
 - 게이트: tsc 0 | P0 | PASS · test 156 | P1 | PASS · lint 0 | P2 | PASS.
 - 검수자: 메인 직접.
+
+### 2026-06-21 키워드 조합 생성기 테스트 (검증 인프라)
+- Change-Fingerprint: keyword-combiner-tests
+- Gate Result: PASS — type-check 0 + test 164(+8) + lint 0.
+- 변경: keywordCombiner.test.ts 8건(combineKeywords). 순수·결정론 보장: 유효 head→후보 생성 · 모든 main/sub가 'head 수식어' 2단어+head 공유 · head≠수식어 · main 중복 0 · maxCandidates/maxModifiersPerHead 한도 · 결정론(idempotent) · 빈/2어절 head 제외.
+- 게이트: tsc 0 | P0 | PASS · test 164 | P1 | PASS · lint 0 | P2 | PASS.
+- 검수자: 메인 직접.
