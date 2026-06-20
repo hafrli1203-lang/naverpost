@@ -353,3 +353,17 @@
   - lint 0 | P2 | 유지 | PASS
 - 남음: P1 복잡 라우트 — article/route(다필드)·article/chat·article/wash(ArticleContent 모델링)·keywords(3594줄). 다음 배치.
 - 검수자: 메인 직접(type-check/test/lint/라이브). 커밋 예정.
+
+### 2026-06-20 P1 zod 경계검증 3차(완료) — 복잡 라우트 4개 (품질스캔 후속)
+- Change-Fingerprint: 8a54773f8e1bcb20
+- Gate Result: **PASS** — type-check 0 + test 78(69+9) + lint 0 + 재기동 후 라이브 400 4종.
+- 변경: apiRequestSchemas.ts에 keywords·article·articleChat·articleWash 스키마 추가(+test 9). KeywordOption/ArticleContent는 z.custom 타입(필수필드 런타임검증)으로 전체 모델링 없이 정확한 타입 확보. article은 enum/charCount 기본값을 스키마로 이전. 라우트 4개(keywords·article·article/chat·article/wash) body-as 단언 → safeParse → 400. ArticleContent import 미사용된 wash는 제거.
+- 라이브(무비용, 재기동 후): keywords 누락→400"shopId와 categoryId가 필요합니다." · article keyword 하위필드 누락→400"keyword, shopId, categoryId는 필수입니다." · chat 빈 article→400 · wash 서브키워드 누락→400.
+- 주의(절차 교훈): 공유 모듈(apiRequestSchemas)에 export 추가 시 Next dev HMR이 신규 export를 즉시 못 잡아 라이브가 "safeParse undefined" 500을 냄 → **dev 서버 재기동으로 해소**(코드는 tsc/test/node-import 모두 정상). 라이브 검증은 재기동 후 신뢰.
+- 게이트 결과:
+  - 타입 에러 0 | P0 | tsc exit 0 | PASS
+  - 테스트 | P1 | vitest 78 passed (+9) | PASS
+  - 입력 검증 동작 | P1 | 재기동 후 라이브 400 4종 | PASS
+  - lint 0 | P2 | 유지 | PASS
+- **P1 완료**: body-as 14라우트 전부 zod 적용(image 4 + 단순 6 + 복잡 4). request.json만 하던 나머지는 대부분 입력 없음/SSE.
+- 검수자: 메인 직접(type-check/test/lint/재기동 라이브). 커밋 예정.

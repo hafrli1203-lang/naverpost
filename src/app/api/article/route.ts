@@ -19,6 +19,8 @@ import { analyzeAutocompleteIndex } from "@/lib/analysis/autocompleteIndex";
 import { CATEGORIES } from "@/lib/constants";
 import { getShopById } from "@/lib/data/shops";
 import { lookupGlossary, buildGlossaryHint } from "@/lib/domain/opticalGlossary";
+import { articleSchema } from "@/lib/validation/apiRequestSchemas";
+import { parseRequestBody } from "@/lib/validation/parseRequestBody";
 import type { KeywordOption, ArticleContent, SearchVolumeSignal } from "@/types";
 
 export const maxDuration = 600;
@@ -170,40 +172,28 @@ export async function POST(request: NextRequest) {
   const requestStartedAt = Date.now();
   try {
     const body = await request.json();
+    const parsed = parseRequestBody(articleSchema, body);
+    if (!parsed.ok) {
+      return NextResponse.json(
+        { success: false, error: parsed.message },
+        { status: 400 }
+      );
+    }
+    // 기본값(articleType/charCount/tone/contentSubtype)은 스키마가 적용한다.
     const {
       keyword,
       shopId,
       categoryId,
       topic,
-      articleType = "info",
-      charCount = 2000,
-      tone = "standard",
-      contentSubtype = "blog",
+      articleType,
+      charCount,
+      tone,
+      contentSubtype,
       eventName,
       eventPeriod,
       benefitContent,
       externalReference,
-    } = body as {
-      keyword: KeywordOption;
-      shopId: string;
-      categoryId: string;
-      topic: string;
-      articleType?: "info" | "promo";
-      charCount?: 1000 | 1500 | 2000 | 2500;
-      tone?: "standard" | "friendly" | "casual" | "business" | "expert";
-      contentSubtype?: "blog" | "event" | "season" | "short";
-      eventName?: string;
-      eventPeriod?: string;
-      benefitContent?: string;
-      externalReference?: string;
-    };
-
-    if (!keyword || !shopId || !categoryId) {
-      return NextResponse.json(
-        { success: false, error: "keyword, shopId, categoryId는 필수입니다." },
-        { status: 400 }
-      );
-    }
+    } = parsed.data;
 
     const shop = await getShopById(shopId);
     const category = CATEGORIES.find((c) => c.id === categoryId);

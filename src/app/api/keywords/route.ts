@@ -14,6 +14,8 @@ import { generateKeywordCandidatesWithGpt } from "@/lib/ai/openaiKeywords";
 import { CATEGORIES } from "@/lib/constants";
 import { getShopById } from "@/lib/data/shops";
 import { fetchBlogTitles } from "@/lib/naver/rssParser";
+import { keywordsSchema } from "@/lib/validation/apiRequestSchemas";
+import { parseRequestBody } from "@/lib/validation/parseRequestBody";
 import {
   fetchCompetitorTitles,
   fetchKeywordDemandSignals,
@@ -2858,19 +2860,14 @@ async function analyzeOptions(params: {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { shopId, categoryId, topic, refresh } = body as {
-      shopId: string;
-      categoryId: string;
-      topic?: string;
-      refresh?: boolean;
-    };
-
-    if (!shopId || !categoryId) {
+    const parsed = parseRequestBody(keywordsSchema, body);
+    if (!parsed.ok) {
       return NextResponse.json(
-        { success: false, error: "shopId와 categoryId가 필요합니다." },
+        { success: false, error: parsed.message },
         { status: 400 }
       );
     }
+    const { shopId, categoryId, topic, refresh } = parsed.data;
 
     const shop = await getShopById(shopId);
     const category = CATEGORIES.find((item) => item.id === categoryId);
