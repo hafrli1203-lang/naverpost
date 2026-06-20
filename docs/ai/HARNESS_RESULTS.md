@@ -376,3 +376,12 @@
 - route 3594→3554줄. 게이트: tsc 0 | P0 | PASS · test 92 | P1 | PASS · lint 0 | P2 | PASS.
 - 다음: 카테고리 게이트(isCategoryAppropriateCandidate) + 헬퍼 체인 추출/테스트.
 - 검수자: 메인 직접(type-check/test/lint).
+
+### 2026-06-20 keywords 핵심 로직 테스트 추출 #2 — 카테고리 게이트 + 헬퍼
+- Change-Fingerprint: keywords-categorygate-extract
+- Gate Result: PASS — type-check 0 + test 108(+16) + lint 0 + 동작 불변(라우트 사용 유지).
+- 변경: isCategoryAppropriateCandidate + 헬퍼 4개(isRegionWord·startsWithRegionWord·isValidTwoWordKeyword(2~3단어판)·hasMalformedCompoundAxis)를 src/lib/keywords/categoryGate.ts로 추출. 라우트는 import로 교체(바이트 동일). categoryGate.test.ts 16건: 헬퍼 단위 + 메인 게이트(구조/합성축/브랜드/지역/스캐폴드 + 카테고리별 누수 frames·lenses·contacts·eye-info, 고굴절 등 안경렌즈 상품어 통과 불변식).
+- route 3554→3457줄(누적 3594→3457, −137). hasMalformedCompoundAxis는 게이트 전용이라 route 직접 사용 0.
+- 게이트: tsc 0 | P0 | PASS · test 108 | P1 | PASS · lint 0 | P2 | PASS.
+- 남음(#1 잔여): keywords/route.ts 여전히 3457줄 — fan-out·재시도 분류 등은 라우트 상태 의존이라 추가 추출은 별도 TASK. 두 공유 하드게이트는 완료.
+- 검수자: 메인 직접(type-check/test/lint).
