@@ -412,3 +412,10 @@
 - 무비용 근거: validateContent fast 경로의 서브분석기(contentSignal·titleBodyAlignment·networkDuplicate·repetition·analyzeMorphology sync) 전부 CLI/fetch 0 확인.
 - 게이트: tsc 0 | P0 | PASS · test 131 | P1 | PASS · lint 0 | P2 | PASS.
 - 검수자: 메인 직접(type-check/test/lint + 무비용 경로 grep 확인).
+
+### 2026-06-20 언어 리스크 분석 테스트 — 쉼표 정책 + templateLeak (검증 인프라)
+- Change-Fingerprint: language-risk-tests
+- Gate Result: PASS — type-check 0 + test 136(+5) + lint 0.
+- 변경: contentSignalAnalyzer.test.ts 5건(analyzeLanguageRisk 공개 API). 쉼표 형식 정책(v2.8: 정상 0위반·한문장 3개↑ 남발 검출·천단위 1,000 제외) + 지침어 본문 누수(templateLeak: 정상 소제목 0·'넘겨짚' 노출 검출). 모두 순수(CLI 0).
+- 게이트: tsc 0 | P0 | PASS · test 136 | P1 | PASS · lint 0 | P2 | PASS.
+- 검수자: 메인 직접.
