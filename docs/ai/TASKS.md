@@ -85,8 +85,9 @@ C:/project/naverpost/docs/ai/TASKS.md
 - [x] **완료(069ab26)**: `CRankAudit`·`CadenceTracker`·`FinalConfirm`의 effect 내 동기 setState를 async 경로(IIFE)로 감싸 캐스케이드 렌더 경고 제거. 동작 불변. lint 해당 3건 제거.
 
 ### P2 — keywords/route.ts 3594줄 모듈 분리
-- [ ] 배경: 단일 파일 3594줄(800 규칙 4.5배). 가독성·변경 위험.
-  - 처리 방향: 핸들러는 얇게, fan-out/검증/지역부착 등 헬퍼를 lib/keywords로 추출. 동작 불변 리팩터.
+- [~] 배경: 단일 파일 3594줄(800 규칙 4.5배). 가독성·변경 위험.
+  - ✅ **두 공유 하드게이트 추출+테스트(밥줄 핵심)**: titleGate.ts(isAwkwardGeneratedTitle, test 14) + categoryGate.ts(isCategoryAppropriateCandidate+헬퍼4, test 16). route 3594→3457줄.
+  - **남음**: fan-out·재시도 분류·볼륨게이트 적용부 등은 라우트 상태 의존이라 추가 추출은 더 큰 리팩터. 우선순위 중.
 
 ### P3 — as 캐스팅 71건 점진 축소
 - [ ] 배경: CLAUDE "no as casting"인데 src에 71건. 타입 안전 구멍.
