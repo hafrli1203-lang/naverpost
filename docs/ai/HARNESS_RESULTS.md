@@ -283,3 +283,17 @@
   - AI/외부 호출 0 | P0 | sharp 로컬 처리만 | PASS
 - 미검증: 워싱 전용 유닛 테스트는 부재(기능 자체에 테스트 파일 없음) — 무비용 1회 실측으로 대체.
 - 검수자: 메인 직접(type-check + sharp 무비용 실측). 커밋/push 0.
+
+### 2026-06-20 외부 리뷰(Codex) 반영 — 워싱 1:1 contain (feature/naverpost-image-fixes)
+- Change-Fingerprint: 83b77c6763b1939b
+- Gate Result: **PASS** — type-check 0 + test 49 + 무비용 실측(1024x1024 contain·무크롭).
+- 외부 리뷰: `codex exec review --base origin/master` (codex-cli 0.141.0). P0/P1 없음. P2 2건.
+- **P2-1 반영**: `imageWash.ts` 워싱 출력이 너비만 리사이즈→원본비율(실사진 ~4:3)로 생성(1:1)과 불일치하던 것. 사용자 결정=**contain(레터박스, 무크롭)**. 최종 `resize(1024,1024,{fit:contain,background:white})` 적용(메타 폴백 경로 포함). 생성 경로(gtiCli)는 cover 크롭 유지 — 실사진은 간판 손실 방지 위해 contain.
+- **P2-2 미반영(backlog)**: `.claude/settings.local.json` `Bash(gh pr *)` 권한 과대 → 사용자 결정=현행 유지. REVIEW_QUEUE/backlog 기록만.
+- 게이트 결과:
+  - 타입 에러 0 | P0 | tsc --noEmit exit 0 | PASS
+  - 1:1 정사각 출력 | P0 | 4:3 입력→1024x1024, 상단 흰여백(255,255,255)·중앙 원본보존 | PASS
+  - 무크롭(contain) | P1 | 레터박스 확인(내용 손실 0) | PASS
+  - 테스트 회귀 0 | P1 | vitest 49 passed | PASS
+  - AI/외부 비용 | - | codex 리뷰 1회(승인됨), 그 외 0 | PASS
+- 검수자: 외부 Codex(P2x2) + 메인 직접(type-check/test/무비용 실측). 커밋/push 0(아래 커밋 예정).
