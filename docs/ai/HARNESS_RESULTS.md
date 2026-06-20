@@ -327,3 +327,15 @@
   - lint 무증가 | P2 | 7건 유지(새 파일 0건) | PASS
 - 남음: 나머지 ~19개 라우트는 후속 TASK(article/*, blogops/*, topics/* 등). 이번은 image/* 우선.
 - 검수자: 메인 직접(type-check/test/라이브 400). 커밋 예정.
+
+### 2026-06-20 P2 set-state-in-effect 정리 + P3 eslint ignores (품질스캔 후속)
+- Change-Fingerprint: 16e59f881dc34741
+- Gate Result: **PASS** — type-check 0 + test 58 + build 성공 + **lint 0(7→0)**.
+- P2: CRankAudit:100·CadenceTracker:52·FinalConfirm:172의 effect 내 동기 setState를 async 경로(IIFE)로 감싸 캐스케이드 렌더 경고 제거. 동작 불변(마운트/의존변경 시 fetch, 빈 본문 리셋 동일).
+- P3: eslint.config.mjs globalIgnores에 `.codex-review/**`(미추적 로컬 툴링, .codex-push와 동급)·`.tmp-*`(gitignore된 임시파일) 추가 → require-import 3 + unused-var 1 노이즈 제거. 파일 삭제 0(임시파일은 이미 gitignore).
+- 게이트 결과:
+  - 타입 에러 0 | P0 | tsc exit 0 | PASS
+  - lint 0 | P2 | 7→0 problems | PASS
+  - 테스트 회귀 0 | P1 | vitest 58 passed | PASS
+  - build | P1 | next build 성공(5.7s) | PASS
+- 검수자: 메인 직접(lint/type-check/test/build). 커밋 예정.

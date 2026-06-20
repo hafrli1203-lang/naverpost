@@ -7,6 +7,7 @@ export default defineConfig([
   ...nextTs,
   globalIgnores([
     ".codex-push/**",
+    ".codex-review/**",
     ".next/**",
     "out/**",
     "build/**",
@@ -14,5 +15,6 @@ export default defineConfig([
     "scripts/**/*.cjs",
     "data/sessions/**",
     "data/images/**",
+    ".tmp-*",
   ]),
 ]);
