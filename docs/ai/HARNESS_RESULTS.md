@@ -419,3 +419,10 @@
 - 변경: contentSignalAnalyzer.test.ts 5건(analyzeLanguageRisk 공개 API). 쉼표 형식 정책(v2.8: 정상 0위반·한문장 3개↑ 남발 검출·천단위 1,000 제외) + 지침어 본문 누수(templateLeak: 정상 소제목 0·'넘겨짚' 노출 검출). 모두 순수(CLI 0).
 - 게이트: tsc 0 | P0 | PASS · test 136 | P1 | PASS · lint 0 | P2 | PASS.
 - 검수자: 메인 직접.
+
+### 2026-06-21 6매장 중복방지 분석 테스트 (검증 인프라)
+- Change-Fingerprint: network-dup-tests
+- Gate Result: PASS — type-check 0 + test 142(+6) + lint 0.
+- 변경: networkDuplicateAnalyzer.test.ts 6건(analyzeNetworkDuplicateRisk 공개 API). 핵심 제품가치(자기잠식/과잉탈락 방지) 고정: 빈 히스토리 0위험 · 같은매장 메인조합 중복=high · 다른소재 미탐 · 조사무시(적응에=적응) 매칭 · 다른블로그 메인+서브 관점겹침 검출 · 제목패턴 토큰공유 검출. 순수(CLI 0).
+- 게이트: tsc 0 | P0 | PASS · test 142 | P1 | PASS · lint 0 | P2 | PASS.
+- 검수자: 메인 직접.
