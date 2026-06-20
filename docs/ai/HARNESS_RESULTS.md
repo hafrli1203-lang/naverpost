@@ -394,3 +394,12 @@
 - 미해결(문서): CLAUDE.md 기술스택/모듈표가 Google Sheets를 기능처럼 기술 → 실제 미구현. 제품 로드맵 문서라 임의 재작성 보류, 사용자 판단 필요.
 - 게이트: tsc 0 | P0 | PASS · test 108 | P1 | PASS · lint 0 | P2 | PASS.
 - 검수자: 메인 직접.
+
+### 2026-06-20 파이프라인 골든-런 회귀 고정 (#2 품질감사 후속)
+- Change-Fingerprint: pipeline-golden-export
+- Gate Result: PASS — type-check 0 + test 111(+3) + lint 0 + 스냅샷 재실행 드리프트 0.
+- 배경: 파이프라인 최종 산출물(붙여넣기용 export)이 결정론 순수함수인데 전체 출력 회귀 고정이 없었음. 서식/문단분리/표/이미지마커 로직 변경이 조용히 붙여넣기 품질을 망가뜨릴 위험.
+- 변경: src/lib/naver/contentFormatter.golden.test.ts — 대표 원고 1개(도입+소제목2+표+불릿+문단)를 formatForNaverExport(rich HTML)·buildNaverPlainText(평문)에 통과시켜 toMatchSnapshot으로 전체 출력 고정 + 핵심 계약 불변식(제목 포함·이미지마커 3개·마크다운 잔재 0·표 "셀 / 셀"·불릿 •). __snapshots__/*.snap 골든 아티팩트 동반 커밋.
+- 눈확인: 평문 골든이 제목→문장분리 문단→표 변환→[사진 N]→불릿(•) 순으로 붙여넣기 적합.
+- 게이트: tsc 0 | P0 | PASS · test 111 | P1 | PASS · lint 0 | P2 | PASS.
+- 검수자: 메인 직접(스냅샷 생성+재실행 안정성+눈확인).
