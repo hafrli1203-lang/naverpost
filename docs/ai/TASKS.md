@@ -75,12 +75,11 @@ C:/project/naverpost/docs/ai/TASKS.md
 ## 품질 스캔 후보 (/agency-quality-sweep 2026-06-20)
 
 ### P1 — API 라우트 입력 경계 검증(zod) 도입
-- [~] 배경: 23개 route.ts 중 zod 사용 0건, 14곳이 `body as {...}` 무검증 단언(CLAUDE "Zod at boundaries" 위반). 잘못된/누락 입력이 런타임 깊숙이 전파.
-  - 처리 방향: 라우트별 작은 zod 스키마로 `request.json()` 파싱 후 safeParse → 400 응답. 고위험·고빈도부터(image/*, keywords, article/*).
-  - 단위: 라우트 1~2개씩 분리 TASK. 런타임 동작 불변(검증만 추가).
-  - ✅ **image/* 4개 완료(22fb61d)**: `imageRequestSchemas.ts` + 라이브 400 검증.
-  - ✅ **단순 6개 완료(cc1efe8)**: article/validate·blogops/backfill·blogops/exposure·topics/series·topics/suggest·title-similarity. `apiRequestSchemas.ts` + 공용 `parseRequestBody.ts` + test 11.
-  - **남음(복잡): article/route(다필드)·article/chat·article/wash(ArticleContent 모델링 필요)·keywords(3594줄).** 다음 배치.
+- [x] **완료**: body-as 14라우트 전부 zod 적용. 잘못된/누락 입력이 경계에서 400.
+  - ✅ image/* 4개(22fb61d): `imageRequestSchemas.ts`
+  - ✅ 단순 6개(cc1efe8): article/validate·blogops/backfill·blogops/exposure·topics/series·topics/suggest·title-similarity. `apiRequestSchemas.ts` + 공용 `parseRequestBody.ts`
+  - ✅ 복잡 4개(65df4bb): keywords·article·article/chat·article/wash. KeywordOption/ArticleContent는 z.custom으로 필수필드 런타임검증. test 총 78.
+  - 비고: request.json만 하던 나머지 라우트는 입력 없음/SSE라 대상 외. 신규 라우트는 같은 패턴 적용할 것.
 
 ### P2 — react-hooks set-state-in-effect 3건 정리
 - [x] **완료(069ab26)**: `CRankAudit`·`CadenceTracker`·`FinalConfirm`의 effect 내 동기 setState를 async 경로(IIFE)로 감싸 캐스케이드 렌더 경고 제거. 동작 불변. lint 해당 3건 제거.
