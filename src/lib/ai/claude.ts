@@ -1,11 +1,9 @@
 import type { KeywordOption } from "@/types";
 import { runClaude } from "./cli/claudeCli";
-import { runCodex } from "./cli/codexCli";
 
 const ARTICLE_MODEL = "claude-opus-4-8";
 const EDIT_MODEL = "claude-opus-4-8";
 const PROMPT_MODEL = "claude-opus-4-8";
-const CODEX_ARTICLE_MODEL = "gpt-5.5";
 
 // LLM이 JSON 앞뒤에 설명문을 붙여도 죽지 않게 파싱한다.
 // (이 파싱 실패는 상위에서 빈 catch로 삼켜져 "성공처럼 보이는 실패"가 되기 쉽다.)
@@ -80,22 +78,6 @@ export async function selectCategoryFitIndices(
 
 export async function writeArticle(prompt: string, timeoutMs = 220_000): Promise<string> {
   return runClaude({ prompt, model: ARTICLE_MODEL, timeoutMs });
-}
-
-export async function writeArticleWithCodex(
-  prompt: string,
-  timeoutMs = 180_000
-): Promise<string> {
-  return runCodex({
-    prompt: `${prompt}
-
-[출력 지시]
-- 위 조건을 모두 지켜 네이버 블로그 본문만 작성하세요.
-- 제목, JSON, 해설, 코드블록 없이 본문 텍스트만 출력하세요.
-- 모델 실패 복구용 작성이므로 문단을 압축하되 검색자가 끝까지 읽을 수 있게 흐름을 유지하세요.`,
-    model: CODEX_ARTICLE_MODEL,
-    timeoutMs,
-  });
 }
 
 export async function reviseArticle(prompt: string, timeoutMs = 160_000): Promise<string> {

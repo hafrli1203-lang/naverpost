@@ -385,3 +385,12 @@
 - 게이트: tsc 0 | P0 | PASS · test 108 | P1 | PASS · lint 0 | P2 | PASS.
 - 남음(#1 잔여): keywords/route.ts 여전히 3457줄 — fan-out·재시도 분류 등은 라우트 상태 의존이라 추가 추출은 별도 TASK. 두 공유 하드게이트는 완료.
 - 검수자: 메인 직접(type-check/test/lint).
+
+### 2026-06-20 dead 코드/미구현 흔적 정리 (#3 품질감사 후속)
+- Change-Fingerprint: deadcode-cleanup
+- Gate Result: PASS — type-check 0 + test 108 + lint 0.
+- 제거: (1) `writeArticleWithCodex`(claude.ts, 호출처 0 = dead) + 전용 상수 CODEX_ARTICLE_MODEL + 전용 import runCodex(runCodex 자체는 openaiKeywords가 사용해 유지). (2) env.ts `GOOGLE_SHEETS_ID`(Sheets 미구현, 읽는 코드 0 = 죽은 env) → 미구현 로드맵 NOTE로 대체.
+- 보존(의도적): `tokenManager`는 writePost.json 종료로 미사용이나 CLAUDE.md 모듈 경계에 "미사용" 명시된 의도적 보존 → 유지.
+- 미해결(문서): CLAUDE.md 기술스택/모듈표가 Google Sheets를 기능처럼 기술 → 실제 미구현. 제품 로드맵 문서라 임의 재작성 보류, 사용자 판단 필요.
+- 게이트: tsc 0 | P0 | PASS · test 108 | P1 | PASS · lint 0 | P2 | PASS.
+- 검수자: 메인 직접.
