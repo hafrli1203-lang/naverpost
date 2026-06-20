@@ -1,16 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { analyzeTitleSimilarity } from "@/lib/analysis/titleSimilarity";
 import { fetchCompetitorTitles, NaverSearchDependencyError } from "@/lib/naver/searchSignals";
+import { titleSimilaritySchema } from "@/lib/validation/apiRequestSchemas";
+import { parseRequestBody } from "@/lib/validation/parseRequestBody";
 
 export const maxDuration = 120;
 
 export async function POST(request: NextRequest) {
   try {
-    const body = (await request.json()) as {
-      title?: string;
-      keyword?: string;
-      comparisonTitles?: string[];
-    };
+    const rawBody = await request.json();
+    const parsed = parseRequestBody(titleSimilaritySchema, rawBody);
+    if (!parsed.ok) {
+      return NextResponse.json(
+        { success: false, error: parsed.message },
+        { status: 400 }
+      );
+    }
+    const body = parsed.data;
     const title = body.title?.trim() ?? "";
     const keyword = body.keyword?.trim() || title;
 

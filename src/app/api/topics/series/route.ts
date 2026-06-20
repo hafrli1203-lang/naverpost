@@ -3,24 +3,22 @@ import { planKeywordSeries } from "@/lib/topics/seriesPlanner";
 import { getShopById } from "@/lib/data/shops";
 import { CATEGORIES } from "@/lib/constants";
 import { fetchBlogTitles } from "@/lib/naver/rssParser";
+import { topicsSeriesSchema } from "@/lib/validation/apiRequestSchemas";
+import { parseRequestBody } from "@/lib/validation/parseRequestBody";
 
 export const maxDuration = 30;
 
 export async function POST(request: NextRequest) {
   try {
-    const body = (await request.json()) as {
-      shopId?: string;
-      categoryId?: string;
-      headKeyword?: string;
-      count?: number;
-    };
-
-    if (!body.shopId || !body.categoryId) {
+    const raw = await request.json();
+    const parsed = parseRequestBody(topicsSeriesSchema, raw);
+    if (!parsed.ok) {
       return NextResponse.json(
-        { success: false, error: "shopId와 categoryId는 필수입니다." },
+        { success: false, error: parsed.message },
         { status: 400 }
       );
     }
+    const body = parsed.data;
 
     const shop = await getShopById(body.shopId);
     const category = CATEGORIES.find((c) => c.id === body.categoryId);

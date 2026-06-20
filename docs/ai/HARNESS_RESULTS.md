@@ -339,3 +339,17 @@
   - 테스트 회귀 0 | P1 | vitest 58 passed | PASS
   - build | P1 | next build 성공(5.7s) | PASS
 - 검수자: 메인 직접(lint/type-check/test/build). 커밋 예정.
+
+### 2026-06-20 P1 zod 경계검증 2차 — 단순 라우트 6개 (품질스캔 후속)
+- Change-Fingerprint: 3f458f71b1ef8849
+- Gate Result: **PASS** — type-check 0 + test 69(58+11) + lint 0 + 라이브 400 5종 + 정상 200 1종.
+- 변경: 헬퍼를 `src/lib/validation/parseRequestBody.ts`로 분리(imageRequestSchemas는 재노출로 호환 유지) + 신규 `apiRequestSchemas.ts`(articleValidate/blogopsShop/topicsSuggest/topicsSeries/titleSimilarity 스키마) + `.test.ts`(11). 라우트 6개 적용: article/validate·blogops/backfill·blogops/exposure·topics/series·topics/suggest·title-similarity. `body as` → safeParse→400(기존 한국어 메시지·동작 보존).
+- 라이브(무비용, 외부 호출 전 차단): topics/suggest·series 누락→400"shopId와 categoryId는 필수입니다." · article/validate 빈 content→400"content는 필수입니다." · title-similarity comparisonTitles 비문자열→400 · blogops/backfill 비문자열 shopId→400. 정상 content→200(검증 결과 반환).
+- 동작 변화(경미·개선): blogops/backfill·exposure가 비문자열 shopId를 전엔 무시(전체 매장)했으나 이제 400 거부. 더 엄격·정확.
+- 게이트 결과:
+  - 타입 에러 0 | P0 | tsc exit 0 | PASS
+  - 테스트 | P1 | vitest 69 passed (+11) | PASS
+  - 입력 검증 동작 | P1 | 라이브 400 5종 + 정상 200 | PASS
+  - lint 0 | P2 | 유지 | PASS
+- 남음: P1 복잡 라우트 — article/route(다필드)·article/chat·article/wash(ArticleContent 모델링)·keywords(3594줄). 다음 배치.
+- 검수자: 메인 직접(type-check/test/lint/라이브). 커밋 예정.
