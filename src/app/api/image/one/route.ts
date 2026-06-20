@@ -10,8 +10,11 @@ import {
   getSceneReferenceImages,
   listScenePhotos,
   listAllDetailRefPhotos,
-  type SceneTag,
 } from "@/lib/data/shopRefs";
+import {
+  imageOneSchema,
+  parseRequestBody,
+} from "@/lib/validation/imageRequestSchemas";
 
 export const runtime = "nodejs";
 export const maxDuration = 600;
@@ -21,21 +24,14 @@ const ALLOWED_PHOTO_EXTS = new Set([".jpg", ".jpeg", ".png", ".webp"]);
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { sessionId, index, prompt, shopId, scene, rawPhoto } = body as {
-      sessionId?: string;
-      index?: number;
-      prompt?: string;
-      shopId?: string;
-      scene?: SceneTag | null;
-      rawPhoto?: string;
-    };
-
-    if (!sessionId || index === undefined || !prompt) {
+    const parsed = parseRequestBody(imageOneSchema, body);
+    if (!parsed.ok) {
       return NextResponse.json(
-        { success: false, error: "sessionId, index, prompt는 필수입니다." },
+        { success: false, error: parsed.message },
         { status: 400 }
       );
     }
+    const { sessionId, index, prompt, shopId, scene, rawPhoto } = parsed.data;
 
     // 하이브리드: 매장 컷은 실제 매장 사진을 "그대로" 서빙(AI 생성/합성 아님 — 진짜 사진 한 장).
     // 보안: 클라가 보낸 rawPhoto 경로는 신뢰하지 않는다. shopId+scene로 서버가 허용 목록을

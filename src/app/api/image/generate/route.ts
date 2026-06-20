@@ -5,14 +5,18 @@ import { saveImage, getGenerationParams, deleteGenerationParams } from "@/lib/st
 import { buildImagePrompts, parseScenePrompt } from "@/lib/prompts/imagePrompt";
 import { getShopById } from "@/lib/data/shops";
 import { getShopProfile, getSceneReferenceImages } from "@/lib/data/shopRefs";
+import {
+  imageGenerateSchema,
+  parseRequestBody,
+} from "@/lib/validation/imageRequestSchemas";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
 export async function POST(request: NextRequest) {
-  let body: { sessionId: string; articleContent: string; title: string; mainKeyword: string; shopId?: string };
+  let raw: unknown;
   try {
-    body = await request.json();
+    raw = await request.json();
   } catch {
     return new Response(
       `data: ${JSON.stringify({ type: "complete", successCount: 0, failCount: 0, total: 0, error: "Invalid request body" })}\n\n`,
@@ -20,13 +24,14 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { sessionId, articleContent, title, mainKeyword, shopId } = body;
-  if (!sessionId || !articleContent || !title || !mainKeyword) {
+  const parsed = parseRequestBody(imageGenerateSchema, raw);
+  if (!parsed.ok) {
     return new Response(
       `data: ${JSON.stringify({ type: "complete", successCount: 0, failCount: 0, total: 0, error: "Missing required fields" })}\n\n`,
       { headers: sseHeaders() }
     );
   }
+  const { sessionId, articleContent, title, mainKeyword, shopId } = parsed.data;
 
   return new Response(createImageStream(sessionId, articleContent, title, mainKeyword, shopId), {
     headers: sseHeaders(),

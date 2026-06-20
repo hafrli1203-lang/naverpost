@@ -12,6 +12,10 @@ import {
   pickDetailCategory,
   type SceneTag,
 } from "@/lib/data/shopRefs";
+import {
+  imageRegenerateSchema,
+  parseRequestBody,
+} from "@/lib/validation/imageRequestSchemas";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -23,20 +27,14 @@ const RAW_PHOTO_SCENES = new Set<SceneTag>(["exterior", "interior", "detail"]);
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { index, sessionId, prompt, shopId, scene } = body as {
-      index: number;
-      sessionId: string;
-      prompt?: string;
-      shopId?: string;
-      scene?: SceneTag | null;
-    };
-
-    if (index === undefined || !sessionId) {
+    const parsed = parseRequestBody(imageRegenerateSchema, body);
+    if (!parsed.ok) {
       return NextResponse.json(
-        { success: false, error: "index와 sessionId는 필수입니다." },
+        { success: false, error: parsed.message },
         { status: 400 }
       );
     }
+    const { index, sessionId, prompt, shopId, scene } = parsed.data;
 
     // 공간 컷(외관/내부/디테일, 사람 없음)만 실제 사진을 워싱해 직접 서빙한다.
     // 사람이 등장하는 fitting은 직접 서빙하지 않는다(원본과 동일인 방지) → 아래에서 새로 생성.

@@ -297,3 +297,33 @@
   - 테스트 회귀 0 | P1 | vitest 49 passed | PASS
   - AI/외부 비용 | - | codex 리뷰 1회(승인됨), 그 외 0 | PASS
 - 검수자: 외부 Codex(P2x2) + 메인 직접(type-check/test/무비용 실측). 커밋/push 0(아래 커밋 예정).
+
+### 2026-06-20 품질 스캔 (/agency-quality-sweep, 읽기 전용)
+- Change-Fingerprint: sweep-2026-06-20-readonly (코드 변경 0, 스캔만)
+- Gate Result: **PASS (실행 차단 없음)** — type-check 0 · test 49 · next build 성공(6.7s) · P0 없음.
+- 안전검사: tsc 0 / vitest 49 passed / `npm run lint` 7건(6E+1W) / `npm run build` exit 0(빌드는 lint 비차단 확인) / 정적 grep.
+- 차원별 결점 수: 기능 1(경계검증) · 디자인/UX 3(set-state-in-effect) · 보안 1(입력검증 부재=기능과 중복) · 테스트 0(skip 0) · 문서 2(잡파일·eslintignore).
+- 우선순위표:
+  - [기능/보안 | API 23라우트 zod 경계검증 0건, 14곳 `body as` 무검증 | grep: zod 사용 0 / request.json 20 | **P1** | 라우트별 소단위 zod 스키마]
+  - [디자인/UX | react-hooks/set-state-in-effect 3건(CRankAudit:100·CadenceTracker:52·FinalConfirm:172) | eslint error, 캐스케이드 렌더 위험(빌드 비차단) | **P2** | effect 정리/파생계산화]
+  - [기능 | keywords/route.ts 3594줄(800 규칙 4.5배) | wc -l | **P2** | 핸들러/헬퍼 모듈 분리]
+  - [코드품질 | `as` 캐스팅 71건(CLAUDE: no-as) | grep | **P2** | 타입가드 점진 치환]
+  - [문서/잡파일 | 루트 `.tmp-test-export.mjs` 잔존(6/13) + .codex-review/*.cjs eslintignore 누락 → lint 4건 노이즈 | lint | **P3** | 파일 제거 + ignores 추가]
+  - [코드품질 | KeywordOptions 933·searchSignals 839·page 808줄(>800) | wc -l | **P3** | 점진 분리]
+  - [관측 | console.* 22건(비테스트) | grep | **P3** | logger 게이트 검토]
+- 좋은 신호: any 0 · non-null! 0 · TODO/FIXME 0 · skip/only 0 · type-check 0 · test 49 · build OK.
+- TASK 후보: TASKS.md에 P1(zod)·P2(set-state·keywords분리·as캐스팅)·P3(잡파일/eslintignore) 추가.
+- 검수자: 메인 직접(읽기). 코드/커밋 0.
+
+### 2026-06-20 P1 zod 경계검증 — image 라우트 4개 (품질스캔 후속)
+- Change-Fingerprint: ee6fef9b282db6fd
+- Gate Result: **PASS** — type-check 0 + test 58(49+9) + 라이브 400 4종 확인.
+- 변경: 신규 `src/lib/validation/imageRequestSchemas.ts`(imageOne/Regenerate/Content/Generate 스키마 + parseRequestBody 헬퍼) + `.test.ts`(9). image/one·regenerate·prompts·generate 라우트가 `body as` 무검증 단언 → zod safeParse로 교체(실패 시 400, 기존 한국어 메시지/SSE 포맷 보존).
+- 라이브(무비용, 생성 전 차단): /image/one 필수누락→400"sessionId, index, prompt는 필수입니다." · **문자열 index→400(전엔 as로 통과)** · /image/prompts 빈 content→400 · 잘못된 scene enum→400.
+- 게이트 결과:
+  - 타입 에러 0 | P0 | tsc exit 0 | PASS
+  - 테스트 | P1 | vitest 58 passed (+9 스키마) | PASS
+  - 입력 검증 동작 | P1 | 400 4종 라이브 확인, 유효입력 동작 보존 | PASS
+  - lint 무증가 | P2 | 7건 유지(새 파일 0건) | PASS
+- 남음: 나머지 ~19개 라우트는 후속 TASK(article/*, blogops/*, topics/* 등). 이번은 image/* 우선.
+- 검수자: 메인 직접(type-check/test/라이브 400). 커밋 예정.

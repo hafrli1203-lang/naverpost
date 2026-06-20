@@ -10,6 +10,10 @@ import {
   pickDetailCategory,
   type SceneTag,
 } from "@/lib/data/shopRefs";
+import {
+  imageContentSchema,
+  parseRequestBody,
+} from "@/lib/validation/imageRequestSchemas";
 
 export const runtime = "nodejs";
 export const maxDuration = 240;
@@ -27,19 +31,14 @@ function pickFreshRandom(pool: string[], used: Set<string>): string | undefined 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { articleContent, title, mainKeyword, shopId } = body as {
-      articleContent?: string;
-      title?: string;
-      mainKeyword?: string;
-      shopId?: string;
-    };
-
-    if (!articleContent || !title || !mainKeyword) {
+    const parsedBody = parseRequestBody(imageContentSchema, body);
+    if (!parsedBody.ok) {
       return NextResponse.json(
-        { success: false, error: "articleContent, title, mainKeyword는 필수입니다." },
+        { success: false, error: parsedBody.message },
         { status: 400 }
       );
     }
+    const { articleContent, title, mainKeyword, shopId } = parsedBody.data;
 
     let shop: { name: string; interiorDescription?: string } | undefined;
     if (shopId) {
