@@ -498,3 +498,15 @@
 - 게이트: tsc 0 | P0 | PASS · test 238 | P1 | PASS · lint 0 | P2 | PASS.
 - 비고: 같은 패턴으로 backfill·cadence도 가능(가치순 노출추적 우선). mock 한계: 실제 BlogOps/네이버 응답 스키마 변경은 못 잡음(계약 테스트 별도).
 - 검수자: 메인 직접.
+
+### 2026-06-21 외부 I/O mock 테스트 #2~5 — backfill/cadence/searchSignals/sessionStore
+- Change-Fingerprint: external-io-mock-batch2
+- Gate Result: PASS — type-check 0 + test 255(+17) + lint 0 + mock 격리 확인(전체 36파일 255 통과).
+- 변경 4파일(전부 mock):
+  - backfill.test(4): graceful OFF · RSS 파싱→posts 등록 집계(found/registered) · 미등록 사유 · RSS 실패 사유. fetch URL 라우팅(clients/RSS/posts) + getShops mock.
+  - cadence.test(5): graceful OFF · clients 500 사유 · 발행간격 집계(totalPosts·avgIntervalDays 7일, 시간독립 속성만) · 미등록 failures.
+  - searchSignals.test(4): fetchBlogSearch HTML태그 제거·필드 정규화 · items 없음 안전처리 · 401→NaverSearchDependencyError · display 1~100 클램프(URL 검증).
+  - sessionStore.test(5): **fs 인메모리 mock**으로 파일폴백 라운드트립(save→get→list 내림차순→delete) + **ID 새니타이즈 경로순회 방지(보안)**. KV env 삭제로 파일경로 강제.
+- 절차: sessionStore fixture가 SavedSession 필수필드 누락으로 tsc 2에러 → 실제 타입대로 채워 해소(test는 통과했었음). fs 전체 mock이 다른 테스트 오염 0 확인.
+- 게이트: tsc 0 | P0 | PASS · test 255 | P1 | PASS · lint 0 | P2 | PASS.
+- 검수자: 메인 직접.
