@@ -571,3 +571,13 @@
 - 게이트: tsc 0 | P0 | PASS · test 318 | P1 | PASS · lint 0 | P2 | PASS.
 - 다음: 라우트(/api/topics/seasonal-series)에서 fetchMonthlySeasonality+fetchKeywordDemandSignals+planSeasonalSeries 조립 → 대시보드.
 - 검수자: 메인 직접.
+
+### 2026-06-21 시즌 시리즈 라우트 — /api/topics/seasonal-series (설계 갭2 해소)
+- Change-Fingerprint: seasonal-series-route
+- Gate Result: PASS — type-check 0 + test 323(+5) + lint 0.
+- 변경: 신규 `app/api/topics/seasonal-series/route.ts` + `seasonalSeriesSchema`(zod). 3종 데이터(fetchMonthlySeasonality·fetchKeywordDemandSignals·getTopExposedKeywordKeys) Promise.all 병렬 수집(각각 catch 폴백) → 키 정규화 매칭으로 SeasonalCandidate 조립 → planSeasonalSeries 위임. 대상월 기본=다음달, startDateForMonth로 일정 기준일 산출.
+- 테스트 5건: headKeywords 누락 400·잘못된 shopId 400·정상 7월 편성(시즌+검색량 조립·isPeakMonth)·자기잠식 제외·시즌API 죽어도 폴백 200.
+- 발견: route 테스트에서 vi.clearAllMocks가 mockResolvedValue 구현을 안 지워 mock 누수→ beforeEach에서 기본 구현 명시 복원으로 해소(교훈).
+- **시즌 시리즈 기능 STEP2~라우트 완성**: 설계(seasonal-series-planner.md) → 엔진(planSeasonalSeries) → 데이터(fetchMonthlySeasonality) → 라우트. 남은 건 대시보드 UI(별도).
+- 게이트: tsc 0 | P0 | PASS · test 323 | P1 | PASS · lint 0 | P2 | PASS.
+- 검수자: 메인 직접(TDD).
