@@ -653,3 +653,37 @@
 - 미검증: UX 하네스 리뷰어 미실행(반응형/접근성 정밀점검은 별도) — 기능/렌더는 라이브 확인.
 - 잔재(P3): 구 `seasonalSeriesPlanner.ts`(편성 schedule 엔진) 미사용 고아(파일삭제 금지로 보존, 테스트 통과 유지). 추후 정리 후보.
 - 검수자: 메인 직접(TDD RED→GREEN + 라이브).
+
+## 2026-06-21 외부리뷰 P1 수정 — 딥링크 topic 길이 경계검증
+- Change-Fingerprint: a47d89f004660190
+- Gate Result: PASS — type-check 0 · test 337(+1) · lint 0 · build 0(✓ Compiled 6.2s).
+- 배경: codex 외부 diff 리뷰(d06dad3)가 유일 P1 지적 — `?start=1` 딥링크가 페이지 로드 시 `/api/keywords` 자동 호출 + 서버 `keywordsSchema.topic = z.string().optional()` 길이 상한 없음(캐시키에 topic 포함 → 상이 topic마다 실제 LLM 생성). 메인 검증: auto-start는 d06dad3 신규(+블록), allowlist 매장검증(page.tsx:174-175) 존재로 외부 노출면 낮으나 zod 경계검증은 글로벌 원칙상 필수.
+- 수정: `apiRequestSchemas.ts` keywordsSchema.topic + articleSchema.topic에 `.max(100, "주제가 너무 깁니다.")` 추가. 사용자 승인 옵션은 .max(60)이었으나 UI 입력 maxLength=100(ShopSelector.tsx:181)+buildUserTopicPlan 80자 슬라이스와 충돌(61~100자 정상입력 400 회귀) → 회귀방지로 UI 허용치와 일치하는 .max(100) 적용(사용자에 명시 보고).
+- 테스트 +1: keywordsSchema 100자 허용·101자 거부(메시지 "주제가 너무 깁니다.") 경계 고정.
+- 미검증: UX 하네스 리뷰어(스키마 변경이라 UI 영향 없음). P2/P3(IO 단위테스트·RSS파서테스트·계약버전·클라zod단언)는 보류(사용자 결정 대기).
+- 검수자: 메인 직접(코드확인+TDD+전게이트).
+
+## 2026-06-21 외부리뷰 P2 3건 처리 — 이슈누락 보정 + IO/파서 테스트
+- Change-Fingerprint: 622d463c2ef2e537
+- Gate Result: PASS — type-check 0 · lint 0 · test 347(+10) · build 0(✓ Compiled 5.7s).
+- 배경: codex 외부 diff 리뷰(d06dad3) P2 3건 처리(사용자 지시).
+- P2-1 알고리즘(seasonalDiscovery.ts): issueTop(급상승)은 시즌데이터 있어야 평가되는데 검색량 상위 40만 시즌 fetch → 40위 밖 급상승 적격(>=200) 키워드가 seasonalLift null로 조용히 누락. 수정: SEASONALITY_FETCH_LIMIT 40→60 확대 + 이슈 적격 후보가 상한 초과 시 notes로 누락 한계 명시(조용한 누락 금지). 회귀: volume 랭킹 로직 불변, 상한만 확대(데이터랩 호출 8→12청크, graceful 유지).
+- P2-2 테스트(seasonalDiscovery.io.test.ts 신규 +5): discoverSeasonalKeywords IO를 fetch 4종 mock으로 검증 — 카테고리 귀속 보존·자기잠식 제외(양 리스트)·시즌 fetch 실패 graceful(이슈 비움)·빈 발굴 노트·누락 한계 노트. 기존 route.test는 함수 통째 mock이라 IO 조립 미검증이던 공백 해소.
+- P2-3 테스트(googleTrends.test.ts 신규 +5): RSS 파서를 실제 Response로 fetch mock — CDATA/엔티티 디코딩·approx_traffic·null 트래픽·중복 제거·limit·!ok 폴백·throw 폴백. as 캐스팅 회피(new Response).
+- 테스트 +10(53 files). 순수 랭킹 8건 회귀 없음 확인.
+- 미검증: UX 하네스 리뷰어(테스트/엔진 변경이라 UI 영향 없음). 남은 P3 2건(계약버전·클라 zod단언)·고아파일은 보류(사용자 결정 대기).
+- 검수자: 메인 직접(TDD + 전게이트).
+
+## 2026-06-21 외부리뷰 P3 2건 + 고아 정리 — 클라 응답 zod + 구 엔진 삭제
+- Change-Fingerprint: c9aaa3a87403497b
+- Gate Result: PASS — type-check 0 · lint 0 · test 342 · build 0(✓ Compiled 8.3s).
+- 배경: codex 외부 diff 리뷰(d06dad3) 잔여 P3 2건 + 고아 파일(사용자 지시 "남은거하자" + 삭제 명시 승인).
+- P3-1 판정(코드변경 없음): "응답 계약 picks/schedule→volumeTop/issueTop 깨짐, 버전 분리 없음"은 조사 결과 **구 계약 프로덕션 소비자 0건**(구 planSeasonalSeries는 자기 테스트만 import). 따라서 버전 분리는 과잉 → 고아 정리로 해소.
+- P3-2 수정(클라 응답 경계검증): 신규 `apiResponseSchemas.ts` — parseShopList(형식 깨지면 []), seasonalDiscoveryResultSchema, seriesPlanSchema. SeasonalSeriesPlanner.tsx(2곳)·SeriesPlanner.tsx(2곳)의 `json.data as Shop[]/SeasonalDiscoveryResult/SeriesPlan` 4개 단언을 safeParse+폴백/오류로 교체(글로벌 원칙 no-as + zod 경계). 컴포넌트 로컬 타입은 구조 동일이라 유지(z.infer 호환). 테스트 +5(apiResponseSchemas.test).
+- 고아 삭제(사용자 승인): `seasonalSeriesPlanner.ts` + `seasonalSeriesPlanner.test.ts` 제거. 삭제 전 프로덕션 import 0건 재확인, 삭제 후 전 게이트 PASS(test 352→342: 스키마+5, 고아테스트−15). git 복구 가능.
+- 미검증: UX 하네스 리뷰어(응답검증/삭제라 화면 동작 불변). 라이브 미실행(스키마는 단위테스트로 고정).
+- 검수자: 메인 직접(코드확인 + TDD + 전게이트).
+
+## 외부리뷰 d06dad3 종결 요약
+- codex P0 0 / P1 1 / P2 3 / P3 2 — 전부 처리 완료(P1 topic상한, P2 이슈누락보정+IO/파서테스트, P3 계약판정+클라zod, 고아삭제).
+- 누적 게이트: type-check 0 · lint 0 · test 342 · build 0. 미커밋 상태(push는 사용자 승인 대기).

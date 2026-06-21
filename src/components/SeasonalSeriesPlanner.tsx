@@ -7,6 +7,10 @@ import { Button } from "@/components/ui/button";
 import { CalendarRange, Loader2, PenLine, TrendingUp } from "lucide-react";
 import { toast } from "sonner";
 import type { Shop } from "@/types";
+import {
+  parseShopList,
+  seasonalDiscoveryResultSchema,
+} from "@/lib/validation/apiResponseSchemas";
 
 type RankedKeyword = {
   keyword: string;
@@ -174,7 +178,7 @@ export function SeasonalSeriesPlanner() {
       .then((r) => r.json())
       .then((json) => {
         if (json.success) {
-          const list = (json.data as Shop[]) ?? [];
+          const list = parseShopList(json.data);
           setShops(list);
           setShopId((prev) => prev || list[0]?.id || "");
         }
@@ -199,7 +203,11 @@ export function SeasonalSeriesPlanner() {
       if (!res.ok || !json.success) {
         throw new Error(json.error ?? "시즌 키워드 발굴에 실패했습니다.");
       }
-      setResult(json.data as SeasonalDiscoveryResult);
+      const parsed = seasonalDiscoveryResultSchema.safeParse(json.data);
+      if (!parsed.success) {
+        throw new Error("발굴 응답 형식이 올바르지 않습니다.");
+      }
+      setResult(parsed.data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "시즌 키워드 발굴 중 오류가 발생했습니다.");
     } finally {

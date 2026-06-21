@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Loader2, Layers, PenLine } from "lucide-react";
 import { CATEGORIES } from "@/lib/constants";
 import type { Shop } from "@/types";
+import { parseShopList, seriesPlanSchema } from "@/lib/validation/apiResponseSchemas";
 
 type SeriesPlanItem = {
   order: number;
@@ -57,7 +58,7 @@ export function SeriesPlanner() {
       .then((r) => r.json())
       .then((json) => {
         if (json.success) {
-          const list = (json.data as Shop[]) ?? [];
+          const list = parseShopList(json.data);
           setShops(list);
           setShopId((prev) => prev || list[0]?.id || "");
         }
@@ -87,7 +88,11 @@ export function SeriesPlanner() {
       if (!res.ok || !json.success) {
         throw new Error(json.error ?? "시리즈 계획에 실패했습니다.");
       }
-      setPlan(json.data as SeriesPlan);
+      const parsed = seriesPlanSchema.safeParse(json.data);
+      if (!parsed.success) {
+        throw new Error("시리즈 응답 형식이 올바르지 않습니다.");
+      }
+      setPlan(parsed.data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "시리즈 계획 중 오류가 발생했습니다.");
     } finally {

@@ -62,8 +62,12 @@ export interface SeasonalDiscoveryResult {
 
 const DEFAULT_COUNT = 10;
 const MAX_COUNT = 20;
-/** 데이터랩 시즌곡선을 받을 후보 상한(절대량 상위). 호출 비용을 묶는다. */
-const SEASONALITY_FETCH_LIMIT = 40;
+/**
+ * 데이터랩 시즌곡선을 받을 후보 상한(절대량 상위). 호출 비용을 묶는다.
+ * 이슈(급상승) 랭킹은 시즌데이터가 있어야 평가되므로, 검색량은 중위권이지만
+ * 그 달에 튀는 키워드를 덜 놓치도록 컷을 넉넉히 둔다(컷 초과분은 notes로 명시).
+ */
+const SEASONALITY_FETCH_LIMIT = 60;
 /** 이슈(급상승) 리스트의 노이즈 컷 — 절대 검색량이 이보다 작으면 제외. */
 const MIN_ISSUE_VOLUME = 200;
 
@@ -250,6 +254,18 @@ export async function discoverSeasonalKeywords(params: {
     .sort((a, b) => (b.monthlyVolume ?? 0) - (a.monthlyVolume ?? 0))
     .slice(0, SEASONALITY_FETCH_LIMIT)
     .map((c) => c.keyword);
+
+  // 이슈(급상승) 후보는 시즌데이터가 있어야 평가된다. 검색량 상위 컷 밖에 있는
+  // 이슈 적격(>= MIN_ISSUE_VOLUME) 후보는 lift를 못 구해 조용히 누락되므로 한계를 명시한다.
+  const issueEligibleCount = union.filter(
+    (c) => (c.monthlyVolume ?? 0) >= MIN_ISSUE_VOLUME
+  ).length;
+  if (issueEligibleCount > SEASONALITY_FETCH_LIMIT) {
+    notes.push(
+      `급상승 후보 ${issueEligibleCount}개 중 검색량 상위 ${SEASONALITY_FETCH_LIMIT}개만 시즌 분석해, 나머지는 이슈 랭킹에서 누락될 수 있습니다.`
+    );
+  }
+
   const seasonality = await fetchMonthlySeasonality(forSeason).catch(() => []);
   const seasonByKey = new Map(seasonality.map((s) => [normalizeKey(s.keyword), s.monthlyRatios]));
 

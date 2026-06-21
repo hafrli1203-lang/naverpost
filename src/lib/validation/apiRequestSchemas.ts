@@ -69,7 +69,8 @@ export type TitleSimilarityInput = z.infer<typeof titleSimilaritySchema>;
 export const keywordsSchema = z.object({
   shopId: z.string("shopId와 categoryId가 필요합니다.").min(1, "shopId와 categoryId가 필요합니다."),
   categoryId: z.string("shopId와 categoryId가 필요합니다.").min(1, "shopId와 categoryId가 필요합니다."),
-  topic: z.string().optional(),
+  // 딥링크(?start=1&topic=)로도 유입되므로 길이 상한을 둔다. UI 입력 maxLength=100과 일치.
+  topic: z.string().max(100, "주제가 너무 깁니다.").optional(),
   refresh: z.boolean().optional(),
 });
 
@@ -83,7 +84,7 @@ export const articleSchema = z.object({
   ),
   shopId: z.string(REQUIRED_ARTICLE).min(1, REQUIRED_ARTICLE),
   categoryId: z.string(REQUIRED_ARTICLE).min(1, REQUIRED_ARTICLE),
-  topic: z.string().optional(),
+  topic: z.string().max(100, "주제가 너무 깁니다.").optional(),
   articleType: z.enum(["info", "promo"]).default("info"),
   charCount: z
     .union([z.literal(1000), z.literal(1500), z.literal(2000), z.literal(2500)])

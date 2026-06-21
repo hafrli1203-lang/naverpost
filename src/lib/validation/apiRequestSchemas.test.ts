@@ -115,6 +115,13 @@ describe("keywordsSchema", () => {
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.message).toBe("shopId와 categoryId가 필요합니다.");
   });
+  it("accepts a 100-char topic (matches UI maxLength) but rejects 101", () => {
+    const base = { shopId: "top50jn", categoryId: "frames" };
+    expect(parseRequestBody(keywordsSchema, { ...base, topic: "가".repeat(100) }).ok).toBe(true);
+    const tooLong = parseRequestBody(keywordsSchema, { ...base, topic: "가".repeat(101) });
+    expect(tooLong.ok).toBe(false);
+    if (!tooLong.ok) expect(tooLong.message).toBe("주제가 너무 깁니다.");
+  });
 });
 
 describe("articleSchema", () => {
