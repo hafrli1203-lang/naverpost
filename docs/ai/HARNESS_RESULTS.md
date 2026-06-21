@@ -520,3 +520,10 @@
 - 게이트: tsc 0 | P0 | PASS · test 260 | P1 | PASS · lint 0 | P2 | PASS · 기존 255 통과 유지 | P0 | PASS.
 - 비고: 패키지 설치는 CLAUDE.md 평소 금지나 이번 사용자 명시 승인. node 환경 전역 유지로 순수 테스트 속도 보존.
 - 검수자: 메인 직접.
+
+### 2026-06-21 CadenceTracker 컴포넌트 테스트 (fetch mock)
+- Change-Fingerprint: cadence-tracker-component-test
+- Gate Result: PASS — type-check 0 + test 264(+4) + lint 0.
+- 변경: CadenceTracker.test.tsx 4건(jsdom). fetch mock으로 성공(매장 렌더+상태배지)·API 실패(오류 메시지)·빈 결과(reason 안내)·새로고침 버튼 재조회. 이번 세션 set-state-in-effect 수정한 컴포넌트의 동작 회귀 안전망.
+- 게이트: tsc 0 | P0 | PASS · test 264 | P1 | PASS · lint 0 | P2 | PASS.
+- 검수자: 메인 직접.
