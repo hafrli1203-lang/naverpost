@@ -534,3 +534,14 @@
 - 변경: FinalConfirm.test.tsx 4건(jsdom). 핵심 화면(사람이 네이버에 붙여넣는 최종 export). 본문 제목 렌더 · **SEO 검수(/api/analysis) 실패해도 export 안 막힘(fail-open 계약)** · 복사 버튼이 붙여넣기용 평문(제목 포함)을 navigator.clipboard에 씀 · onStartOver 연결. fetch/clipboard mock. WorkflowState fixture(validation.revisionReasons 필수 — buildFinalReport 의존).
 - 게이트: tsc 0 | P0 | PASS · test 268 | P1 | PASS · lint 0 | P2 | PASS.
 - 검수자: 메인 직접.
+
+### 2026-06-21 API 라우트 테스트 — analysis/article-validate/sessions
+- Change-Fingerprint: api-route-tests
+- Gate Result: PASS — type-check 0 + test 283(+15) + lint 0 + mock 격리(42파일 전부 통과).
+- 변경 3파일(Next 핸들러를 가짜 request로 직접 호출):
+  - analysis/route.test(7): JSON파싱 실패 400·알수없는 mode 400·posting-audit(로컬순수, mock없이) 검증/성공·smart-block·autocomplete-index 외부함수 mock으로 분기+검증 가드.
+  - article/validate/route.test(3): zod 게이트(content 누락 400, validateContent 미호출)·유효시 호출+응답·tone 옵션 전달. **validateContent를 mock**(라우트는 fast 없이 호출→형태소가 AI CLI를 타므로 라우트 테스트는 mock 필수, 비용/타임아웃 회피).
+  - sessions/route.test(5): sessionStore+BlogOps mock으로 GET목록·POST저장(blogops 표면화·UUID생성)·DELETE(id 없으면 400/있으면 삭제).
+- 발견: article/validate 라우트가 validateContent를 `{fast:true}` 없이 호출 → 실제 AI CLI 경로(첫 시도 5s 타임아웃으로 드러남). 라우트 단위는 의존 mock이 정답.
+- 게이트: tsc 0 | P0 | PASS · test 283 | P1 | PASS · lint 0 | P2 | PASS.
+- 검수자: 메인 직접.
