@@ -545,3 +545,11 @@
 - 발견: article/validate 라우트가 validateContent를 `{fast:true}` 없이 호출 → 실제 AI CLI 경로(첫 시도 5s 타임아웃으로 드러남). 라우트 단위는 의존 mock이 정답.
 - 게이트: tsc 0 | P0 | PASS · test 283 | P1 | PASS · lint 0 | P2 | PASS.
 - 검수자: 메인 직접.
+
+### 2026-06-21 API 라우트 테스트 2차 — 순수/단순 6개 (auth·shops·image·document)
+- Change-Fingerprint: api-route-tests-simple6
+- Gate Result: PASS — type-check 0 + test 303(+20) + lint 0.
+- 변경 6파일: auth(5: 비번 미설정 500·틀린비번 401·맞으면 쿠키설정·JSON실패 400·로그아웃 쿠키삭제, next/headers mock) · shops(4: GET목록·POST 필수검증/rssUrl 구성) · shops/[shopId](3: PUT 부분수정·blogId→rssUrl 갱신·DELETE) · image/file/[imageId](2: 부재 404·존재 바이너리+헤더) · image/session(2: 필수누락 400·토큰발급) · document/upload(5: 파일없음 400·10MB초과·txt추출·미지원형식 500·빈txt 400, 실제 FormData/File).
+- 게이트: tsc 0 | P0 | PASS · test 303 | P1 | PASS · lint 0 | P2 | PASS.
+- 라우트 커버: 23개 중 9개 테스트(analysis·validate·sessions + auth·shops·shopsId·imageFile·imageSession·docUpload). 나머지 14는 AI비용/외부I/O 중심(핵심 lib은 이미 커버)이라 선택사항.
+- 검수자: 메인 직접.
