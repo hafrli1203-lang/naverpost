@@ -476,3 +476,10 @@
 - 변경: medicalLawSanitizer.test.ts 8건(sanitizeMedicalLaw). 의료행위어 치환(시술/수술→조정·치료/진단→확인·의사→안경사·병원→매장) · 단정/보장(100%효과 보장·완치됩니다→개선) · 비방(다른안경원보다 제거)·압박(지금바로 방문하세요) · **매장 안내 블록 보호(주소/운영시간/상호의 '정확한'·'의원'은 단어치환 건너뜀)** · 무위반 0치환 내용보존 · examples 8개 제한. 순수.
 - 게이트: tsc 0 | P0 | PASS · test 200 | P1 | PASS · lint 0 | P2 | PASS.
 - 검수자: 메인 직접.
+
+### 2026-06-21 워싱 짝+브리프+본문프롬프트 테스트 (검증 인프라)
+- Change-Fingerprint: wash-brief-articleprompt-tests
+- Gate Result: PASS — type-check 0 + test 219(+19) + lint 0.
+- 변경 3파일: aiClicheSanitizer.test(7: 1:1 안전치환·레지스터 유지·무위반 0치환·결정론·examples 8제한) + articleBrief.test(5: 키워드 매핑·연구요약 출처제외·crossBlog 5제한·sources naver-search 분기) + articlePrompt.test(7: getToneGuide 톤분기+standard 폴백·charCount→섹션수(1000=2/2500=5)·키워드 주입·외부참고/용어집 조건부 섹션). 전부 순수.
+- 게이트: tsc 0 | P0 | PASS · test 219 | P1 | PASS · lint 0 | P2 | PASS.
+- 검수자: 메인 직접.
