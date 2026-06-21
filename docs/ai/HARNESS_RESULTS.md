@@ -447,3 +447,10 @@
 - 변경: keywordCombiner.test.ts 8건(combineKeywords). 순수·결정론 보장: 유효 head→후보 생성 · 모든 main/sub가 'head 수식어' 2단어+head 공유 · head≠수식어 · main 중복 0 · maxCandidates/maxModifiersPerHead 한도 · 결정론(idempotent) · 빈/2어절 head 제외.
 - 게이트: tsc 0 | P0 | PASS · test 164 | P1 | PASS · lint 0 | P2 | PASS.
 - 검수자: 메인 직접.
+
+### 2026-06-21 제목-본문 일치 + BLAI 언어규칙 테스트 (검증 인프라)
+- Change-Fingerprint: tba-blai-tests
+- Gate Result: PASS — type-check 0 + test 178(+14) + lint 0.
+- 변경: titleBodyAlignment.test.ts 4건(키워드 커버리지/누락 high이슈·표 감지·인용 감지) + blaiLanguageRules.test.ts 10건(비속어/비하/민감/상업어/강조어/광고어 6탐지기 + 중복제거 + **가장자리 오탐 방지(법적)**). 둘 다 순수(CLI 0).
+- 게이트: tsc 0 | P0 | PASS · test 178 | P1 | PASS · lint 0 | P2 | PASS.
+- 검수자: 메인 직접.
