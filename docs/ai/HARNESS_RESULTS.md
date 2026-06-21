@@ -490,3 +490,11 @@
 - 변경 4파일: washingPrompt.test(3: 원문/의료법·광고법 지시·톤 주입) + revisionPrompt.test(4: 원문·금지어→대체어 지시(매핑유무)·삭제폴백) + promoPrompt.test(4: 키워드/매장·행사블록 조건부·[확인 필요] 폴백) + titlePrompt.test(4: TITLE_PATTERN_GUIDE·매장/카테고리/목록 주입·빈목록 (없음) 폴백). 전부 순수.
 - 게이트: tsc 0 | P0 | PASS · test 235 | P1 | PASS · lint 0 | P2 | PASS.
 - 검수자: 메인 직접.
+
+### 2026-06-21 외부 I/O mock 테스트 #1 — 노출 추적(BlogOps+네이버) (검증 인프라)
+- Change-Fingerprint: exposure-mock-tests
+- Gate Result: PASS — type-check 0 + test 238(+3) + lint 0 + mock 격리 확인.
+- 변경: exposure.test.ts 3건. **외부 I/O를 mock으로 검증**(첫 mock 테스트): vi.mock으로 getShops·fetchBlogSearch 가짜화 + global.fetch를 URL별 라우팅(clients/posts/exposure-runs)해 진짜 서버/키 없이 흐름 검증. graceful OFF(URL 미설정→enabled:false, fetch 호출 0) · 전체 흐름(등록확인→키워드→검색순위 측정→기록, measured/ranked 카운트) · 매장 미등록(clients 빈응답→사유). afterEach로 env·mock 복원(스위트 오염 0, 전체 238 통과 확인).
+- 게이트: tsc 0 | P0 | PASS · test 238 | P1 | PASS · lint 0 | P2 | PASS.
+- 비고: 같은 패턴으로 backfill·cadence도 가능(가치순 노출추적 우선). mock 한계: 실제 BlogOps/네이버 응답 스키마 변경은 못 잡음(계약 테스트 별도).
+- 검수자: 메인 직접.
