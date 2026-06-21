@@ -553,3 +553,12 @@
 - 게이트: tsc 0 | P0 | PASS · test 303 | P1 | PASS · lint 0 | P2 | PASS.
 - 라우트 커버: 23개 중 9개 테스트(analysis·validate·sessions + auth·shops·shopsId·imageFile·imageSession·docUpload). 나머지 14는 AI비용/외부I/O 중심(핵심 lib은 이미 커버)이라 선택사항.
 - 검수자: 메인 직접.
+
+### 2026-06-21 시즌 시리즈 편성 엔진 STEP2 (TDD) — planSeasonalSeries
+- Change-Fingerprint: seasonal-series-engine
+- Gate Result: PASS — type-check 0 + test 313(+10) + lint 0.
+- 설계: docs/designs/seasonal-series-planner.md STEP2. 신규 `src/lib/topics/seasonalSeriesPlanner.ts`(순수 함수, 외부호출 0 — 데이터 주입 구조). 시즌랭킹(대상월 비율 desc, 동점시 절대량) · 피크월 계산 · **isPeakMonth는 월일치가 아니라 연중최고치 동률 판정**(TDD가 첫 설계 결함 잡음: 6·7·8 동점시 7월도 피크) · 자기잠식 제외 · cadence 간격 일정배치(startDateIso 주입=결정론) · 폴백(시즌데이터 없음/후보부족).
+- 테스트 10건: 여름/겨울 랭킹·동점 절대량 타이브레이크·피크월·자기잠식 note·일정 배치(3일/7일)·시즌없음 폴백·후보부족·결정론.
+- 게이트: tsc 0 | P0 | PASS · test 313 | P1 | PASS · lint 0 | P2 | PASS.
+- 다음: 데이터랩 12개월 month 호출(fetchMonthlySeasonality) → 라우트 → 대시보드.
+- 검수자: 메인 직접(TDD RED→GREEN).
