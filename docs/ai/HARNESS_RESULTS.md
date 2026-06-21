@@ -562,3 +562,12 @@
 - 게이트: tsc 0 | P0 | PASS · test 313 | P1 | PASS · lint 0 | P2 | PASS.
 - 다음: 데이터랩 12개월 month 호출(fetchMonthlySeasonality) → 라우트 → 대시보드.
 - 검수자: 메인 직접(TDD RED→GREEN).
+
+### 2026-06-21 데이터랩 12개월 시즌 곡선 (fetchMonthlySeasonality) — 설계 갭1 해소
+- Change-Fingerprint: datalab-monthly-seasonality
+- Gate Result: PASS — type-check 0 + test 318(+5) + lint 0.
+- 변경: searchSignals.ts에 `fetchMonthlySeasonality(keywords)` 추가(기존 데이터랩 API/인증 재사용, 시간창 ~13개월·timeUnit=month). **period(yyyy-mm-dd)에서 달력 월(1~12) 추출해 monthlyRatios[12]로 정렬**(같은 달 둘이면 최신값 덮음) → 엔진 SeasonalCandidate.monthlyRatios에 직결. 자격증명 없으면 빈배열(graceful OFF), 실패는 NaverSearchDependencyError.
+- 테스트 5건(기존 searchSignals.test 확장): graceful OFF·빈키워드·월 정렬(7월 최신값 덮기·없는 달 0)·timeUnit=month 호출·500 에러.
+- 게이트: tsc 0 | P0 | PASS · test 318 | P1 | PASS · lint 0 | P2 | PASS.
+- 다음: 라우트(/api/topics/seasonal-series)에서 fetchMonthlySeasonality+fetchKeywordDemandSignals+planSeasonalSeries 조립 → 대시보드.
+- 검수자: 메인 직접.

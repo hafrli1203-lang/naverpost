@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { fetchBlogSearch, NaverSearchDependencyError } from "./searchSignals";
+import {
+  fetchBlogSearch,
+  fetchMonthlySeasonality,
+  NaverSearchDependencyError,
+} from "./searchSignals";
 
 /**
  * 네이버 블로그 검색 회귀 테스트 — 외부 I/O mock.
@@ -66,5 +70,60 @@ describe("fetchBlogSearch", () => {
     const calledUrl = String((spy.mock.calls[0]?.[0]) ?? "");
     expect(calledUrl).toContain("display=100"); // 999 → 100으로 클램프
     expect(calledUrl).toContain("openapi.naver.com/v1/search/blog.json");
+  });
+});
+
+describe("fetchMonthlySeasonality", () => {
+  it("자격증명 없으면 빈 배열(graceful OFF)", async () => {
+    delete process.env.NAVER_CLIENT_ID;
+    const spy = vi.spyOn(global, "fetch");
+    expect(await fetchMonthlySeasonality(["선글라스"])).toEqual([]);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("키워드 없으면 빈 배열", async () => {
+    expect(await fetchMonthlySeasonality([])).toEqual([]);
+  });
+
+  it("월별 데이터를 달력 월(1~12) 배열로 정렬한다", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          results: [
+            {
+              title: "선글라스",
+              data: [
+                { period: "2025-07-01", ratio: 80 },
+                { period: "2025-12-01", ratio: 10 },
+                { period: "2026-07-01", ratio: 95 }, // 같은 7월 → 최신값으로 덮음
+              ],
+            },
+          ],
+        }),
+        { status: 200 }
+      )
+    );
+    const [s] = await fetchMonthlySeasonality(["선글라스"]);
+    expect(s.keyword).toBe("선글라스");
+    expect(s.monthlyRatios).toHaveLength(12);
+    expect(s.monthlyRatios[6]).toBe(95); // 7월(index 6) = 최신 95
+    expect(s.monthlyRatios[11]).toBe(10); // 12월(index 11)
+    expect(s.monthlyRatios[0]).toBe(0); // 1월 데이터 없음 → 0
+  });
+
+  it("timeUnit=month로 데이터랩을 호출한다", async () => {
+    const spy = vi.spyOn(global, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ results: [] }), { status: 200 })
+    );
+    await fetchMonthlySeasonality(["안경"]);
+    const bodyStr = String((spy.mock.calls[0]?.[1] as RequestInit)?.body ?? "");
+    expect(bodyStr).toContain('"timeUnit":"month"');
+  });
+
+  it("API 실패(500)면 NaverSearchDependencyError", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(new Response("err", { status: 500 }));
+    await expect(fetchMonthlySeasonality(["안경"])).rejects.toBeInstanceOf(
+      NaverSearchDependencyError
+    );
   });
 });

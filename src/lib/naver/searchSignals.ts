@@ -350,6 +350,65 @@ async function fetchSearchTrend(keywords: string[]): Promise<SearchVolumeSignal[
   });
 }
 
+export interface MonthlySeasonality {
+  keyword: string;
+  /** 달력 월(1~12)로 정렬된 데이터랩 상대 비율(0~100). 데이터 없는 달은 0. */
+  monthlyRatios: number[];
+}
+
+/**
+ * 데이터랩 12개월 시즌 곡선 조회 (설계: seasonal-series-planner.md 갭1).
+ * 기존 fetchSearchTrend와 같은 API/인증을 쓰되 시간 창을 ~13개월·timeUnit=month로 바꿔
+ * "어느 달에 검색이 뜨는지"를 달력 월(1~12) 배열로 정렬해 돌려준다(읽기 전용).
+ * 자격증명 없으면 빈 배열(graceful OFF). 실패는 NaverSearchDependencyError.
+ */
+export async function fetchMonthlySeasonality(
+  keywords: string[]
+): Promise<MonthlySeasonality[]> {
+  const unique = Array.from(new Set(keywords.map((k) => k.trim()).filter(Boolean)));
+  if (unique.length === 0 || !hasWorkingCredentials()) return [];
+
+  const endDate = new Date();
+  const startDate = new Date();
+  startDate.setMonth(endDate.getMonth() - 12);
+
+  const body = {
+    startDate: startDate.toISOString().slice(0, 10),
+    endDate: endDate.toISOString().slice(0, 10),
+    timeUnit: "month",
+    keywordGroups: unique.map((keyword) => ({ groupName: keyword, keywords: [keyword] })),
+  };
+
+  const response = await fetchWithTimeout("https://openapi.naver.com/v1/datalab/search", {
+    method: "POST",
+    headers: getHeaders(),
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    throw new NaverSearchDependencyError(`네이버 데이터랩 API 호출에 실패했습니다. (${response.status})`);
+  }
+
+  const json = (await response.json()) as {
+    results?: Array<{
+      title?: string;
+      data?: Array<{ period?: string; ratio?: number }>;
+    }>;
+  };
+
+  return (json.results ?? []).map((result) => {
+    // period(yyyy-mm-dd)에서 달력 월(1~12)을 뽑아 정렬. 같은 달이 둘이면 최신값으로 덮는다.
+    const monthlyRatios = new Array<number>(12).fill(0);
+    for (const point of result.data ?? []) {
+      const month = Number((point.period ?? "").slice(5, 7));
+      if (month >= 1 && month <= 12) {
+        monthlyRatios[month - 1] = typeof point.ratio === "number" ? point.ratio : 0;
+      }
+    }
+    return { keyword: result.title ?? "", monthlyRatios };
+  });
+}
+
 function normalizeKeywordKey(keyword: string): string {
   return keyword.replace(/\s+/g, "").trim().toLowerCase();
 }
