@@ -469,3 +469,10 @@
 - 절차: 첫 시도서 시드 공백정규화('누진렌즈 적응'→'누진렌즈적응') 미인지로 1건 실패 → 실제 출력 probe로 확인 후 정정(추측 금지 원칙).
 - 게이트: tsc 0 | P0 | PASS · test 192 | P1 | PASS · lint 0 | P2 | PASS.
 - 검수자: 메인 직접.
+
+### 2026-06-21 의료법 워싱(결정론 치환) 테스트 (검증 인프라·법적)
+- Change-Fingerprint: medical-law-sanitizer-tests
+- Gate Result: PASS — type-check 0 + test 200(+8) + lint 0.
+- 변경: medicalLawSanitizer.test.ts 8건(sanitizeMedicalLaw). 의료행위어 치환(시술/수술→조정·치료/진단→확인·의사→안경사·병원→매장) · 단정/보장(100%효과 보장·완치됩니다→개선) · 비방(다른안경원보다 제거)·압박(지금바로 방문하세요) · **매장 안내 블록 보호(주소/운영시간/상호의 '정확한'·'의원'은 단어치환 건너뜀)** · 무위반 0치환 내용보존 · examples 8개 제한. 순수.
+- 게이트: tsc 0 | P0 | PASS · test 200 | P1 | PASS · lint 0 | P2 | PASS.
+- 검수자: 메인 직접.
