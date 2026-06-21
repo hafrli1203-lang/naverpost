@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { ArticlePreview } from "@/components/ArticlePreview";
@@ -68,6 +68,7 @@ export default function Home() {
     state.shop === null && state.currentStage <= 1 ? 0 : (state.currentStage as 1 | 2 | 3 | 4);
 
   const [maxStageReached, setMaxStageReached] = useState<number>(state.currentStage);
+  const autoStartedRef = useRef(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isChatting, setIsChatting] = useState(false);
   const [isWashing, setIsWashing] = useState(false);
@@ -160,6 +161,31 @@ export default function Home() {
     },
     [shops, state, setState]
   );
+
+  // 시즌 편성표 "글쓰기 시작" 딥링크: ?start=1&shopId&categoryId&topic 로 진입하면
+  // 매장+카테고리+헤드키워드를 프리필해 키워드 생성을 자동 시작한다. (한 번만 실행)
+  useEffect(() => {
+    if (autoStartedRef.current || shops.length === 0) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("start") !== "1") return;
+    const shopId = params.get("shopId") ?? "";
+    const categoryId = params.get("categoryId") ?? "";
+    const topic = params.get("topic") ?? "";
+    if (!shopId || !categoryId || !shops.some((s) => s.id === shopId)) return;
+    if (!CATEGORIES.some((c) => c.id === categoryId)) return;
+    autoStartedRef.current = true;
+    window.history.replaceState(null, "", "/");
+    // Defer out of the effect body so the initial setState happens off the
+    // synchronous render path (avoids cascading renders).
+    const timer = setTimeout(() => {
+      handleStart(shopId, categoryId, topic, {
+        articleType: "info",
+        tone: "standard",
+        charCount: 2000,
+      });
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [shops, handleStart]);
 
   const handleKeywordRegenerate = useCallback(async () => {
     if (!state.shop || !state.category) return;

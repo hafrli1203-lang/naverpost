@@ -2,6 +2,59 @@
 
 공통: `C:\project\_AGENCY_OS\HARNESS_STANDARD.md`. 매 검문마다 아래 형식으로 기록(메인 작업자).
 
+## 2026-06-21 시리즈 표시용 수식어 축별 교정
+- Change-Fingerprint: 25f2d26073a03eec
+- Gate Result: PASS — type-check 0 · test 336(+1) · lint 0 · build 0.
+- 문제: buildKeywordSeriesTopics가 수식어를 [키워드+카테고리 하위분류]로 고정 → 6편 동일 + 무관어(압축·굴절률) 섞임.
+- 수정: 각 frame에 축 의도 수식어 부여(비교=종류/등급/선택/기준/차이, 생활=운전/실내/야외/생활/시야, 문제=불편/원인/적응/증상/습관, 검사=도수/검사/코팅/확인/선택, 방문=방문/상담/맞춤/정리/목적, 상품=종류/등급/기능/옵션/가격). category.subcategories 의존 제거.
+- 테스트 +1: 편마다 수식어 묶음 상이 + 압축·굴절률 미포함.
+- 라이브(:3100, 편광렌즈 6편): 편마다 수식어 다름·무관어 사라짐 확인.
+- 검수자: 메인 직접(TDD+라이브).
+
+## 2026-06-21 시리즈 플래너 → 제목/키워드 엔진 연결(글쓰기 딥링크)
+- Change-Fingerprint: 706e960e872e8a95
+- Gate Result: PASS — type-check 0 · lint 0 · build 0 · test 335 · 키워드 파이프라인 라이브 실측(편광렌즈 주제→제목 10개 12~32자·무콤마·키워드 2단어 규칙 통과).
+- 배경(사용자 질문): "이게 우리 제목·키워드 규칙이 반영되나?" → grep 확인 결과 `src/lib/topics`는 keywordRules·validateContent·isAwkwardGeneratedTitle·prohibitedWords 참조 0건. 시리즈 플래너는 "소재 계획"만, 제목 12~32자·무콤마·어색함게이트·키워드 7대 규칙은 글쓰기 단계(/api/keywords)에만 존재. 게다가 SeriesPlanner UI에 글쓰기 연결 부재(수동 재입력 필요).
+- 수정: `SeriesPlanner.tsx`에 각 편 "글쓰기" 딥링크(`/?start=1&shopId&categoryId&topic=편주제`) + 일괄생성. 메인 page.tsx auto-start(기존)로 /api/keywords 자동 시작 → 거기서 제목/키워드 규칙 실제 적용. 시즌 발굴과 동일 패턴.
+- 한계(정직): 시리즈 플래너의 표시용 수식어는 여전히 6편 동일+일부 무관어(교체·압축·굴절률) — 표시 힌트일 뿐 실제 키워드는 글쓰기 단계 생성. 수식어 교정은 사용자가 딥링크 연결만 선택(범위 밖).
+- 미검증: UX 하네스 리뷰어. 라이브: 딥링크 href 구조는 검증된 시즌 패턴과 동일, 도착지 /api/keywords 규칙적용 확인(별도).
+- 검수자: 메인 직접.
+
+## 2026-06-21 시리즈 플래너 버그 수정 — 헤드 키워드 주도 생성
+- Change-Fingerprint: 4635008aa6d569bd
+- Gate Result: PASS — type-check 0 · test 335(+4) · lint 0 · build 0.
+- 버그(사용자 발견): "편광렌즈"로 시리즈 계획 시 4편 주제가 편광과 무관(어린이렌즈·압축굴절률 등). 원인=`seriesPlanner.ts`가 주제 생성 시 헤드 키워드를 안 넘기고 `planBlogTopics({category})`의 **카테고리 고정 템플릿**을 그대로 사용 → 헤드 키워드는 자기잠식키·안내문구에만 쓰임(장식). 키워드를 바꿔도 4편 동일(0% 반영).
+- 수정: `topicPlanner.ts`에 `buildKeywordSeriesTopics({headKeyword, category, existingTitles})` 추가 — 헤드 키워드를 6개 의도 축(비교·생활·문제·검사·방문·종류)에 끼워 모든 편이 그 키워드 주제가 되게. 카테고리별로 문제/방문 축 표현만 자연화(eye-info "가 계속되는 이유", glasses-story "문제가 반복되는 이유"). `seriesPlanner.ts`는 **명시 헤드 키워드 입력 시** 키워드 주도 사용, 없으면 기존 카테고리 템플릿 폴백(기존 동작 보존).
+- 테스트 +4(topicPlanner.test): 모든 편에 키워드 포함·축 전부 상이·키워드 다르면 주제 다름·existingTitles 중복축 제외.
+- 라이브(:3100): 편광렌즈→4편 모두 편광렌즈 주제, 변색렌즈로 바꾸면 4편 모두 변색렌즈(버그 시 동일했음). 키워드 반영 확인.
+- 미검증: UX 하네스 리뷰어. 한계: 축 프레임이 템플릿이라 일부 엣지 키워드는 표현이 다소 일반적일 수 있음(상품 키워드엔 자연스러움).
+- 검수자: 메인 직접(TDD + 라이브).
+
+## 2026-06-21 전 분야 실시간 트렌드 연동(구글 트렌드 KR)
+- Change-Fingerprint: 68568791b43be941
+- Gate Result: PASS — type-check 0 · test 331 · lint 0 · build 0.
+- 배경: 사용자가 "전 분야 이슈도 보자". 네이버 불가 → 구글 트렌드 KR 일일 트렌딩 RSS(키 불필요) 연동.
+- 변경: 신규 `src/lib/trends/googleTrends.ts` `fetchGoogleTrendsKR()` — `https://trends.google.com/trending/rss?geo=KR` fetch + 정규식 파싱(title·approx_traffic), 실패 빈배열(graceful). route.ts에서 발굴과 Promise.all 병렬 수집 후 `trendingNow` 응답에 첨부. UI 3번째 섹션(칩 목록, 네이버검색 링크) + route.test에 googleTrends mock·assert.
+- 정직한 한계(코드·UI 모두 명시): "지정 월"이 아니라 **현재 일일** 트렌드(구글이 과거 월별 트렌딩 RSS 미제공). 인물·스포츠·뉴스가 대부분이라 안경 소재 직접연관 적음(참고·시의성 발굴용). 비공식 RSS라 차단/형식변경 가능.
+- 라이브(:3100): trendingNow 10건 실수신(채서안·딕 아드보카트·상장지수펀드·적금·미사일 등). 볼륨/이슈 안경 리스트와 별개로 정상 첨부.
+- 미검증: UX 하네스 리뷰어.
+- 검수자: 메인 직접(라이브 + RSS 응답 확인).
+
+## 2026-06-21 시즌 발굴 — 두 축 재정의(검색량 TOP / 이슈·급상승 TOP)
+- Change-Fingerprint: 506620e33fd7a608
+- Gate Result: PASS — type-check 0 · test 331(+2) · lint 0 · build 0.
+- 배경: 사용자 목적 명확화 = "그 달에 이슈가 되는 키워드 추출". 리스트2를 "절대 검색량"이 아니라 "그 달 급상승(시의성)"으로 재정의. 리스트1은 안경 도메인 통합에서 그 달 검색량(추정) 순.
+- 변경(seasonalDiscovery.ts): RankedKeyword에 `seasonalLift`(그 달 비율÷연평균) 추가. `rankSeasonalKeywords`에 mode "volume"|"issue" — issue는 lift 순 + 노이즈컷(시즌데이터 필수 & 월검색량≥200). 결과 필드 coreTop/discoveredTop → **volumeTop/issueTop**. 시드/연관 구분 폐기(안경 도메인 한 풀). route.ts·route.test·UI·순수test 동기화.
+- UI: 섹션 "이 달 검색량 TOP10"/"이 달 이슈(급상승) TOP10", 이슈행에 "급상승 N.N배" 배지. 카드 설명에 전 분야 한계 명시.
+- 정직한 한계: "전 분야(안경 밖) 이슈"는 네이버 인기검색어 API 폐지(2021)+keywordstool 시드필수로 불가 → 안경 도메인 내 급상승으로 산출(notes 명시). 전 분야 원하면 구글 트렌드 등 외부연동 별도.
+- 라이브(:3100, top50jn 7월): volumeTop=안경테/난시/근시… issueTop=편광렌즈(1.98배)/안경닦이(1.89)/변색렌즈(1.67)… 7월 여름급등 키워드 정확 포착.
+- 미검증: UX 하네스 리뷰어. 잔재(P3): 구 seasonalSeriesPlanner.ts 고아(보존).
+- 검수자: 메인 직접(TDD + 라이브).
+
+## 변경 지문 추적(동일 묶음 재기록)
+- Change-Fingerprint: ad6209a98d413a8a
+- Gate Result: PASS — 아래 [f149c6774436b5f6] 블록과 동일 변경 묶음(시즌 발굴형 전환). 이후 코드 변경 없음(HARNESS_RESULTS.md 기록 추가로 지문만 갱신됨). 게이트 재확인: type-check 0 · test 329 passed(51 files) · lint 0 · build 0 · 라이브 :3100 operations 200 + 발굴 API 정상(7월 core10/discovered10, overlap 0). 미검증: UX 하네스 리뷰어.
+
 ## 형식
 ```
 ### [날짜] TASK/작업 — Trigger
@@ -581,3 +634,22 @@
 - **시즌 시리즈 기능 STEP2~라우트 완성**: 설계(seasonal-series-planner.md) → 엔진(planSeasonalSeries) → 데이터(fetchMonthlySeasonality) → 라우트. 남은 건 대시보드 UI(별도).
 - 게이트: tsc 0 | P0 | PASS · test 323 | P1 | PASS · lint 0 | P2 | PASS.
 - 검수자: 메인 직접(TDD).
+
+### 2026-06-21 시즌 발굴형 전환 — 매장+월 → TOP10 키워드 발굴(편성표 폐기)
+- Change-Fingerprint: f149c6774436b5f6
+- Gate Result: PASS — type-check 0 + test 329(+6) + lint 0 + build 0.
+- 배경: 사용자 피드백으로 방향 수정. 기존 "사용자가 헤드키워드 입력→날짜 편성표"는 발굴 단계 누락 + 카테고리 분할이 매일글쓰기 부담. → "매장+월만 입력→그 달 안경원 검색량 높은 키워드 TOP10 발굴" 발굴형으로 전환.
+- 변경:
+  - 신규 `src/lib/topics/seasonalDiscovery.ts`: 순수 `rankSeasonalKeywords`(그달 추정수요=절대량×시즌비율/100 정렬, 자기잠식·중복 제외) + IO `discoverSeasonalKeywords`(카테고리별 `CATEGORY_CORE_KEYWORDS` 시드→keywordstool 연관발굴[카테고리 귀속 보존]→절대량 상위40만 데이터랩 시즌곡선→coreTop[시드만]/discoveredTop[전체에서 coreTop 제외=겹침0] 두 리스트).
+  - `seasonalStrategy.ts`: `CATEGORY_CORE_KEYWORDS` export(시드 공유).
+  - `searchSignals.ts`: `fetchMonthlySeasonality` 5개씩 청크화(데이터랩 그룹 최대5 제한). **회귀 주의 해소**: 청크 !ok는 기존 계약대로 throw(처음 graceful[]로 바꿔 searchSignals.test 1건 깨짐→되돌림, 호출부 .catch로 폴백).
+  - `apiRequestSchemas.ts`: seasonalSeriesSchema → {shopId, month?, count?≤20}(headKeywords·categoryId 제거).
+  - `route.ts`: discoverSeasonalKeywords 위임으로 얇게.
+  - UI `SeasonalSeriesPlanner.tsx` 재작성: 매장+월만, "안경원 핵심 TOP10"/"전체 발굴 TOP10" 두 섹션, 각 행 키워드·카테고리태그·월검색량·그달추정·연중피크 + "글쓰기" 딥링크(?start=1, categoryId 자동) + 섹션별 일괄생성.
+  - 메인 `page.tsx`: 딥링크 auto-start(이전 세션에서 추가, 유지).
+- 테스트: seasonalDiscovery.test 6(순수 랭킹) + route.test 5(IO mock으로 재작성) 신규. 전체 329 passed(51 files).
+- 라이브검증(:3100, top50jn 7월): 핵심=안경테/난시/근시/돋보기/변색렌즈… 발굴=돋보기안경/노안안경/컬러렌즈/편광렌즈/안압… overlap 0. 카테고리 태그·월검색량·시즌가중 실데이터 정상.
+- 게이트: tsc 0 | P0 | PASS · test 329 | P1 | PASS · lint 0 | P2 | PASS · build 0 | P2 | PASS.
+- 미검증: UX 하네스 리뷰어 미실행(반응형/접근성 정밀점검은 별도) — 기능/렌더는 라이브 확인.
+- 잔재(P3): 구 `seasonalSeriesPlanner.ts`(편성 schedule 엔진) 미사용 고아(파일삭제 금지로 보존, 테스트 통과 유지). 추후 정리 후보.
+- 검수자: 메인 직접(TDD RED→GREEN + 라이브).

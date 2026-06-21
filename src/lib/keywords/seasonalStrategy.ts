@@ -50,7 +50,11 @@ const CATEGORY_INTENT_AXES: Record<string, string[]> = {
   ],
 };
 
-const CATEGORY_CORE_KEYWORDS: Record<string, string[]> = {
+/**
+ * 카테고리별 핵심 키워드 풀. 키워드 전략 가이드 + 시즌 발굴(seasonalDiscovery)의
+ * 시드로 공유한다. 각 키워드는 그 카테고리에 귀속되므로 발굴 결과의 카테고리 태깅에 쓰인다.
+ */
+export const CATEGORY_CORE_KEYWORDS: Record<string, string[]> = {
   progressive: [
     "누진렌즈",
     "다초점렌즈",

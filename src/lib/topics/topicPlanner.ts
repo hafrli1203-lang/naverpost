@@ -450,6 +450,109 @@ function buildProductTopicPlan(params: {
   };
 }
 
+/**
+ * 헤드 키워드 주도 시리즈 주제 생성.
+ * 입력한 헤드 키워드를 6개 검색 의도 축(비교·생활·문제·검사·방문·종류)에 끼워
+ * 모든 편이 그 키워드 주제가 되도록 만든다(카테고리 고정 템플릿과 달리 키워드가 실제 반영됨).
+ * 카테고리에 따라 일부 축의 표현(문제/방문)만 자연스럽게 바꾼다.
+ */
+function problemTopicFor(keyword: string, categoryId: string): string {
+  if (categoryId === "eye-info") return `${keyword}가 계속되는 이유`;
+  if (categoryId === "glasses-story") return `${keyword} 문제가 반복되는 이유`;
+  return `${keyword} 사용 중 불편한 이유`;
+}
+
+function visitTopicFor(keyword: string, categoryId: string): string {
+  if (categoryId === "eye-info") return `${keyword} 받기 전 확인할 점`;
+  if (categoryId === "glasses-story") return `${keyword} 맡기기 전 확인할 점`;
+  return `${keyword} 맞추기 전 확인할 점`;
+}
+
+export function buildKeywordSeriesTopics(params: {
+  headKeyword: string;
+  category: Category;
+  existingTitles?: string[];
+}): TopicPlan[] {
+  const keyword = normalizeText(params.headKeyword).slice(0, 40);
+  const categoryId = params.category.id;
+
+  // 수식어는 축(검색 의도)에 맞춰 편마다 다르게 준다. 카테고리 하위분류를 그대로 박으면
+  // 6편이 똑같고 키워드와 무관한 어휘(압축·굴절률 등)가 섞이므로 축 의도어로 대체한다.
+  const frames: Array<{
+    axis: TopicIntentAxis;
+    topic: string;
+    thesis: string;
+    searcherQuestion: string;
+    titleAngles: string[];
+    modifiers: string[];
+  }> = [
+    {
+      axis: "comparison",
+      topic: `${keyword} 고를 때 비교 기준`,
+      thesis: `${keyword}는 종류와 등급이 다양하므로 가격보다 사용 목적, 도수, 관리 난이도를 함께 비교해야 한다.`,
+      searcherQuestion: `${keyword}는 무엇을 보고 골라야 하나`,
+      titleAngles: ["선택 전 비교", "종류별 차이", "고르기 전 기준"],
+      modifiers: ["종류", "등급", "선택", "기준", "차이"],
+    },
+    {
+      axis: "lifestyle",
+      topic: `${keyword}가 도움되는 생활 상황`,
+      thesis: `${keyword}의 효과는 쓰는 환경에 따라 체감이 다르므로 운전, 실내, 야외 같은 생활 장면부터 따져야 한다.`,
+      searcherQuestion: `${keyword}는 어떤 생활 상황에서 필요한가`,
+      titleAngles: ["생활 장면별", "언제 필요한지", "환경에 맞출 때"],
+      modifiers: ["운전", "실내", "야외", "생활", "시야"],
+    },
+    {
+      axis: "problem",
+      topic: problemTopicFor(keyword, categoryId),
+      thesis: `${keyword} 관련 불편은 한 가지 원인보다 도수, 상태, 생활 습관이 겹쳐 생기므로 원인을 나눠 봐야 한다.`,
+      searcherQuestion: `${keyword} 때문에 불편한 이유가 무엇인가`,
+      titleAngles: ["불편할 때", "원인을 나눌 때", "반복될 때"],
+      modifiers: ["불편", "원인", "적응", "증상", "습관"],
+    },
+    {
+      axis: "verification",
+      topic: `${keyword} 선택 전 확인할 점`,
+      thesis: `${keyword}는 제품명보다 도수, 코팅, 사용 환경, 검사 결과가 맞아야 실제 만족도가 높다.`,
+      searcherQuestion: `${keyword}를 선택하기 전에 무엇을 확인해야 하나`,
+      titleAngles: ["선택 전 체크", "방문 전 기준", "실패를 줄이는 순서"],
+      modifiers: ["도수", "검사", "코팅", "확인", "선택"],
+    },
+    {
+      axis: "visit",
+      topic: visitTopicFor(keyword, categoryId),
+      thesis: `${keyword}는 방문 전에 현재 불편과 목적을 정리할수록 더 정확하게 맞출 수 있다.`,
+      searcherQuestion: `${keyword}를 맞추기 전에 안경원에서 무엇을 확인해야 하나`,
+      titleAngles: ["방문 전 체크", "맞추기 전 확인", "불편 원인 정리"],
+      modifiers: ["방문", "상담", "맞춤", "정리", "목적"],
+    },
+    {
+      axis: "product",
+      topic: `${keyword} 종류와 등급 이해`,
+      thesis: `${keyword}는 등급과 기능 옵션에 따라 가격과 체감이 달라지므로 기본 종류부터 이해하면 선택이 쉬워진다.`,
+      searcherQuestion: `${keyword}는 어떤 종류와 등급이 있나`,
+      titleAngles: ["종류 이해", "등급별 차이", "기능 옵션"],
+      modifiers: ["종류", "등급", "기능", "옵션", "가격"],
+    },
+  ];
+
+  const existingTitles = params.existingTitles ?? [];
+  const filtered = frames.filter(
+    (frame) => !existingTitles.some((title) => hasOverlap(frame.topic, title))
+  );
+  const chosen = filtered.length > 0 ? filtered : frames;
+
+  return chosen.map((frame) => ({
+    topic: frame.topic,
+    thesis: frame.thesis,
+    axis: frame.axis,
+    searcherQuestion: frame.searcherQuestion,
+    preferredModifiers: frame.modifiers,
+    titleAngles: frame.titleAngles,
+    notes: [`헤드 키워드 "${keyword}"를 ${frame.axis} 축으로 다룬 시리즈 편입니다.`],
+  }));
+}
+
 export function planBlogTopics(params: {
   shop: Shop;
   category: Category;

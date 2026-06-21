@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 /**
- * /api/topics/seasonal-series 라우트 테스트.
- * 외부 데이터 3종(시즌곡선·검색량·자기잠식)과 getShopById를 mock해
- * zod 검증·매장/카테고리 해석·후보 조립·엔진 위임·폴백을 무비용 검증한다.
+ * /api/topics/seasonal-series 라우트 테스트 (발굴형).
+ * 매장+월만 받아 discoverSeasonalKeywords에 위임한다.
+ * zod 검증·매장 해석·월 기본값(다음 달)·위임을 무비용으로 검증한다(발굴 IO는 mock).
  */
 
 vi.mock("@/lib/data/shops", () => ({
@@ -11,85 +11,85 @@ vi.mock("@/lib/data/shops", () => ({
     id === "top50jn" ? { id, name: "탑안경", blogId: "top50jn", rssUrl: "x" } : null
   ),
 }));
-vi.mock("@/lib/constants", () => ({
-  CATEGORIES: [{ id: "progressive", name: "누진다초점", subcategories: [] }],
+vi.mock("@/lib/topics/seasonalDiscovery", () => ({
+  discoverSeasonalKeywords: vi.fn(async (p: { shopId: string; month: number }) => ({
+    shopId: p.shopId,
+    month: p.month,
+    volumeTop: [
+      { keyword: "선글라스", categoryId: "lenses", categoryName: "안경렌즈", seasonScore: 95, monthlyVolume: 5000, peakMonth: 7, isPeakMonth: true, estimatedMonthlyDemand: 4750, seasonalLift: 3.2 },
+    ],
+    issueTop: [
+      { keyword: "선글라스", categoryId: "lenses", categoryName: "안경렌즈", seasonScore: 95, monthlyVolume: 5000, peakMonth: 7, isPeakMonth: true, estimatedMonthlyDemand: 4750, seasonalLift: 3.2 },
+    ],
+    notes: [],
+  })),
 }));
-vi.mock("@/lib/naver/searchSignals", () => ({
-  fetchMonthlySeasonality: vi.fn(async () => [
-    { keyword: "선글라스", monthlyRatios: [10, 10, 10, 10, 10, 90, 95, 90, 10, 10, 10, 10] },
-  ]),
-  fetchKeywordDemandSignals: vi.fn(async () => [
-    { keyword: "선글라스", monthlyTotalSearches: 5000 },
-  ]),
-}));
-vi.mock("@/lib/blogops/insights", () => ({
-  getTopExposedKeywordKeys: vi.fn(async () => new Set<string>()),
+
+vi.mock("@/lib/trends/googleTrends", () => ({
+  fetchGoogleTrendsKR: vi.fn(async () => [{ keyword: "트렌드", trafficLabel: "1000+" }]),
 }));
 
 import { POST } from "./route";
-import { getTopExposedKeywordKeys } from "@/lib/blogops/insights";
-import { fetchMonthlySeasonality } from "@/lib/naver/searchSignals";
+import { discoverSeasonalKeywords } from "@/lib/topics/seasonalDiscovery";
 
 function req(body: unknown) {
   return { json: async () => body } as Parameters<typeof POST>[0];
 }
 
-const SUMMER_RATIOS = [10, 10, 10, 10, 10, 90, 95, 90, 10, 10, 10, 10];
 beforeEach(() => {
   vi.clearAllMocks();
-  // clearAllMocks는 mockResolvedValue 구현을 지우지 않으므로(누수) 매 테스트 기본값 복원.
-  vi.mocked(getTopExposedKeywordKeys).mockResolvedValue(new Set<string>());
-  vi.mocked(fetchMonthlySeasonality).mockResolvedValue([
-    { keyword: "선글라스", monthlyRatios: SUMMER_RATIOS },
-  ]);
+  // clearAllMocks는 mockResolvedValue 구현을 지우지 않으므로 매 테스트 기본 구현 복원.
+  vi.mocked(discoverSeasonalKeywords).mockImplementation(async (p) => ({
+    shopId: p.shopId,
+    month: p.month,
+    volumeTop: [
+      { keyword: "선글라스", categoryId: "lenses", categoryName: "안경렌즈", seasonScore: 95, monthlyVolume: 5000, peakMonth: 7, isPeakMonth: true, estimatedMonthlyDemand: 4750, seasonalLift: 3.2 },
+    ],
+    issueTop: [
+      { keyword: "변색렌즈", categoryId: "lenses", categoryName: "안경렌즈", seasonScore: 80, monthlyVolume: 3000, peakMonth: 7, isPeakMonth: true, estimatedMonthlyDemand: 2400, seasonalLift: 2.7 },
+    ],
+    notes: [],
+  }));
 });
 afterEach(() => vi.restoreAllMocks());
 
 describe("/api/topics/seasonal-series POST", () => {
-  it("headKeywords 없으면 400(zod)", async () => {
-    const res = await POST(req({ shopId: "top50jn", categoryId: "progressive" }));
+  it("shopId 없으면 400(zod)", async () => {
+    const res = await POST(req({ month: 7 }));
     expect(res.status).toBe(400);
   });
 
   it("잘못된 shopId면 400", async () => {
-    const res = await POST(
-      req({ shopId: "nope", categoryId: "progressive", headKeywords: ["선글라스"] })
-    );
+    const res = await POST(req({ shopId: "nope", month: 7 }));
     expect(res.status).toBe(400);
     expect((await res.json()).error).toContain("shopId");
   });
 
-  it("유효 입력이면 7월 편성표를 만든다(시즌곡선+검색량 조립)", async () => {
-    const res = await POST(
-      req({ shopId: "top50jn", categoryId: "progressive", headKeywords: ["선글라스"], month: 7 })
-    );
+  it("유효 입력이면 볼륨/이슈 두 리스트를 발굴해 돌려준다", async () => {
+    const res = await POST(req({ shopId: "top50jn", month: 7 }));
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.success).toBe(true);
     expect(json.data.month).toBe(7);
-    expect(json.data.picks[0].headKeyword).toBe("선글라스");
-    expect(json.data.picks[0].monthlyVolume).toBe(5000);
-    expect(json.data.picks[0].isPeakMonth).toBe(true); // 7월=95=연중최고
-    expect(json.data.schedule[0].slot).toBe(1);
+    expect(json.data.volumeTop[0].keyword).toBe("선글라스");
+    expect(json.data.issueTop[0].keyword).toBe("변색렌즈");
+    expect(json.data.trendingNow[0].keyword).toBe("트렌드");
+    expect(discoverSeasonalKeywords).toHaveBeenCalledWith(
+      expect.objectContaining({ shopId: "top50jn", month: 7 })
+    );
   });
 
-  it("자기잠식 키워드는 편성에서 제외한다", async () => {
-    vi.mocked(getTopExposedKeywordKeys).mockResolvedValue(new Set(["선글라스"]));
-    const res = await POST(
-      req({ shopId: "top50jn", categoryId: "progressive", headKeywords: ["선글라스"], month: 7 })
-    );
-    const json = await res.json();
-    expect(json.data.picks).toHaveLength(0);
-    expect(json.data.notes.join(" ")).toContain("자기잠식");
-  });
-
-  it("시즌 API가 죽어도(빈 결과) 폴백해 200을 준다", async () => {
-    vi.mocked(fetchMonthlySeasonality).mockRejectedValue(new Error("datalab down"));
-    const res = await POST(
-      req({ shopId: "top50jn", categoryId: "progressive", headKeywords: ["선글라스"], month: 7 })
-    );
+  it("month 생략 시 다음 달로 기본 설정한다", async () => {
+    const res = await POST(req({ shopId: "top50jn" }));
     expect(res.status).toBe(200);
-    const json = await res.json();
-    expect(json.data.picks[0].peakMonth).toBeNull();
+    const now = new Date();
+    const expectedMonth = ((now.getMonth() + 1) % 12) + 1;
+    expect(vi.mocked(discoverSeasonalKeywords).mock.calls[0][0].month).toBe(expectedMonth);
+  });
+
+  it("발굴 IO가 던지면 500", async () => {
+    vi.mocked(discoverSeasonalKeywords).mockRejectedValue(new Error("boom"));
+    const res = await POST(req({ shopId: "top50jn", month: 7 }));
+    expect(res.status).toBe(500);
   });
 });

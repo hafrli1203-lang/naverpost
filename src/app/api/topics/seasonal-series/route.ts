@@ -1,28 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getShopById } from "@/lib/data/shops";
-import { CATEGORIES } from "@/lib/constants";
-import { fetchMonthlySeasonality } from "@/lib/naver/searchSignals";
-import { fetchKeywordDemandSignals } from "@/lib/naver/searchSignals";
-import { getTopExposedKeywordKeys } from "@/lib/blogops/insights";
-import {
-  planSeasonalSeries,
-  type SeasonalCandidate,
-} from "@/lib/topics/seasonalSeriesPlanner";
+import { discoverSeasonalKeywords } from "@/lib/topics/seasonalDiscovery";
+import { fetchGoogleTrendsKR } from "@/lib/trends/googleTrends";
 import { seasonalSeriesSchema } from "@/lib/validation/apiRequestSchemas";
 import { parseRequestBody } from "@/lib/validation/parseRequestBody";
 
 export const maxDuration = 60;
-
-function normalizeKey(keyword: string): string {
-  return keyword.replace(/\s+/g, "").trim().toLowerCase();
-}
-
-/** 대상 월의 1일을 ISO(yyyy-mm-dd)로. month는 1~12, 연도는 올해(과거면 내년). */
-function startDateForMonth(month: number, now: Date): string {
-  const thisYear = now.getFullYear();
-  const year = month - 1 < now.getMonth() ? thisYear + 1 : thisYear;
-  return `${year}-${String(month).padStart(2, "0")}-01`;
-}
 
 export async function POST(request: NextRequest) {
   try {
@@ -31,13 +14,12 @@ export async function POST(request: NextRequest) {
     if (!parsed.ok) {
       return NextResponse.json({ success: false, error: parsed.message }, { status: 400 });
     }
-    const { shopId, categoryId, headKeywords, count } = parsed.data;
+    const { shopId, count } = parsed.data;
 
     const shop = await getShopById(shopId);
-    const category = CATEGORIES.find((c) => c.id === categoryId);
-    if (!shop || !category) {
+    if (!shop) {
       return NextResponse.json(
-        { success: false, error: "잘못된 shopId 또는 categoryId입니다." },
+        { success: false, error: "잘못된 shopId입니다." },
         { status: 400 }
       );
     }
@@ -46,37 +28,15 @@ export async function POST(request: NextRequest) {
     // 기본 대상 월 = 다음 달(1~12 순환).
     const month = parsed.data.month ?? ((now.getMonth() + 1) % 12) + 1;
 
-    // 3종 데이터 병렬 수집. 외부가 죽어도 빈 결과로 폴백(엔진이 graceful 처리).
-    const [seasonality, demand, exposedKeys] = await Promise.all([
-      fetchMonthlySeasonality(headKeywords).catch(() => []),
-      fetchKeywordDemandSignals(headKeywords).catch(() => []),
-      getTopExposedKeywordKeys(shopId).catch(() => new Set<string>()),
+    // 안경 도메인 발굴 + 전 분야 실시간 트렌드(구글)를 병렬 수집. 트렌드 실패는 빈 배열.
+    const [result, trendingNow] = await Promise.all([
+      discoverSeasonalKeywords({ shopId, month, count, now }),
+      fetchGoogleTrendsKR().catch(() => []),
     ]);
 
-    const seasonalityByKey = new Map(seasonality.map((s) => [normalizeKey(s.keyword), s]));
-    const demandByKey = new Map(demand.map((d) => [normalizeKey(d.keyword), d]));
-
-    const candidates: SeasonalCandidate[] = headKeywords.map((headKeyword) => {
-      const key = normalizeKey(headKeyword);
-      return {
-        headKeyword,
-        monthlyRatios: seasonalityByKey.get(key)?.monthlyRatios ?? [],
-        monthlyVolume: demandByKey.get(key)?.monthlyTotalSearches ?? null,
-      };
-    });
-
-    const plan = planSeasonalSeries({
-      shopId,
-      month,
-      candidates,
-      count,
-      startDateIso: startDateForMonth(month, now),
-      excludedKeys: Array.from(exposedKeys),
-    });
-
-    return NextResponse.json({ success: true, data: plan });
+    return NextResponse.json({ success: true, data: { ...result, trendingNow } });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "시즌 시리즈 편성 중 오류";
+    const message = err instanceof Error ? err.message : "시즌 키워드 발굴 중 오류";
     return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
 }

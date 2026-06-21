@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Loader2, Layers } from "lucide-react";
+import { Loader2, Layers, PenLine } from "lucide-react";
 import { CATEGORIES } from "@/lib/constants";
 import type { Shop } from "@/types";
 
@@ -35,6 +35,12 @@ const AXIS_LABEL: Record<string, string> = {
   visit: "방문형",
   product: "상품형",
 };
+
+/** 메인 생성기로 딥링크 — 그 편 주제로 키워드/제목 생성 자동 시작(제목·키워드 규칙 적용). */
+function generatorUrl(shopId: string, categoryId: string, topic: string): string {
+  const params = new URLSearchParams({ start: "1", shopId, categoryId, topic });
+  return `/?${params.toString()}`;
+}
 
 export function SeriesPlanner() {
   const [shops, setShops] = useState<Shop[]>([]);
@@ -157,25 +163,53 @@ export function SeriesPlanner() {
 
         {plan && (
           <div className="space-y-3 pt-1">
-            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-              <Badge variant="secondary" className="bg-teal-100 text-teal-700">
-                {plan.headKeyword}
-              </Badge>
-              <span>
-                {plan.shopName} · {plan.categoryName} · {plan.items.length}편
-              </span>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <Badge variant="secondary" className="bg-teal-100 text-teal-700">
+                  {plan.headKeyword}
+                </Badge>
+                <span>
+                  {plan.shopName} · {plan.categoryName} · {plan.items.length}편
+                </span>
+              </div>
+              {plan.items.length > 0 && (
+                <Button
+                  onClick={() => {
+                    for (const item of plan.items) {
+                      window.open(generatorUrl(shopId, categoryId, item.topic), "_blank");
+                    }
+                  }}
+                  variant="outline"
+                  size="sm"
+                  className="h-7 gap-1.5 text-xs"
+                >
+                  <PenLine className="h-3.5 w-3.5" />
+                  일괄 생성
+                </Button>
+              )}
             </div>
 
             {plan.items.map((item) => (
               <div key={item.order} className="rounded-lg border border-slate-200 p-3">
-                <div className="flex items-center gap-2">
-                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-slate-800 text-[11px] font-semibold text-white">
-                    {item.order}
-                  </span>
-                  <Badge variant="secondary" className="bg-slate-100 text-slate-600 text-[11px]">
-                    {AXIS_LABEL[item.axis] ?? item.axis}
-                  </Badge>
-                  <p className="text-sm font-medium text-slate-800">{item.topic}</p>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-slate-800 text-[11px] font-semibold text-white">
+                      {item.order}
+                    </span>
+                    <Badge variant="secondary" className="shrink-0 bg-slate-100 text-slate-600 text-[11px]">
+                      {AXIS_LABEL[item.axis] ?? item.axis}
+                    </Badge>
+                    <p className="truncate text-sm font-medium text-slate-800">{item.topic}</p>
+                  </div>
+                  <a
+                    href={generatorUrl(shopId, categoryId, item.topic)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border border-input px-2.5 text-xs font-medium text-slate-700 transition-colors hover:-translate-y-0.5 hover:border-teal-400 hover:text-teal-600 active:translate-y-0"
+                  >
+                    <PenLine className="h-3 w-3" />
+                    글쓰기
+                  </a>
                 </div>
                 <p className="mt-1.5 text-xs leading-5 text-muted-foreground">{item.thesis}</p>
                 {item.modifiers.length > 0 && (

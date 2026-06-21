@@ -3,6 +3,7 @@ import {
   planBlogTopics,
   planBlogTopic,
   planMonthlyCategorySlots,
+  buildKeywordSeriesTopics,
 } from "./topicPlanner";
 import type { Shop, Category } from "@/types";
 
@@ -51,6 +52,51 @@ describe("planBlogTopics", () => {
     const a = planBlogTopics({ shop, category, maxCount: 5 });
     const b = planBlogTopics({ shop, category, maxCount: 5 });
     expect(a).toEqual(b);
+  });
+});
+
+describe("buildKeywordSeriesTopics (헤드 키워드 주도)", () => {
+  const lenses: Category = { id: "lenses", name: "안경렌즈", subcategories: [] };
+
+  it("모든 편 주제에 헤드 키워드가 들어간다(키워드가 실제 반영됨)", () => {
+    const plans = buildKeywordSeriesTopics({ headKeyword: "편광렌즈", category: lenses });
+    expect(plans.length).toBeGreaterThanOrEqual(5);
+    for (const p of plans) {
+      expect(p.topic).toContain("편광렌즈");
+    }
+  });
+
+  it("편마다 검색 의도 축이 서로 다르다(시리즈 다각화)", () => {
+    const plans = buildKeywordSeriesTopics({ headKeyword: "편광렌즈", category: lenses });
+    const axes = plans.map((p) => p.axis);
+    expect(new Set(axes).size).toBe(axes.length);
+  });
+
+  it("키워드가 다르면 주제도 다르다(카테고리 고정 템플릿이 아님)", () => {
+    const a = buildKeywordSeriesTopics({ headKeyword: "편광렌즈", category: lenses });
+    const b = buildKeywordSeriesTopics({ headKeyword: "변색렌즈", category: lenses });
+    expect(a[0].topic).not.toBe(b[0].topic);
+    expect(b.every((p) => p.topic.includes("변색렌즈"))).toBe(true);
+  });
+
+  it("수식어가 편(축)마다 다르고 무관한 카테고리어가 섞이지 않는다", () => {
+    const plans = buildKeywordSeriesTopics({ headKeyword: "편광렌즈", category: lenses });
+    // 편마다 수식어 묶음이 달라야 한다(6편 동일 문제 해소).
+    const joined = plans.map((p) => p.preferredModifiers.join(","));
+    expect(new Set(joined).size).toBe(joined.length);
+    // 카테고리 하위분류에서 새던 무관어가 더는 들어가지 않는다.
+    const all = plans.flatMap((p) => p.preferredModifiers);
+    expect(all).not.toContain("압축");
+    expect(all).not.toContain("굴절률");
+  });
+
+  it("이미 발행한 제목과 겹치는 축은 거른다", () => {
+    const plans = buildKeywordSeriesTopics({
+      headKeyword: "편광렌즈",
+      category: lenses,
+      existingTitles: ["편광렌즈 고를 때 비교 기준"],
+    });
+    expect(plans.some((p) => p.topic === "편광렌즈 고를 때 비교 기준")).toBe(false);
   });
 });
 

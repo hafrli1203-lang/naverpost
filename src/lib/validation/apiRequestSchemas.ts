@@ -41,15 +41,14 @@ export const topicsSeriesSchema = z.object({
   count: z.number().int().optional(),
 });
 
-/** POST /api/topics/seasonal-series — 월별 시즌 키워드 시리즈 편성 */
+/**
+ * POST /api/topics/seasonal-series — 시즌 키워드 발굴.
+ * 매장 + 월만 받는다(키워드는 시스템이 발굴). categoryId·headKeywords는 발굴형 전환으로 제거.
+ */
 export const seasonalSeriesSchema = z.object({
-  shopId: z.string(REQUIRED_SHOP_CATEGORY).min(1, REQUIRED_SHOP_CATEGORY),
-  categoryId: z.string(REQUIRED_SHOP_CATEGORY).min(1, REQUIRED_SHOP_CATEGORY),
-  headKeywords: z
-    .array(z.string().min(1))
-    .min(1, "headKeywords가 최소 1개 필요합니다."),
+  shopId: z.string("shopId가 필요합니다.").min(1, "shopId가 필요합니다."),
   month: z.number().int().min(1).max(12).optional(),
-  count: z.number().int().min(1).max(8).optional(),
+  count: z.number().int().min(1).max(20).optional(),
 });
 
 /** POST /api/title-similarity (title 필수 여부는 라우트가 trim 후 판정 — 여기선 타입만) */
