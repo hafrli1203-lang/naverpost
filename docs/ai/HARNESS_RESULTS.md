@@ -510,3 +510,13 @@
 - 절차: sessionStore fixture가 SavedSession 필수필드 누락으로 tsc 2에러 → 실제 타입대로 채워 해소(test는 통과했었음). fs 전체 mock이 다른 테스트 오염 0 확인.
 - 게이트: tsc 0 | P0 | PASS · test 255 | P1 | PASS · lint 0 | P2 | PASS.
 - 검수자: 메인 직접.
+
+### 2026-06-21 컴포넌트 테스트 인프라 도입 + 첫 컴포넌트 테스트 (사용자 승인 설치)
+- Change-Fingerprint: component-test-infra
+- Gate Result: PASS — type-check 0 + test 260(+5) + lint 0 + 기존 255 무영향.
+- 설치(pnpm, 사용자 승인): @testing-library/react@16.3.2·jest-dom@6.9.1·dom@10.4.1·jsdom@25.0.1 (devDeps, React19 호환). package.json엔 4종만 추가, pnpm-lock 갱신.
+- 설정: vitest.config.ts에 environment:"node"(전역 유지) + setupFiles. vitest.setup.ts(jest-dom matcher + DOM 있을때만 cleanup 가드 → node 순수테스트 무영향). 컴포넌트 테스트는 파일 상단 `// @vitest-environment jsdom` 도크블록으로 개별 전환.
+- 첫 테스트: WorkflowStepper.test.tsx 5건(4단계 렌더·현재단계 강조·도달단계 클릭·현재단계 클릭무시·미도달 클릭무시). render/screen/fireEvent.
+- 게이트: tsc 0 | P0 | PASS · test 260 | P1 | PASS · lint 0 | P2 | PASS · 기존 255 통과 유지 | P0 | PASS.
+- 비고: 패키지 설치는 CLAUDE.md 평소 금지나 이번 사용자 명시 승인. node 환경 전역 유지로 순수 테스트 속도 보존.
+- 검수자: 메인 직접.
