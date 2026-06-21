@@ -454,3 +454,10 @@
 - 변경: titleBodyAlignment.test.ts 4건(키워드 커버리지/누락 high이슈·표 감지·인용 감지) + blaiLanguageRules.test.ts 10건(비속어/비하/민감/상업어/강조어/광고어 6탐지기 + 중복제거 + **가장자리 오탐 방지(법적)**). 둘 다 순수(CLI 0).
 - 게이트: tsc 0 | P0 | PASS · test 178 | P1 | PASS · lint 0 | P2 | PASS.
 - 검수자: 메인 직접.
+
+### 2026-06-21 주제 추천/월간 슬롯 테스트 (검증 인프라)
+- Change-Fingerprint: topic-planner-tests
+- Gate Result: PASS — type-check 0 + test 185(+7) + lint 0.
+- 변경: topicPlanner.test.ts 7건(planBlogTopics·planBlogTopic·planMonthlyCategorySlots). 내부 rotation이 현재 월(getMonthKey=new Date) 의존이라 정확값 대신 시간독립 불변식 고정: maxCount 이하·핵심필드(topic/thesis/axis) 존재 · userTopic 단축경로(결정론) · 같은입력=같은출력 · 슬롯 1..N 번호 · 제공 카테고리만 사용 · 6슬롯=6카테고리 1회씩(쏠림 방지).
+- 게이트: tsc 0 | P0 | PASS · test 185 | P1 | PASS · lint 0 | P2 | PASS.
+- 검수자: 메인 직접.
