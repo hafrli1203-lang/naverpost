@@ -483,3 +483,10 @@
 - 변경 3파일: aiClicheSanitizer.test(7: 1:1 안전치환·레지스터 유지·무위반 0치환·결정론·examples 8제한) + articleBrief.test(5: 키워드 매핑·연구요약 출처제외·crossBlog 5제한·sources naver-search 분기) + articlePrompt.test(7: getToneGuide 톤분기+standard 폴백·charCount→섹션수(1000=2/2500=5)·키워드 주입·외부참고/용어집 조건부 섹션). 전부 순수.
 - 게이트: tsc 0 | P0 | PASS · test 219 | P1 | PASS · lint 0 | P2 | PASS.
 - 검수자: 메인 직접.
+
+### 2026-06-21 프롬프트 빌더 4종 테스트 (검증 인프라)
+- Change-Fingerprint: prompt-builders-tests
+- Gate Result: PASS — type-check 0 + test 235(+16) + lint 0.
+- 변경 4파일: washingPrompt.test(3: 원문/의료법·광고법 지시·톤 주입) + revisionPrompt.test(4: 원문·금지어→대체어 지시(매핑유무)·삭제폴백) + promoPrompt.test(4: 키워드/매장·행사블록 조건부·[확인 필요] 폴백) + titlePrompt.test(4: TITLE_PATTERN_GUIDE·매장/카테고리/목록 주입·빈목록 (없음) 폴백). 전부 순수.
+- 게이트: tsc 0 | P0 | PASS · test 235 | P1 | PASS · lint 0 | P2 | PASS.
+- 검수자: 메인 직접.
