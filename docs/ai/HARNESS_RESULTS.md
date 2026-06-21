@@ -461,3 +461,11 @@
 - 변경: topicPlanner.test.ts 7건(planBlogTopics·planBlogTopic·planMonthlyCategorySlots). 내부 rotation이 현재 월(getMonthKey=new Date) 의존이라 정확값 대신 시간독립 불변식 고정: maxCount 이하·핵심필드(topic/thesis/axis) 존재 · userTopic 단축경로(결정론) · 같은입력=같은출력 · 슬롯 1..N 번호 · 제공 카테고리만 사용 · 6슬롯=6카테고리 1회씩(쏠림 방지).
 - 게이트: tsc 0 | P0 | PASS · test 185 | P1 | PASS · lint 0 | P2 | PASS.
 - 검수자: 메인 직접.
+
+### 2026-06-21 지역추론/발굴시드/전략가이드 테스트 (검증 인프라)
+- Change-Fingerprint: seasonal-strategy-tests
+- Gate Result: PASS — type-check 0 + test 192(+7) + lint 0.
+- 변경: seasonalStrategy.test.ts 7건. inferShopRegion(6매장 고정 매핑: top50jn=장림·leesi7007=대전충남대 등 + 미등록 이름추론) · buildKeywordDiscoverySeeds(지역=마지막토큰 '대전 충남대'→충남대, 비지역시드 공백정규화 '누진렌즈적응', 25개·중복0) · buildKeywordStrategyGuide(now? 주입 결정론). inferShopRegion/seeds 순수, guide는 now 주입으로 시간 의존 우회.
+- 절차: 첫 시도서 시드 공백정규화('누진렌즈 적응'→'누진렌즈적응') 미인지로 1건 실패 → 실제 출력 probe로 확인 후 정정(추측 금지 원칙).
+- 게이트: tsc 0 | P0 | PASS · test 192 | P1 | PASS · lint 0 | P2 | PASS.
+- 검수자: 메인 직접.
