@@ -527,3 +527,10 @@
 - 변경: CadenceTracker.test.tsx 4건(jsdom). fetch mock으로 성공(매장 렌더+상태배지)·API 실패(오류 메시지)·빈 결과(reason 안내)·새로고침 버튼 재조회. 이번 세션 set-state-in-effect 수정한 컴포넌트의 동작 회귀 안전망.
 - 게이트: tsc 0 | P0 | PASS · test 264 | P1 | PASS · lint 0 | P2 | PASS.
 - 검수자: 메인 직접.
+
+### 2026-06-21 FinalConfirm(붙여넣기 export 화면) 컴포넌트 테스트
+- Change-Fingerprint: finalconfirm-component-test
+- Gate Result: PASS — type-check 0 + test 268(+4) + lint 0.
+- 변경: FinalConfirm.test.tsx 4건(jsdom). 핵심 화면(사람이 네이버에 붙여넣는 최종 export). 본문 제목 렌더 · **SEO 검수(/api/analysis) 실패해도 export 안 막힘(fail-open 계약)** · 복사 버튼이 붙여넣기용 평문(제목 포함)을 navigator.clipboard에 씀 · onStartOver 연결. fetch/clipboard mock. WorkflowState fixture(validation.revisionReasons 필수 — buildFinalReport 의존).
+- 게이트: tsc 0 | P0 | PASS · test 268 | P1 | PASS · lint 0 | P2 | PASS.
+- 검수자: 메인 직접.
