@@ -687,3 +687,18 @@
 ## 외부리뷰 d06dad3 종결 요약
 - codex P0 0 / P1 1 / P2 3 / P3 2 — 전부 처리 완료(P1 topic상한, P2 이슈누락보정+IO/파서테스트, P3 계약판정+클라zod, 고아삭제).
 - 누적 게이트: type-check 0 · lint 0 · test 342 · build 0. 미커밋 상태(push는 사용자 승인 대기).
+
+## 2026-06-22 이미지 전량 실패 긴급대응 — 토큰 만료 복구 + 401 표면화
+- Change-Fingerprint: b6c352c5e4abda58
+- Gate Result: PASS — type-check 0 · lint 0 · build 0(✓ Compiled). 단위테스트 신규 없음(아래 미검증 참조).
+- 배경(긴급): 사용자 화면에서 이미지 10/10 전부 "실패". 진단 결과 코드 버그 아님 — gti 백엔드(private-codex)가 전 호출에 HTTP 401. `~/.codex/auth.json` access_token이 2026-06-22T04:49:41Z 만료(06-12 발급, 10일 수명). gti는 토큰을 읽기만 하고 갱신 안 함 → 만료 시 전량 실패.
+- 1차 복구(코드무관): `codex exec` 1회로 refresh_token 자동 갱신 → exp 2026-07-02로 갱신 확인 → gti 직접호출 HTTP 200·1.9MB PNG 생성 확인. 사용자 재생성 가능 상태 복귀.
+- 원인규명: 인증 닿는 변경파일은 gtiCli.ts 단 1개이며 토큰 제어 로직 0줄. 만료는 JWT exp 객관값. 이미지 변경이 만료 유발했다는 근거 없음(평소 codex 사용이 10일내 갱신해 만료선 미도달, 이번엔 갱신 트리거 미발생).
+- 2차 재발방지(사용자 승인 후 구현 — 401 표면화):
+  - `spawnCli.ts`: CliErrorCode에 `"auth"` 추가.
+  - `gtiCli.ts`: runCli를 try/catch로 감싸 stderr가 `/unauthorized|auth may be expired|\b401\b/i`면 CliError code `"auth"` + 한국어 안내 메시지로 재분류(일반 non-zero와 분리). 성공 경로 불변(rethrow만).
+  - `page.tsx`: `/api/image/one`·`/regenerate` 실패 응답의 `code:"auth"` 감지 → `imageAuthExpired` 상태(만료 시 재시도 즉시 중단, 재생성 성공 시 해제). LooseApiResponse·worker json 타입에 code 추가.
+  - `ImagePreview.tsx`: authExpired prop → 그리드 상단 적색 안내 배너("ChatGPT 로그인 만료 → 터미널 codex 실행 후 재생성", 다크모드 대응).
+- 게이트: tsc 0 | P0 | PASS · build 0 | P0 | PASS · lint 0 | P1 | PASS · 핵심기능삭제 0 | P0 | PASS · 민감정보출력 0(토큰값 미출력, exp/만료여부만 표시) | P0 | PASS.
+- 미검증(P1 test): gtiCli 인증분류는 신규 유닛테스트 미작성 — 대신 실제 stderr 시그니처 2종(Unauthorized / HTTP 401) 매칭 + 일반 타임아웃 오탐 0을 node 스니펫으로 확인. src/lib/ai엔 기존 테스트파일 없음. UX 하네스 리뷰어 미실행(배너 단일 추가, 반응형/접근성 정밀점검 별도).
+- 검수자: 메인 직접(라이브 진단·복구 + 코드확인 + 전게이트). 미커밋(push 사용자 승인 대기).

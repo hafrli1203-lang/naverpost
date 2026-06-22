@@ -72,11 +72,29 @@ export async function runGti({
       args.push("--dry-run");
     }
 
-    const { stdout } = await runCli({
-      command: "gti",
-      args,
-      timeoutMs,
-    });
+    let stdout: string;
+    try {
+      ({ stdout } = await runCli({
+        command: "gti",
+        args,
+        timeoutMs,
+      }));
+    } catch (err) {
+      // 401/Unauthorized = ChatGPT(Codex) 로그인 만료. gti는 토큰을 읽기만 하고 갱신하지
+      // 않으므로 만료되면 전 호출이 죽는다. 일반 "non-zero" 대신 "auth"로 재분류해
+      // UI가 "로그인 만료"를 명확히 안내하도록 한다(원인 모를 "실패" 방지).
+      if (err instanceof CliError) {
+        const haystack = `${err.message}\n${err.stderr ?? ""}`;
+        if (/unauthorized|auth may be expired|\b401\b/i.test(haystack)) {
+          throw new CliError(
+            "ChatGPT(Codex) 로그인이 만료되어 이미지 생성이 차단되었습니다. 터미널에서 codex를 한 번 실행해 로그인을 갱신한 뒤 다시 시도하세요.",
+            "auth",
+            err.stderr
+          );
+        }
+      }
+      throw err;
+    }
 
     // dry-run은 PNG를 만들지 않는다 → 요청 형태를 진단 에러로 노출(이미지 없음).
     if (effectiveDryRun) {

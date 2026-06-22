@@ -32,6 +32,8 @@ interface ImagePreviewProps {
   isGenerating: boolean;
   progress: { current: number; total: number };
   hasArticle?: boolean;
+  /** ChatGPT(Codex) 로그인 만료(401)로 생성이 막혔을 때 안내 배너를 띄운다. */
+  authExpired?: boolean;
 }
 
 function ImageStatusBadge({ status }: { status: BlogImage["status"] }) {
@@ -233,6 +235,7 @@ export function ImagePreview({
   isGenerating,
   progress,
   hasArticle,
+  authExpired,
 }: ImagePreviewProps) {
   const successCount = images.filter((img) => img.status === "success").length;
   const failCount = images.filter((img) => img.status === "failed").length;
@@ -281,6 +284,22 @@ export function ImagePreview({
         <h2 className="text-xl font-semibold">이미지 생성</h2>
         <p className="text-sm text-muted-foreground">블로그에 사용될 이미지를 확인하세요</p>
       </div>
+
+      {/* 로그인 만료 안내: 이미지가 전부 실패하는 가장 흔한 원인이 ChatGPT(Codex) 토큰 만료라
+          원인 모를 "실패" 대신 조치 방법을 명확히 보여준다. */}
+      {authExpired && (
+        <div className="flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 p-4 text-sm dark:border-red-900 dark:bg-red-950/40">
+          <XCircle className="w-5 h-5 shrink-0 text-red-500 mt-0.5" />
+          <div className="space-y-1">
+            <p className="font-semibold text-red-700 dark:text-red-300">
+              ChatGPT 로그인이 만료되어 이미지 생성이 막혔습니다
+            </p>
+            <p className="text-red-600/90 dark:text-red-400/90">
+              터미널에서 <code className="rounded bg-red-100 px-1 py-0.5 dark:bg-red-900/60">codex</code> 를 한 번 실행해 로그인을 갱신한 뒤 재생성하세요. (이미지 백엔드 인증은 약 10일마다 만료됩니다.)
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* 원고 소스 선택 */}
       {onStartGeneration && !isGenerating && images.length === 0 && (
