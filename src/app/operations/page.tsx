@@ -4,6 +4,7 @@ import Link from "next/link";
 import { ArrowLeft, Store } from "lucide-react";
 import { CadenceTracker } from "@/components/CadenceTracker";
 import { SeriesPlanner } from "@/components/SeriesPlanner";
+import { SeasonalSeriesPlanner } from "@/components/SeasonalSeriesPlanner";
 
 export default function OperationsPage() {
   return (
@@ -27,6 +28,7 @@ export default function OperationsPage() {
       <main className="mx-auto max-w-3xl space-y-6 px-4 py-8">
         <CadenceTracker />
         <SeriesPlanner />
+        <SeasonalSeriesPlanner />
       </main>
     </div>
   );

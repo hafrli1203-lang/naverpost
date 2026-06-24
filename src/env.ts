@@ -7,7 +7,7 @@ const envSchema = z.object({
   NAVER_SEARCHAD_API_KEY: z.string().optional(),
   NAVER_SEARCHAD_SECRET_KEY: z.string().optional(),
   NAVER_SEARCHAD_CUSTOMER_ID: z.string().optional(),
-  GOOGLE_SHEETS_ID: z.string().optional(),
+  // NOTE: Google Sheets 연동은 미구현(로드맵). 실제 구현 시 GOOGLE_SHEETS_ID 등 재추가.
 });
 
 export type Env = z.infer<typeof envSchema>;

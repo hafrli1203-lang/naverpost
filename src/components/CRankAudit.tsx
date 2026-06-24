@@ -97,7 +97,11 @@ export function CRankAudit({
   }, [title, body, mainKeyword, subKeyword1, subKeyword2]);
 
   useEffect(() => {
-    runAudit();
+    // 동기 setState가 effect 본문에서 바로 호출되지 않도록 async 경로로 감싼다
+    // (캐스케이드 렌더 방지). 동작 동일(마운트/의존 변경 시 사전 점검 실행).
+    void (async () => {
+      await runAudit();
+    })();
   }, [runAudit]);
 
   const warnings = audit ? filterContextWarnings(audit.warnings) : [];

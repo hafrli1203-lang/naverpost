@@ -2,14 +2,19 @@ import { NextRequest, NextResponse } from "next/server";
 import fs from "fs/promises";
 import path from "path";
 import { generateBlogImage } from "@/lib/ai/imageGen";
+import { appendReferenceAdherence } from "@/lib/prompts/imageRefPrompt";
+import { CliError } from "@/lib/ai/cli/spawnCli";
 import { saveImage } from "@/lib/storage/imageStore";
 import { washImageBuffer } from "@/lib/storage/imageWash";
 import {
   getSceneReferenceImages,
   listScenePhotos,
   listAllDetailRefPhotos,
-  type SceneTag,
 } from "@/lib/data/shopRefs";
+import {
+  imageOneSchema,
+  parseRequestBody,
+} from "@/lib/validation/imageRequestSchemas";
 
 export const runtime = "nodejs";
 export const maxDuration = 600;
@@ -19,21 +24,14 @@ const ALLOWED_PHOTO_EXTS = new Set([".jpg", ".jpeg", ".png", ".webp"]);
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { sessionId, index, prompt, shopId, scene, rawPhoto } = body as {
-      sessionId?: string;
-      index?: number;
-      prompt?: string;
-      shopId?: string;
-      scene?: SceneTag | null;
-      rawPhoto?: string;
-    };
-
-    if (!sessionId || index === undefined || !prompt) {
+    const parsed = parseRequestBody(imageOneSchema, body);
+    if (!parsed.ok) {
       return NextResponse.json(
-        { success: false, error: "sessionId, index, prompt는 필수입니다." },
+        { success: false, error: parsed.message },
         { status: 400 }
       );
     }
+    const { sessionId, index, prompt, shopId, scene, rawPhoto } = parsed.data;
 
     // 하이브리드: 매장 컷은 실제 매장 사진을 "그대로" 서빙(AI 생성/합성 아님 — 진짜 사진 한 장).
     // 보안: 클라가 보낸 rawPhoto 경로는 신뢰하지 않는다. shopId+scene로 서버가 허용 목록을
@@ -78,7 +76,11 @@ export async function POST(request: NextRequest) {
     // 매장 밖/개념 이미지(scene=null)는 빈 배열 → 묘사 기반 생성.
     const refImages = scene && shopId ? await getSceneReferenceImages(shopId, scene) : [];
 
-    const result = await generateBlogImage(prompt, refImages);
+    // IMG-D: 참조 사진이 붙으면 "실제 환경 충실 재현 + 설비 복제 금지" 지시를 덧붙인다.
+    const result = await generateBlogImage(
+      appendReferenceAdherence(prompt, refImages.length),
+      refImages
+    );
     const saved = await saveImage(sessionId, index, result.base64Data, result.mimeType);
 
     return NextResponse.json({
@@ -94,6 +96,8 @@ export async function POST(request: NextRequest) {
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "이미지 생성 중 오류";
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
+    // IMG-G: 실패 원인(타임아웃/비정상종료/빈응답/미설치)을 구분해 노출한다.
+    const code = err instanceof CliError ? err.code : undefined;
+    return NextResponse.json({ success: false, error: message, code }, { status: 500 });
   }
 }

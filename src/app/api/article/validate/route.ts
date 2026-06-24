@@ -1,17 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { validateContent } from "@/lib/validation/contentValidator";
+import { articleValidateSchema } from "@/lib/validation/apiRequestSchemas";
+import { parseRequestBody } from "@/lib/validation/parseRequestBody";
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { content, tone } = body as { content: string; tone?: string };
-
-    if (!content) {
+    const parsed = parseRequestBody(articleValidateSchema, body);
+    if (!parsed.ok) {
       return NextResponse.json(
-        { success: false, error: "content는 필수입니다." },
+        { success: false, error: parsed.message },
         { status: 400 }
       );
     }
+    const { content, tone } = parsed.data;
 
     const validation = await validateContent(
       content,

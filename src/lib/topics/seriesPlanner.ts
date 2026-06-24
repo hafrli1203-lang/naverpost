@@ -1,5 +1,9 @@
 import type { Category, Shop } from "@/types";
-import { planBlogTopics, type TopicIntentAxis } from "@/lib/topics/topicPlanner";
+import {
+  buildKeywordSeriesTopics,
+  planBlogTopics,
+  type TopicIntentAxis,
+} from "@/lib/topics/topicPlanner";
 import { getShopProductHeads } from "@/lib/keywords/productKeywordCatalog";
 import {
   getTopExposedKeywordKeys,
@@ -76,18 +80,26 @@ export async function planKeywordSeries(params: {
   const { shop, category } = params;
   const count = Math.max(1, Math.min(MAX_COUNT, params.count ?? DEFAULT_COUNT));
   const headKeyword = resolveHeadKeyword(params);
+  const explicitHead = (params.headKeyword ?? "").trim().length > 0;
   const notes: string[] = [];
 
   // 자기잠식 가드: 노출 1~3위 키워드 키 집합(BlogOps 다운 시 빈 집합).
   const exposedKeys = await getTopExposedKeywordKeys(shop.id);
 
-  // 축 순환 기반 후보 주제(category-diverse). 넉넉히 뽑아 가드로 거른다.
-  const candidates = planBlogTopics({
-    shop,
-    category,
-    existingTitles: params.existingTitles,
-    maxCount: MAX_COUNT * 2,
-  });
+  // 헤드 키워드를 직접 입력하면 그 키워드가 모든 편 주제에 반영되도록 키워드 주도로 생성한다.
+  // 키워드 없이 자동일 때만 카테고리 템플릿(category-diverse)을 폴백으로 쓴다.
+  const candidates = explicitHead
+    ? buildKeywordSeriesTopics({
+        headKeyword,
+        category,
+        existingTitles: params.existingTitles,
+      })
+    : planBlogTopics({
+        shop,
+        category,
+        existingTitles: params.existingTitles,
+        maxCount: MAX_COUNT * 2,
+      });
 
   const items: SeriesPlanItem[] = [];
   const excludedByCannibalization: string[] = [];

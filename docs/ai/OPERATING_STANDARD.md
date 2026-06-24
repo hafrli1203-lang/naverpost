@@ -53,3 +53,5 @@
 ## 8. 자동검증 레벨2 FULL (2026-06-19, P2-F4)
 - test 인프라 도입(package.json test + vitest devDep + lockfile)으로 validate-stop-check.sh가 type-check + test 모두 실행 → 레벨2 **FULL**(이전 type-check 중심 PARTIAL 해소).
 - 여전히 build는 자동검증 제외(수동), naverpost 전용(전체 미확장).
+
+> 명령어 레이어: docs/ai/COMMANDS.md

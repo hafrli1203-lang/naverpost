@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { trackExposureForShops } from "@/lib/blogops/exposure";
+import { blogopsShopSchema } from "@/lib/validation/apiRequestSchemas";
+import { parseRequestBody } from "@/lib/validation/parseRequestBody";
 
 export const maxDuration = 120;
 
@@ -7,10 +9,17 @@ export const maxDuration = 120;
 // Body: { shopId?: string } — omit to track all shops.
 export async function POST(request: NextRequest) {
   try {
-    const body = (await request.json().catch(() => ({}))) as { shopId?: string };
+    const raw = await request.json().catch(() => ({}));
+    const parsed = parseRequestBody(blogopsShopSchema, raw);
+    if (!parsed.ok) {
+      return NextResponse.json(
+        { success: false, error: parsed.message },
+        { status: 400 }
+      );
+    }
     const shopIds =
-      typeof body.shopId === "string" && body.shopId.trim().length > 0
-        ? [body.shopId.trim()]
+      typeof parsed.data.shopId === "string" && parsed.data.shopId.trim().length > 0
+        ? [parsed.data.shopId.trim()]
         : undefined;
 
     const outcome = await trackExposureForShops(shopIds);

@@ -66,3 +66,32 @@ C:/project/naverpost/docs/ai/TASKS.md
 ### P3 — CRankAudit/FinalConfirm 컴포넌트 테스트
 - [ ] 배경: UI 회귀 안전망 부족.
   - 처리 방향: 컴포넌트 테스트 인프라(위 P2 선택지 A) 도입 후 단계적 보강. 우선순위 낮음.
+
+### P2 — settings.local.json gh pr 권한 좁히기 (Codex 외부 리뷰 2026-06-20)
+- [ ] 배경: `.claude/settings.local.json`의 `Bash(gh pr *)`가 merge/close/edit/comment까지 무프롬프트 허용 → draft-only·승인 원칙과 충돌(Codex P2-2).
+  - 처리 방향: `gh pr create`·`gh pr view`·`gh pr list`만 허용으로 축소(merge/close 제거).
+  - 사용자 결정(2026-06-20): **현행 유지** — 당장 미수정. 안전 의식하되 권한 좁힘은 추후.
+
+## 품질 스캔 후보 (/agency-quality-sweep 2026-06-20)
+
+### P1 — API 라우트 입력 경계 검증(zod) 도입
+- [x] **완료**: body-as 14라우트 전부 zod 적용. 잘못된/누락 입력이 경계에서 400.
+  - ✅ image/* 4개(22fb61d): `imageRequestSchemas.ts`
+  - ✅ 단순 6개(cc1efe8): article/validate·blogops/backfill·blogops/exposure·topics/series·topics/suggest·title-similarity. `apiRequestSchemas.ts` + 공용 `parseRequestBody.ts`
+  - ✅ 복잡 4개(65df4bb): keywords·article·article/chat·article/wash. KeywordOption/ArticleContent는 z.custom으로 필수필드 런타임검증. test 총 78.
+  - 비고: request.json만 하던 나머지 라우트는 입력 없음/SSE라 대상 외. 신규 라우트는 같은 패턴 적용할 것.
+
+### P2 — react-hooks set-state-in-effect 3건 정리
+- [x] **완료(069ab26)**: `CRankAudit`·`CadenceTracker`·`FinalConfirm`의 effect 내 동기 setState를 async 경로(IIFE)로 감싸 캐스케이드 렌더 경고 제거. 동작 불변. lint 해당 3건 제거.
+
+### P2 — keywords/route.ts 3594줄 모듈 분리
+- [~] 배경: 단일 파일 3594줄(800 규칙 4.5배). 가독성·변경 위험.
+  - ✅ **두 공유 하드게이트 추출+테스트(밥줄 핵심)**: titleGate.ts(isAwkwardGeneratedTitle, test 14) + categoryGate.ts(isCategoryAppropriateCandidate+헬퍼4, test 16). route 3594→3457줄.
+  - **남음**: fan-out·재시도 분류·볼륨게이트 적용부 등은 라우트 상태 의존이라 추가 추출은 더 큰 리팩터. 우선순위 중.
+
+### P3 — as 캐스팅 71건 점진 축소
+- [ ] 배경: CLAUDE "no as casting"인데 src에 71건. 타입 안전 구멍.
+  - 처리 방향: 타입가드/`satisfies`로 점진 치환. 신규 코드 우선 차단, 기존은 접촉 시 정리.
+
+### P3 — 잡파일 제거 + eslintignore 보강
+- [x] **완료(eca297a)**: eslint.config.mjs ignores에 `.codex-review/**`·`.tmp-*` 추가 → lint 노이즈 4건 제거, **전체 lint 0건 달성**. `.tmp-test-export.mjs`는 이미 gitignore라 삭제 불요(파일 삭제 0).

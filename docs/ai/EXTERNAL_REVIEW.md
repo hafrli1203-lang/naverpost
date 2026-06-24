@@ -94,3 +94,136 @@ Focus: security regressions, missing tests, data-flow, external/AI-CLI cost-call
 - clean PR 기준 **FULL PASS**: type-check src 0 + pnpm test 2 passed. 자동검증 레벨2가 type-check+test 모두 실행(PARTIAL→FULL).
 - PR #2에 추가 commit push 후 **@codex review 2차 요청**(test infra/lockfile/package regression 포커스).
 - merge/deploy/main push 금지 유지.
+
+---
+
+## 이미지 파이프라인 수정 리뷰 요청 준비 (2026-06-20)
+### 범위 (origin/master..HEAD, 2 commits, clean)
+- `1609d1a` fix: 1:1 강제(sharp 센터크롭) + 워싱 회전 제거 + 프롬프트 누수 필터 + 참조 충실도 + 진단옵션
+- `c40a79e` docs: AGENCY-OS COMMANDS.md + 포인터 (운영문서, 기능과 분리됨)
+- 진짜 diff: 14파일(+289/−33). 코드 6 + 신규필터/참조/테스트 4 + 문서 4. **로컬 master(e2c63c1)는 stale — origin/master=98084a3 기준.**
+
+### 내부 하네스 (PASS)
+- type-check src 0 · vitest 49 passed(8 files) · fp 4afa7fc12e939016(회전제거) / 0958173d72ae64c5(누적).
+- 라이브 1회 실측: /api/image/one 순수생성 → 1024x1024 정사각·회전없음 확인(AI 비용 1회 승인됨).
+
+### PR 본문 (draft 전용, 준비됨)
+```
+## What changed
+이미지 파이프라인 결함 수정: (1) 백엔드가 --size를 무시해 ~4:3 출력 → sharp로 1024x1024 센터크롭 강제,
+(2) 워싱 ±1.1° 미세 회전 제거(사진 기울어짐), (3) Claude가 흘리는 한국어 설명문이 gti에 새어 실패하던 것을
+hangulRatio 필터로 차단, (4) 참조 사진 첨부 시 설비 복제·증식 금지 지시, (5) gti --dry-run/--debug 진단 + 실패코드 노출.
+운영문서(COMMANDS.md)는 별도 커밋으로 분리.
+
+## Internal harness (passed)
+- type-check src 0 · vitest 49 passed (8 files) · 라이브 1회 1024x1024 1:1 확인.
+
+## Review focus
+- sharp cover-crop이 비정사각 입력에서 콘텐츠 손실/원본 폴백 경로 타당성
+- imageWash 회전 제거 시 .removeAlpha() 동반 삭제 → 투명 PNG 입력의 JPEG 배경 처리(워싱 경로는 매장 JPEG 전용이나 확인)
+- 보안 회귀(rawPhoto IDOR 허용목록), 데이터 흐름, 기존 export/생성 동작 삭제 위험, 테스트 누락
+- AI CLI 비용 호출 누락/중복, 네이버 발행 금지 정책 위반 여부
+
+## Constraints
+내부 사용 단계. naverpost AGENTS.md + docs/ai/CODE_REVIEW.md, P0~P3. merge/deploy 금지(draft only).
+
+@codex review
+Focus: sharp square-crop content loss & fallback, imageWash removeAlpha drop on transparent PNG→JPEG, rawPhoto IDOR allowlist, data-flow, export/generation regression, missing tests, AI-CLI cost-call risk, Naver live-publish policy. Standard: AGENTS.md + docs/ai/CODE_REVIEW.md. P0~P3.
+```
+
+### 실행 경로 (1회 명시 승인 필요)
+- **A안(draft PR)**: `git push origin feature/naverpost-image-fixes` → `gh pr create --draft --base master` → PR 댓글 @codex. merge 금지.
+- **B안(codex 로컬 diff)**: `codex`로 origin/master..HEAD diff 리뷰(푸시 없음, AI 비용).
+- **현재: 준비 완료·실행 보류(C안)**. 승인 시 즉시 실행.
+
+### Codex 리뷰 결과 (2026-06-20, B안 로컬 diff)
+실행: `codex exec review --base origin/master` (codex-cli 0.141.0). Build/type-check/test PASS 전제 확인. **P0/P1 없음.**
+- **[P2-1] 워싱(실사진) 경로도 1:1 크롭 필요** — `src/lib/storage/imageWash.ts:58-60`. gtiCli의 1:1 센터크롭은 *생성* 경로에만 적용됨. exterior/interior/detail에서 rawPhoto가 붙으면 one/regenerate가 `washImageBuffer`의 JPEG(원본 비율, width만 리사이즈)를 그대로 반환 → **실사진 슬롯은 ~4:3, 생성 슬롯은 1:1로 불일치**. 1:1 계약이면 워싱 경로도 동일 cover 정사각 크롭 적용.
+- **[P2-2] `gh pr *` 권한 과대** — `.claude/settings.local.json:172`. `Bash(gh pr *)`가 merge/close/edit/comment까지 무프롬프트 허용 → draft-only·승인 원칙과 충돌. 정확한 read/draft-create로 좁히거나 제거.
+판정/반영: 아래 HARNESS_RESULTS + 사용자 승인 흐름. merge/deploy 안 함.
+
+---
+
+## 시즌 발굴 + 시리즈 키워드화 리뷰 요청 준비 (2026-06-21)
+### 범위 (리뷰 대상 = 단일 커밋 d06dad3)
+- `d06dad3` feat: 시즌 키워드 발굴(편성표→발굴형 전환) + 시리즈 플래너 키워드 주도화. 16파일(+1244/−166).
+- 코드 11(신규 seasonalDiscovery/googleTrends/SeasonalSeriesPlanner + route/UI/searchSignals/topicPlanner/seriesPlanner/schema 수정) · 테스트 3 · 문서 1(HARNESS_RESULTS).
+- 이전 이미지/zod/test 커밋은 2026-06-20 Codex 로컬리뷰 완료(P0/P1 0). 이번 리뷰는 d06dad3만.
+
+### 내부 하네스 (PASS)
+- type-check src 0 · lint 0 · vitest 336 passed(51 files) · build 0.
+- fp: 706e960e872e8a95(딥링크) / 25f2d26073a03eec(수식어) / 506620e33fd7a608(두 축) / 68568791b43be941(트렌드) 등 누적.
+- 라이브 실측: 발굴 두 리스트(7월)·시리즈 키워드 반영(편광렌즈→/api/keywords 제목 10개 규칙통과)·수식어 축별.
+
+### 자체 6대 점검 (Claude)
+1. 보안 회귀: 신규 route는 shopId만 입력(읽기). googleTrends는 고정 URL RSS(사용자 입력 URL 미주입 → SSRF 무관). 발행/쓰기 없음. → 이상 없음.
+2. 데이터 흐름: 딥링크 query(shopId/categoryId/topic)는 메인 page auto-start가 shops/CATEGORIES로 검증. → 이상 없음.
+3. 산출물: JSON 리스트, 라이브 검증. → 이상 없음.
+4. 테스트 누락(리뷰 포커스): **IO 함수 미단위테스트** — `discoverSeasonalKeywords`(라우트 mock으로만), `fetchGoogleTrendsKR` 파서(라이브로만). 순수 랭킹은 커버.
+5. UI/UX: 기존 SeriesPlanner 표시 보존+딥링크 추가. **UX 하네스 리뷰어 미실행(미검증)**.
+6. 기존 기능 삭제(주의): `/api/topics/seasonal-series` **계약 변경**(headKeywords/categoryId→shopId/month, picks/schedule→volumeTop/issueTop/trendingNow) — 사용자 지시 의도적 전환, 호출자는 신규 UI뿐. 구 `seasonalSeriesPlanner.ts`+test는 **고아(미사용, 파일삭제 금지로 보존)**.
+
+### 추가 자기지적(정직)
+- **혼합 커밋**: d06dad3에 기능코드+운영문서(HARNESS_RESULTS.md) 혼재 — clean-PR 원칙 경미 위반(이전 Codex P1과 동류). 푸시 후라 히스토리 재작성은 보류, 리뷰어에 고지.
+- **비공식 RSS 의존**: googleTrends는 구글 비공식 RSS(형식 변경/차단 가능). 실패는 빈배열 graceful.
+
+### 리뷰 요청 본문 (draft PR / codex 공용, 준비됨)
+```
+## What changed
+시즌 시리즈를 "편성표"→"발굴형(매장+월→검색량TOP/이슈TOP/전분야 트렌드)"으로 전환,
+시리즈 플래너의 헤드 키워드 미반영 버그 수정(키워드 주도 생성+규칙엔진 딥링크 연결+수식어 축별).
+
+## Scope (files) — 단일 커밋 d06dad3, 16파일(+1244/−166)
+코드: seasonalDiscovery.ts(신규)·googleTrends.ts(신규)·SeasonalSeriesPlanner.tsx(신규)·
+  route.ts·page.tsx·operations/page.tsx·SeriesPlanner.tsx·topicPlanner.ts·seriesPlanner.ts·
+  searchSignals.ts·seasonalStrategy.ts·apiRequestSchemas.ts
+테스트: seasonalDiscovery.test.ts·route.test.ts·topicPlanner.test.ts
+문서: docs/ai/HARNESS_RESULTS.md (운영 로그 — 혼합 커밋, 고지함)
+
+## Internal harness (passed)
+- type-check src 0 · lint 0 · vitest 336 passed(51 files) · build 0 · fp 706e960e872e8a95(누적)
+- 기능 코드 변경 범위 명확 · 민감정보 포함: 없음(스캔 clean)
+
+## Review focus (please check)
+1. Security regressions — googleTrends 고정URL RSS의 SSRF/주입 여지, route shopId scope.
+2. Data-flow — 딥링크 query 검증(메인 auto-start의 shops/CATEGORIES 게이트) 우회 가능성.
+3. Regression — /api/topics/seasonal-series 계약 변경으로 깨지는 잔존 호출자 여부, 구 seasonalSeriesPlanner 고아.
+4. Deletion risk — 의도치 않게 제거된 기존 동작.
+5. Missing tests — discoverSeasonalKeywords IO / fetchGoogleTrendsKR 파서 미커버 분기.
+
+## Constraints
+내부 사용 단계. naverpost AGENTS.md + docs/ai/CODE_REVIEW.md, P0~P3. merge/deploy 금지(draft only).
+
+@codex review
+Focus: SSRF/injection on fixed-URL Google Trends RSS, deep-link query validation bypass,
+seasonal-series API contract-change regression & orphaned planner, untested IO (discoverSeasonalKeywords / googleTrends parser),
+Naver live-publish policy, AI-CLI cost-call risk. Standard: AGENTS.md + docs/ai/CODE_REVIEW.md. Severity P0~P3.
+```
+
+### 실행 경로 (1회 명시 승인 필요 — 아직 미실행)
+- **A안(GitHub draft PR)**: 브랜치 이미 푸시됨 → `gh pr create --draft --base master` + PR 댓글 @codex. **merge 금지.**
+- **B안(codex 로컬 diff)**: `codex exec review --base origin/master` (AI 비용 호출).
+- **현재: C안(준비 완료·실행 보류)**. 승인 시 즉시.
+
+---
+
+## 실행 결과 — B안(codex exec 로컬 diff 리뷰) 2026-06-21
+
+- 대상: 단일 커밋 `d06dad3` (16파일 +1244/−166), `_verify/d06.diff`로 스테이징
+- 실행: `codex exec -c model_reasoning_effort=medium` (gpt-5.5, 82,752 tok)
+- 비고: `codex exec review` 서브커맨드는 xhigh/medium 모두 메모리 할당 실패(OOM)로 2회 크래시 → 표준 `codex exec`(runCodex 경로)에 diff+프롬프트 직접 투입으로 우회. 정상 완료.
+
+### 종합 판정 (codex): **P0 0 / P1 1 → 머지 보류**
+
+| 심각도 | 위치 | 지적 | 메인 검증 |
+|--------|------|------|-----------|
+| P1 | page.tsx:167 (auto-start, d06dad3 신규) | `?start=1` 딥링크가 shopId/categoryId만 맞으면 페이지 로드 시 `/api/keywords` 자동 호출 → AI-CLI 비용 + topic 길이/문자 미검증 | **사실 확인.** auto-start는 본 커밋 신규(+블록). 서버 `keywordsSchema.topic = z.string().optional()` 상한 없음. 캐시키에 topic 포함(route.ts:179) → 상이 topic마다 실제 LLM 생성. 단 shopId/categoryId는 allowlist 검증(174–175), 내부 6매장 휴먼인루프 도구라 외부 노출면은 낮음 |
+| P2 | seasonalDiscovery.ts:249 | issueTop이 monthlyVolume 상위40에만 시즌데이터 → 40위 밖 급상승 키워드 seasonalLift null로 누락 | 타당(알고리즘 한계) |
+| P2 | seasonalDiscovery.ts:194 | discoverSeasonalKeywords IO 단위테스트 없음(route가 통째 mock) | 타당. 자체 6대점검에서도 동일 지적 |
+| P2 | googleTrends.ts:51 | 정규식 RSS 파서 테스트 없음(CDATA/entity/approx_traffic/형식변경) | 타당. 자체점검 동일 |
+| P3 | route.ts:37 | 응답 계약 picks/schedule→volumeTop/issueTop/trendingNow 깨짐, 호환계층 없음 | 의도적 변경(호출자=신규 UI뿐). 자체점검 동일 |
+| P3 | SeasonalSeriesPlanner.tsx:177 | `json.data as Shop[]` 단언 — zod 경계검증 원칙 위반 | 타당(클라이언트 응답 미검증) |
+
+### 메인 결론
+- codex와 자체 6대점검이 **거의 일치**(테스트누락 3건·계약변경·zod단언 모두 사전 자기지적과 겹침). 신규 발견은 **P1 1건**(auto-start 비용/입력검증).
+- P0 없음. P1은 사실이나 **내부 도구·allowlist 매장검증·휴먼인루프** 맥락에서 실 위험은 낮음. 수정은 저비용.

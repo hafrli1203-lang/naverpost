@@ -2,6 +2,59 @@
 
 공통: `C:\project\_AGENCY_OS\HARNESS_STANDARD.md`. 매 검문마다 아래 형식으로 기록(메인 작업자).
 
+## 2026-06-21 시리즈 표시용 수식어 축별 교정
+- Change-Fingerprint: 25f2d26073a03eec
+- Gate Result: PASS — type-check 0 · test 336(+1) · lint 0 · build 0.
+- 문제: buildKeywordSeriesTopics가 수식어를 [키워드+카테고리 하위분류]로 고정 → 6편 동일 + 무관어(압축·굴절률) 섞임.
+- 수정: 각 frame에 축 의도 수식어 부여(비교=종류/등급/선택/기준/차이, 생활=운전/실내/야외/생활/시야, 문제=불편/원인/적응/증상/습관, 검사=도수/검사/코팅/확인/선택, 방문=방문/상담/맞춤/정리/목적, 상품=종류/등급/기능/옵션/가격). category.subcategories 의존 제거.
+- 테스트 +1: 편마다 수식어 묶음 상이 + 압축·굴절률 미포함.
+- 라이브(:3100, 편광렌즈 6편): 편마다 수식어 다름·무관어 사라짐 확인.
+- 검수자: 메인 직접(TDD+라이브).
+
+## 2026-06-21 시리즈 플래너 → 제목/키워드 엔진 연결(글쓰기 딥링크)
+- Change-Fingerprint: 706e960e872e8a95
+- Gate Result: PASS — type-check 0 · lint 0 · build 0 · test 335 · 키워드 파이프라인 라이브 실측(편광렌즈 주제→제목 10개 12~32자·무콤마·키워드 2단어 규칙 통과).
+- 배경(사용자 질문): "이게 우리 제목·키워드 규칙이 반영되나?" → grep 확인 결과 `src/lib/topics`는 keywordRules·validateContent·isAwkwardGeneratedTitle·prohibitedWords 참조 0건. 시리즈 플래너는 "소재 계획"만, 제목 12~32자·무콤마·어색함게이트·키워드 7대 규칙은 글쓰기 단계(/api/keywords)에만 존재. 게다가 SeriesPlanner UI에 글쓰기 연결 부재(수동 재입력 필요).
+- 수정: `SeriesPlanner.tsx`에 각 편 "글쓰기" 딥링크(`/?start=1&shopId&categoryId&topic=편주제`) + 일괄생성. 메인 page.tsx auto-start(기존)로 /api/keywords 자동 시작 → 거기서 제목/키워드 규칙 실제 적용. 시즌 발굴과 동일 패턴.
+- 한계(정직): 시리즈 플래너의 표시용 수식어는 여전히 6편 동일+일부 무관어(교체·압축·굴절률) — 표시 힌트일 뿐 실제 키워드는 글쓰기 단계 생성. 수식어 교정은 사용자가 딥링크 연결만 선택(범위 밖).
+- 미검증: UX 하네스 리뷰어. 라이브: 딥링크 href 구조는 검증된 시즌 패턴과 동일, 도착지 /api/keywords 규칙적용 확인(별도).
+- 검수자: 메인 직접.
+
+## 2026-06-21 시리즈 플래너 버그 수정 — 헤드 키워드 주도 생성
+- Change-Fingerprint: 4635008aa6d569bd
+- Gate Result: PASS — type-check 0 · test 335(+4) · lint 0 · build 0.
+- 버그(사용자 발견): "편광렌즈"로 시리즈 계획 시 4편 주제가 편광과 무관(어린이렌즈·압축굴절률 등). 원인=`seriesPlanner.ts`가 주제 생성 시 헤드 키워드를 안 넘기고 `planBlogTopics({category})`의 **카테고리 고정 템플릿**을 그대로 사용 → 헤드 키워드는 자기잠식키·안내문구에만 쓰임(장식). 키워드를 바꿔도 4편 동일(0% 반영).
+- 수정: `topicPlanner.ts`에 `buildKeywordSeriesTopics({headKeyword, category, existingTitles})` 추가 — 헤드 키워드를 6개 의도 축(비교·생활·문제·검사·방문·종류)에 끼워 모든 편이 그 키워드 주제가 되게. 카테고리별로 문제/방문 축 표현만 자연화(eye-info "가 계속되는 이유", glasses-story "문제가 반복되는 이유"). `seriesPlanner.ts`는 **명시 헤드 키워드 입력 시** 키워드 주도 사용, 없으면 기존 카테고리 템플릿 폴백(기존 동작 보존).
+- 테스트 +4(topicPlanner.test): 모든 편에 키워드 포함·축 전부 상이·키워드 다르면 주제 다름·existingTitles 중복축 제외.
+- 라이브(:3100): 편광렌즈→4편 모두 편광렌즈 주제, 변색렌즈로 바꾸면 4편 모두 변색렌즈(버그 시 동일했음). 키워드 반영 확인.
+- 미검증: UX 하네스 리뷰어. 한계: 축 프레임이 템플릿이라 일부 엣지 키워드는 표현이 다소 일반적일 수 있음(상품 키워드엔 자연스러움).
+- 검수자: 메인 직접(TDD + 라이브).
+
+## 2026-06-21 전 분야 실시간 트렌드 연동(구글 트렌드 KR)
+- Change-Fingerprint: 68568791b43be941
+- Gate Result: PASS — type-check 0 · test 331 · lint 0 · build 0.
+- 배경: 사용자가 "전 분야 이슈도 보자". 네이버 불가 → 구글 트렌드 KR 일일 트렌딩 RSS(키 불필요) 연동.
+- 변경: 신규 `src/lib/trends/googleTrends.ts` `fetchGoogleTrendsKR()` — `https://trends.google.com/trending/rss?geo=KR` fetch + 정규식 파싱(title·approx_traffic), 실패 빈배열(graceful). route.ts에서 발굴과 Promise.all 병렬 수집 후 `trendingNow` 응답에 첨부. UI 3번째 섹션(칩 목록, 네이버검색 링크) + route.test에 googleTrends mock·assert.
+- 정직한 한계(코드·UI 모두 명시): "지정 월"이 아니라 **현재 일일** 트렌드(구글이 과거 월별 트렌딩 RSS 미제공). 인물·스포츠·뉴스가 대부분이라 안경 소재 직접연관 적음(참고·시의성 발굴용). 비공식 RSS라 차단/형식변경 가능.
+- 라이브(:3100): trendingNow 10건 실수신(채서안·딕 아드보카트·상장지수펀드·적금·미사일 등). 볼륨/이슈 안경 리스트와 별개로 정상 첨부.
+- 미검증: UX 하네스 리뷰어.
+- 검수자: 메인 직접(라이브 + RSS 응답 확인).
+
+## 2026-06-21 시즌 발굴 — 두 축 재정의(검색량 TOP / 이슈·급상승 TOP)
+- Change-Fingerprint: 506620e33fd7a608
+- Gate Result: PASS — type-check 0 · test 331(+2) · lint 0 · build 0.
+- 배경: 사용자 목적 명확화 = "그 달에 이슈가 되는 키워드 추출". 리스트2를 "절대 검색량"이 아니라 "그 달 급상승(시의성)"으로 재정의. 리스트1은 안경 도메인 통합에서 그 달 검색량(추정) 순.
+- 변경(seasonalDiscovery.ts): RankedKeyword에 `seasonalLift`(그 달 비율÷연평균) 추가. `rankSeasonalKeywords`에 mode "volume"|"issue" — issue는 lift 순 + 노이즈컷(시즌데이터 필수 & 월검색량≥200). 결과 필드 coreTop/discoveredTop → **volumeTop/issueTop**. 시드/연관 구분 폐기(안경 도메인 한 풀). route.ts·route.test·UI·순수test 동기화.
+- UI: 섹션 "이 달 검색량 TOP10"/"이 달 이슈(급상승) TOP10", 이슈행에 "급상승 N.N배" 배지. 카드 설명에 전 분야 한계 명시.
+- 정직한 한계: "전 분야(안경 밖) 이슈"는 네이버 인기검색어 API 폐지(2021)+keywordstool 시드필수로 불가 → 안경 도메인 내 급상승으로 산출(notes 명시). 전 분야 원하면 구글 트렌드 등 외부연동 별도.
+- 라이브(:3100, top50jn 7월): volumeTop=안경테/난시/근시… issueTop=편광렌즈(1.98배)/안경닦이(1.89)/변색렌즈(1.67)… 7월 여름급등 키워드 정확 포착.
+- 미검증: UX 하네스 리뷰어. 잔재(P3): 구 seasonalSeriesPlanner.ts 고아(보존).
+- 검수자: 메인 직접(TDD + 라이브).
+
+## 변경 지문 추적(동일 묶음 재기록)
+- Change-Fingerprint: ad6209a98d413a8a
+- Gate Result: PASS — 아래 [f149c6774436b5f6] 블록과 동일 변경 묶음(시즌 발굴형 전환). 이후 코드 변경 없음(HARNESS_RESULTS.md 기록 추가로 지문만 갱신됨). 게이트 재확인: type-check 0 · test 329 passed(51 files) · lint 0 · build 0 · 라이브 :3100 operations 200 + 발굴 API 정상(7월 core10/discovered10, overlap 0). 미검증: UX 하네스 리뷰어.
+
 ## 형식
 ```
 ### [날짜] TASK/작업 — Trigger
@@ -232,3 +285,420 @@
 - 미검증/제외(backlog): A안 컴포넌트 렌더 테스트(testing-library/jsdom 도입), copy/download 버튼 활성 상태 렌더 단언, fetch 실패→null effect 런타임 테스트. (B안은 데이터 계약 고정까지)
 - 안전/제외: CRankAudit·app/page·API route·posting-audit fetch/useEffect·copy/download/preview/export 핸들러·postingAudit(.ts/.types)·contentFormatter 무수정. S3-a 브랜치(fb34f29) 미접촉. `.claude/settings.local.json`·OPERATING_STANDARD·WIKI_INDEX·COMMANDS·백업·`_verify/` 무수정. 커밋/push 0(승인 대기).
 - 검수자: 메인 직접(type-check/test exit code + FinalConfirm diff grep).
+
+### 2026-06-20 이미지 생성 결함 1차 수정 (IMG-1/F/A/B/C) (feature/naverpost-image-fixes)
+- Change-Fingerprint: 68a7c1bc4233e565
+- Gate Result: **PASS (코드 검증)** — type-check 0 + test 46. 단 실제 이미지 생성 결과는 AI 비용 호출 필요라 미검증(아래 명시).
+- 프로파일: 코드(이미지 파이프라인). Trigger: BeforeComplete. 사용자 "진행" 승인. 브랜치: master(98084a3)에서 분기.
+- 근거: `data/cli-crash.log`에 한국어 설명문("...순서로 구성했습니다.")이 gti 프롬프트로 전달돼 매번 exit1 / `--ar 4:3`은 미드저니 문법(gpt-image 무시) / 매장 사진이 `pool.find(첫 장)`이라 매번 동일.
+- 변경(허용 파일만):
+  - IMG-1+3: 신규 `src/lib/prompts/imagePromptFilter.ts`(isLikelyImagePrompt, 한글비중>0.3 드롭) + `.test.ts`(7케이스). `prompts/route.ts`가 length필터→영어프롬프트 필터로 교체.
+  - IMG-F: `gtiCli.ts` `--size`(기본 1024x1024=1:1) 추가. `imagePrompt.ts`에서 "프롬프트에 --ar 넣지 말 것"으로 교정(잡음 제거).
+  - IMG-A: `prompts/route.ts` `pickFreshRandom()` — 매장/디테일 사진을 미사용분 중 무작위 선택(동일사진 해소).
+  - IMG-B: `imagePrompt.ts` "마무리에 매장 와이드 의무 배치" 지시 제거 → 원고가 매장 안내·방문을 다룰 때만(조건화).
+  - IMG-C: `imagePrompt.ts` 전역 "no logos" 완화 → "읽히는 글자 금지, 글자 없는 브랜드 심볼 형태는 허용"(지니스 심볼 무차별 삭제 교정).
+- 게이트: type-check 0 | P0 | PASS · test 46 passed(기존 39 + 필터 7) | P1 | PASS · 패키지/lock 변경 0 | P1 | PASS · AI/외부 호출 0(코드 검증만) | P0 | PASS.
+- **미검증(중요)**: 실제 gti 생성 결과(이미지 품질·1:1 적용·심볼 보존·참조 충실도)는 AI 비용 호출이라 미실행. 코드/프롬프트 레벨 수정만 검증. 라이브 검증은 사용자 승인 후 1회 생성으로 확인 필요.
+- 미해결(모델 한계, 별도 TASK): IMG-D(참조 캡셔닝+--image 충실도 강화)·IMG-G(--dry-run/--debug 진단 루프). gpt-image-2 참조 충실도는 프롬프트로 "개선"만 가능.
+- 검수자: 메인 직접(type-check/test). 커밋/push 0.
+
+### 2026-06-20 이미지 생성 결함 2차 수정 (IMG-D 참조충실도 / IMG-G 진단루프) (feature/naverpost-image-fixes)
+- Change-Fingerprint: 45471f70afb2073c (이미지 1차+2차 누적 변경 묶음)
+- Gate Result: **PASS (코드 검증)** — type-check 0 + test 49(46 + 참조헬퍼 3). 실제 생성 결과는 AI 비용이라 미검증.
+- 프로파일: 코드(이미지 파이프라인). Trigger: BeforeComplete. 사용자 "IMG-D/G 계속" 승인.
+- 변경:
+  - IMG-D: 신규 `src/lib/prompts/imageRefPrompt.ts`(appendReferenceAdherence — 참조 첨부 시 "실제 환경 충실 재현 + 설비 복제·증식 금지(모빌 1개면 1개)" 지시) + `.test.ts`(3). `one/route.ts`·`regenerate/route.ts`가 생성 직전 적용.
+  - IMG-G: `gtiCli.ts` `--dry-run`(무비용 요청형태 출력, env GTI_DRY_RUN=1) + `--debug --debug-dir`(요청/응답 덤프, env GTI_DEBUG_DIR) 추가. `one`·`regenerate` 라우트가 실패 시 `CliError.code`(timeout/non-zero/empty/not-found)를 응답에 노출.
+  - IMG-F 잔여: `regenerate/route.ts` 폴백 프롬프트의 "4:3 aspect ratio" 텍스트 제거.
+- 게이트: type-check 0 | P0 | PASS · test 49 passed | P1 | PASS · 패키지/lock 0 | P1 | PASS · AI/외부 호출 0(코드 검증만) | P0 | PASS.
+- **미검증(중요)**: 참조 충실도 실제 개선폭은 gpt-image-2 능력에 달림(프롬프트로 "개선"만, 완전 보장 불가) — 라이브 1회 생성으로만 확인 가능. dry-run 진단 경로도 라이브로 1회 확인 권장.
+- 검수자: 메인 직접(type-check/test + 누수 grep). 커밋/push 0.
+
+### 2026-06-20 이미지 1:1 강제 — 백엔드 --size 무시 → sharp 센터크롭 (feature/naverpost-image-fixes)
+- Change-Fingerprint: 0958173d72ae64c5 (이미지 수정 전체 누적 + 크롭)
+- Gate Result: **PASS** — type-check 0 + test 49. 1:1 크롭은 실제 생성물에 무비용 적용으로 검증.
+- 라이브 발견: `/api/image/one` 1회 생성 → 산출이 1536x1024(stale 서버) / 재기동 후 1448x1086(4:3). dry-run엔 `"size":"1024x1024"` 정상 포함 → **백엔드(private-codex/gpt-image)가 --size를 무시하고 ~4:3 출력**. `--size`만으론 1:1 불가.
+- 수정: `gtiCli.ts`가 출력 PNG를 `sharp().resize(1024,1024,{fit:cover,position:centre})`로 **1:1 센터크롭**(sharp는 기존 dep, 설치 0). 크롭 실패 시 원본 폴백.
+- 무비용 검증: 기존 생성물(cc540182, 1448x1086)에 동일 sharp 로직 적용 → **1024x1024 확인 ✅**. type-check 에러(Buffer/NonSharedBuffer)는 base64 문자열만 다루도록 구조 정리해 해소.
+- 미검증: 재기동+크롭 반영 후 end-to-end 라이브 1장(비용)으로 최종 눈확인은 미실행(무비용 크롭 검증으로 대체). dev 서버는 다음 요청 시 새 gtiCli 재컴파일.
+- 검수자: 메인 직접(라이브 1회 + dry-run + sharp 무비용 크롭 검증 + type-check/test). 커밋/push 0.
+
+### 2026-06-20 이미지 워싱 회전 제거 (사용자 지시) (feature/naverpost-image-fixes)
+- Change-Fingerprint: 4afa7fc12e939016
+- Gate Result: **PASS** — type-check 0 + 워싱 무비용 실측(회전 없음·해시 변경 유지).
+- 프로파일: 코드(이미지 워싱). Trigger: BeforeComplete. 사용자 지시 "회전 제거".
+- 변경: `src/lib/storage/imageWash.ts` — ±1.1° 미세 회전 단계 삭제. 원본에서 바로 팬 크롭/추출(회전 버퍼 경유 제거로 한 단계 단순화). 팬 크롭·스케일·밝기/채도 지터·JPEG 재압축(mozjpeg)은 유지 → 중복 회피 그대로. 주석도 회전 비적용으로 갱신.
+- 게이트 결과:
+  - 타입 에러 0 | P0 | tsc --noEmit exit 0 | PASS
+  - 회전 미적용 | P0 | 실제 이미지(1254x1254) 워싱 → 출력 1206x1206, 기울기 없음 | PASS
+  - 중복 회피 유지 | P1 | md5 5e879ea9 → e6a96753 (해시 변경 확인) | PASS
+  - 패키지/lock 변경 0 | P1 | 변경 없음 | PASS
+  - AI/외부 호출 0 | P0 | sharp 로컬 처리만 | PASS
+- 미검증: 워싱 전용 유닛 테스트는 부재(기능 자체에 테스트 파일 없음) — 무비용 1회 실측으로 대체.
+- 검수자: 메인 직접(type-check + sharp 무비용 실측). 커밋/push 0.
+
+### 2026-06-20 외부 리뷰(Codex) 반영 — 워싱 1:1 contain (feature/naverpost-image-fixes)
+- Change-Fingerprint: 83b77c6763b1939b
+- Gate Result: **PASS** — type-check 0 + test 49 + 무비용 실측(1024x1024 contain·무크롭).
+- 외부 리뷰: `codex exec review --base origin/master` (codex-cli 0.141.0). P0/P1 없음. P2 2건.
+- **P2-1 반영**: `imageWash.ts` 워싱 출력이 너비만 리사이즈→원본비율(실사진 ~4:3)로 생성(1:1)과 불일치하던 것. 사용자 결정=**contain(레터박스, 무크롭)**. 최종 `resize(1024,1024,{fit:contain,background:white})` 적용(메타 폴백 경로 포함). 생성 경로(gtiCli)는 cover 크롭 유지 — 실사진은 간판 손실 방지 위해 contain.
+- **P2-2 미반영(backlog)**: `.claude/settings.local.json` `Bash(gh pr *)` 권한 과대 → 사용자 결정=현행 유지. REVIEW_QUEUE/backlog 기록만.
+- 게이트 결과:
+  - 타입 에러 0 | P0 | tsc --noEmit exit 0 | PASS
+  - 1:1 정사각 출력 | P0 | 4:3 입력→1024x1024, 상단 흰여백(255,255,255)·중앙 원본보존 | PASS
+  - 무크롭(contain) | P1 | 레터박스 확인(내용 손실 0) | PASS
+  - 테스트 회귀 0 | P1 | vitest 49 passed | PASS
+  - AI/외부 비용 | - | codex 리뷰 1회(승인됨), 그 외 0 | PASS
+- 검수자: 외부 Codex(P2x2) + 메인 직접(type-check/test/무비용 실측). 커밋/push 0(아래 커밋 예정).
+
+### 2026-06-20 품질 스캔 (/agency-quality-sweep, 읽기 전용)
+- Change-Fingerprint: sweep-2026-06-20-readonly (코드 변경 0, 스캔만)
+- Gate Result: **PASS (실행 차단 없음)** — type-check 0 · test 49 · next build 성공(6.7s) · P0 없음.
+- 안전검사: tsc 0 / vitest 49 passed / `npm run lint` 7건(6E+1W) / `npm run build` exit 0(빌드는 lint 비차단 확인) / 정적 grep.
+- 차원별 결점 수: 기능 1(경계검증) · 디자인/UX 3(set-state-in-effect) · 보안 1(입력검증 부재=기능과 중복) · 테스트 0(skip 0) · 문서 2(잡파일·eslintignore).
+- 우선순위표:
+  - [기능/보안 | API 23라우트 zod 경계검증 0건, 14곳 `body as` 무검증 | grep: zod 사용 0 / request.json 20 | **P1** | 라우트별 소단위 zod 스키마]
+  - [디자인/UX | react-hooks/set-state-in-effect 3건(CRankAudit:100·CadenceTracker:52·FinalConfirm:172) | eslint error, 캐스케이드 렌더 위험(빌드 비차단) | **P2** | effect 정리/파생계산화]
+  - [기능 | keywords/route.ts 3594줄(800 규칙 4.5배) | wc -l | **P2** | 핸들러/헬퍼 모듈 분리]
+  - [코드품질 | `as` 캐스팅 71건(CLAUDE: no-as) | grep | **P2** | 타입가드 점진 치환]
+  - [문서/잡파일 | 루트 `.tmp-test-export.mjs` 잔존(6/13) + .codex-review/*.cjs eslintignore 누락 → lint 4건 노이즈 | lint | **P3** | 파일 제거 + ignores 추가]
+  - [코드품질 | KeywordOptions 933·searchSignals 839·page 808줄(>800) | wc -l | **P3** | 점진 분리]
+  - [관측 | console.* 22건(비테스트) | grep | **P3** | logger 게이트 검토]
+- 좋은 신호: any 0 · non-null! 0 · TODO/FIXME 0 · skip/only 0 · type-check 0 · test 49 · build OK.
+- TASK 후보: TASKS.md에 P1(zod)·P2(set-state·keywords분리·as캐스팅)·P3(잡파일/eslintignore) 추가.
+- 검수자: 메인 직접(읽기). 코드/커밋 0.
+
+### 2026-06-20 P1 zod 경계검증 — image 라우트 4개 (품질스캔 후속)
+- Change-Fingerprint: ee6fef9b282db6fd
+- Gate Result: **PASS** — type-check 0 + test 58(49+9) + 라이브 400 4종 확인.
+- 변경: 신규 `src/lib/validation/imageRequestSchemas.ts`(imageOne/Regenerate/Content/Generate 스키마 + parseRequestBody 헬퍼) + `.test.ts`(9). image/one·regenerate·prompts·generate 라우트가 `body as` 무검증 단언 → zod safeParse로 교체(실패 시 400, 기존 한국어 메시지/SSE 포맷 보존).
+- 라이브(무비용, 생성 전 차단): /image/one 필수누락→400"sessionId, index, prompt는 필수입니다." · **문자열 index→400(전엔 as로 통과)** · /image/prompts 빈 content→400 · 잘못된 scene enum→400.
+- 게이트 결과:
+  - 타입 에러 0 | P0 | tsc exit 0 | PASS
+  - 테스트 | P1 | vitest 58 passed (+9 스키마) | PASS
+  - 입력 검증 동작 | P1 | 400 4종 라이브 확인, 유효입력 동작 보존 | PASS
+  - lint 무증가 | P2 | 7건 유지(새 파일 0건) | PASS
+- 남음: 나머지 ~19개 라우트는 후속 TASK(article/*, blogops/*, topics/* 등). 이번은 image/* 우선.
+- 검수자: 메인 직접(type-check/test/라이브 400). 커밋 예정.
+
+### 2026-06-20 P2 set-state-in-effect 정리 + P3 eslint ignores (품질스캔 후속)
+- Change-Fingerprint: 16e59f881dc34741
+- Gate Result: **PASS** — type-check 0 + test 58 + build 성공 + **lint 0(7→0)**.
+- P2: CRankAudit:100·CadenceTracker:52·FinalConfirm:172의 effect 내 동기 setState를 async 경로(IIFE)로 감싸 캐스케이드 렌더 경고 제거. 동작 불변(마운트/의존변경 시 fetch, 빈 본문 리셋 동일).
+- P3: eslint.config.mjs globalIgnores에 `.codex-review/**`(미추적 로컬 툴링, .codex-push와 동급)·`.tmp-*`(gitignore된 임시파일) 추가 → require-import 3 + unused-var 1 노이즈 제거. 파일 삭제 0(임시파일은 이미 gitignore).
+- 게이트 결과:
+  - 타입 에러 0 | P0 | tsc exit 0 | PASS
+  - lint 0 | P2 | 7→0 problems | PASS
+  - 테스트 회귀 0 | P1 | vitest 58 passed | PASS
+  - build | P1 | next build 성공(5.7s) | PASS
+- 검수자: 메인 직접(lint/type-check/test/build). 커밋 예정.
+
+### 2026-06-20 P1 zod 경계검증 2차 — 단순 라우트 6개 (품질스캔 후속)
+- Change-Fingerprint: 3f458f71b1ef8849
+- Gate Result: **PASS** — type-check 0 + test 69(58+11) + lint 0 + 라이브 400 5종 + 정상 200 1종.
+- 변경: 헬퍼를 `src/lib/validation/parseRequestBody.ts`로 분리(imageRequestSchemas는 재노출로 호환 유지) + 신규 `apiRequestSchemas.ts`(articleValidate/blogopsShop/topicsSuggest/topicsSeries/titleSimilarity 스키마) + `.test.ts`(11). 라우트 6개 적용: article/validate·blogops/backfill·blogops/exposure·topics/series·topics/suggest·title-similarity. `body as` → safeParse→400(기존 한국어 메시지·동작 보존).
+- 라이브(무비용, 외부 호출 전 차단): topics/suggest·series 누락→400"shopId와 categoryId는 필수입니다." · article/validate 빈 content→400"content는 필수입니다." · title-similarity comparisonTitles 비문자열→400 · blogops/backfill 비문자열 shopId→400. 정상 content→200(검증 결과 반환).
+- 동작 변화(경미·개선): blogops/backfill·exposure가 비문자열 shopId를 전엔 무시(전체 매장)했으나 이제 400 거부. 더 엄격·정확.
+- 게이트 결과:
+  - 타입 에러 0 | P0 | tsc exit 0 | PASS
+  - 테스트 | P1 | vitest 69 passed (+11) | PASS
+  - 입력 검증 동작 | P1 | 라이브 400 5종 + 정상 200 | PASS
+  - lint 0 | P2 | 유지 | PASS
+- 남음: P1 복잡 라우트 — article/route(다필드)·article/chat·article/wash(ArticleContent 모델링)·keywords(3594줄). 다음 배치.
+- 검수자: 메인 직접(type-check/test/lint/라이브). 커밋 예정.
+
+### 2026-06-20 P1 zod 경계검증 3차(완료) — 복잡 라우트 4개 (품질스캔 후속)
+- Change-Fingerprint: 8a54773f8e1bcb20
+- Gate Result: **PASS** — type-check 0 + test 78(69+9) + lint 0 + 재기동 후 라이브 400 4종.
+- 변경: apiRequestSchemas.ts에 keywords·article·articleChat·articleWash 스키마 추가(+test 9). KeywordOption/ArticleContent는 z.custom 타입(필수필드 런타임검증)으로 전체 모델링 없이 정확한 타입 확보. article은 enum/charCount 기본값을 스키마로 이전. 라우트 4개(keywords·article·article/chat·article/wash) body-as 단언 → safeParse → 400. ArticleContent import 미사용된 wash는 제거.
+- 라이브(무비용, 재기동 후): keywords 누락→400"shopId와 categoryId가 필요합니다." · article keyword 하위필드 누락→400"keyword, shopId, categoryId는 필수입니다." · chat 빈 article→400 · wash 서브키워드 누락→400.
+- 주의(절차 교훈): 공유 모듈(apiRequestSchemas)에 export 추가 시 Next dev HMR이 신규 export를 즉시 못 잡아 라이브가 "safeParse undefined" 500을 냄 → **dev 서버 재기동으로 해소**(코드는 tsc/test/node-import 모두 정상). 라이브 검증은 재기동 후 신뢰.
+- 게이트 결과:
+  - 타입 에러 0 | P0 | tsc exit 0 | PASS
+  - 테스트 | P1 | vitest 78 passed (+9) | PASS
+  - 입력 검증 동작 | P1 | 재기동 후 라이브 400 4종 | PASS
+  - lint 0 | P2 | 유지 | PASS
+- **P1 완료**: body-as 14라우트 전부 zod 적용(image 4 + 단순 6 + 복잡 4). request.json만 하던 나머지는 대부분 입력 없음/SSE.
+- 검수자: 메인 직접(type-check/test/lint/재기동 라이브). 커밋 예정.
+
+### 2026-06-20 keywords 핵심 로직 테스트 추출 #1 — 제목 결정론 게이트
+- Change-Fingerprint: keywords-titlegate-extract
+- Gate Result: PASS — type-check 0 + test 92(+14) + lint 0 + 동작 불변(라우트 16곳 사용 유지).
+- 배경: keywords/route.ts(3594줄)에 핵심 결정론 게이트가 내부 함수로만 있어 전용 테스트 0이던 고위험 지점. 밥줄 핵심이라 회귀 안전망 우선.
+- 변경: isAwkwardGeneratedTitle를 src/lib/keywords/titleGate.ts로 추출(순수 함수, MECHANICAL_TITLE_PATTERNS만 의존). 라우트는 import로 교체(바이트 동일 동작). titleGate.test.ts 14건: v27 전 규칙(쉼표·이모지·번호·반복·나열·슬래시·막연끝맺음·미완성조건절·비문오타·전문용어) 차단 + 오탐0 불변식(고굴절≠굴절률, 누진≠누진대, ~보는 법 통과).
+- route 3594→3554줄. 게이트: tsc 0 | P0 | PASS · test 92 | P1 | PASS · lint 0 | P2 | PASS.
+- 다음: 카테고리 게이트(isCategoryAppropriateCandidate) + 헬퍼 체인 추출/테스트.
+- 검수자: 메인 직접(type-check/test/lint).
+
+### 2026-06-20 keywords 핵심 로직 테스트 추출 #2 — 카테고리 게이트 + 헬퍼
+- Change-Fingerprint: keywords-categorygate-extract
+- Gate Result: PASS — type-check 0 + test 108(+16) + lint 0 + 동작 불변(라우트 사용 유지).
+- 변경: isCategoryAppropriateCandidate + 헬퍼 4개(isRegionWord·startsWithRegionWord·isValidTwoWordKeyword(2~3단어판)·hasMalformedCompoundAxis)를 src/lib/keywords/categoryGate.ts로 추출. 라우트는 import로 교체(바이트 동일). categoryGate.test.ts 16건: 헬퍼 단위 + 메인 게이트(구조/합성축/브랜드/지역/스캐폴드 + 카테고리별 누수 frames·lenses·contacts·eye-info, 고굴절 등 안경렌즈 상품어 통과 불변식).
+- route 3554→3457줄(누적 3594→3457, −137). hasMalformedCompoundAxis는 게이트 전용이라 route 직접 사용 0.
+- 게이트: tsc 0 | P0 | PASS · test 108 | P1 | PASS · lint 0 | P2 | PASS.
+- 남음(#1 잔여): keywords/route.ts 여전히 3457줄 — fan-out·재시도 분류 등은 라우트 상태 의존이라 추가 추출은 별도 TASK. 두 공유 하드게이트는 완료.
+- 검수자: 메인 직접(type-check/test/lint).
+
+### 2026-06-20 dead 코드/미구현 흔적 정리 (#3 품질감사 후속)
+- Change-Fingerprint: deadcode-cleanup
+- Gate Result: PASS — type-check 0 + test 108 + lint 0.
+- 제거: (1) `writeArticleWithCodex`(claude.ts, 호출처 0 = dead) + 전용 상수 CODEX_ARTICLE_MODEL + 전용 import runCodex(runCodex 자체는 openaiKeywords가 사용해 유지). (2) env.ts `GOOGLE_SHEETS_ID`(Sheets 미구현, 읽는 코드 0 = 죽은 env) → 미구현 로드맵 NOTE로 대체.
+- 보존(의도적): `tokenManager`는 writePost.json 종료로 미사용이나 CLAUDE.md 모듈 경계에 "미사용" 명시된 의도적 보존 → 유지.
+- 미해결(문서): CLAUDE.md 기술스택/모듈표가 Google Sheets를 기능처럼 기술 → 실제 미구현. 제품 로드맵 문서라 임의 재작성 보류, 사용자 판단 필요.
+- 게이트: tsc 0 | P0 | PASS · test 108 | P1 | PASS · lint 0 | P2 | PASS.
+- 검수자: 메인 직접.
+
+### 2026-06-20 파이프라인 골든-런 회귀 고정 (#2 품질감사 후속)
+- Change-Fingerprint: pipeline-golden-export
+- Gate Result: PASS — type-check 0 + test 111(+3) + lint 0 + 스냅샷 재실행 드리프트 0.
+- 배경: 파이프라인 최종 산출물(붙여넣기용 export)이 결정론 순수함수인데 전체 출력 회귀 고정이 없었음. 서식/문단분리/표/이미지마커 로직 변경이 조용히 붙여넣기 품질을 망가뜨릴 위험.
+- 변경: src/lib/naver/contentFormatter.golden.test.ts — 대표 원고 1개(도입+소제목2+표+불릿+문단)를 formatForNaverExport(rich HTML)·buildNaverPlainText(평문)에 통과시켜 toMatchSnapshot으로 전체 출력 고정 + 핵심 계약 불변식(제목 포함·이미지마커 3개·마크다운 잔재 0·표 "셀 / 셀"·불릿 •). __snapshots__/*.snap 골든 아티팩트 동반 커밋.
+- 눈확인: 평문 골든이 제목→문장분리 문단→표 변환→[사진 N]→불릿(•) 순으로 붙여넣기 적합.
+- 게이트: tsc 0 | P0 | PASS · test 111 | P1 | PASS · lint 0 | P2 | PASS.
+- 검수자: 메인 직접(스냅샷 생성+재실행 안정성+눈확인).
+
+### 2026-06-20 의료법/광고법 금지어 필터 테스트 (검증 인프라 강화)
+- Change-Fingerprint: prohibited-filter-tests
+- Gate Result: PASS — type-check 0 + test 131(+20) + lint 0.
+- 배경: 금지어 필터(의료법/광고법)는 미검증 모듈 중 법적 리스크 최고(버그=고객 안경원 위법 글). prohibitedWords.ts는 데이터뿐, 실제 탐지로직은 contentValidator.ts(251줄, 테스트 0)에 있었음.
+- 변경: isProhibitedWordPresent를 export(스마트 복합어 매칭) + contentValidator.test.ts 20건. (1)미탐 방지: 진짜 금지어(수술·치료·할인·100%) 검출. (2)오탐 방지: ALLOWED_COMPOUNDS 13개 전부(가장자리·예방접종·확실하지않·정확하지않·안전한지·추천하지·최대한·전문가적·질병관리청·의료기기안전·대학병원·치료권고·의사소통)가 정상 통과. (3)복합어+바깥 금지어 동시 검출. (4)validateContent 통합(무비용 fast 모드: sync analyzeMorphology만 써 CLI 0): 위반/정상/주의표현/키워드누락.
+- 무비용 근거: validateContent fast 경로의 서브분석기(contentSignal·titleBodyAlignment·networkDuplicate·repetition·analyzeMorphology sync) 전부 CLI/fetch 0 확인.
+- 게이트: tsc 0 | P0 | PASS · test 131 | P1 | PASS · lint 0 | P2 | PASS.
+- 검수자: 메인 직접(type-check/test/lint + 무비용 경로 grep 확인).
+
+### 2026-06-20 언어 리스크 분석 테스트 — 쉼표 정책 + templateLeak (검증 인프라)
+- Change-Fingerprint: language-risk-tests
+- Gate Result: PASS — type-check 0 + test 136(+5) + lint 0.
+- 변경: contentSignalAnalyzer.test.ts 5건(analyzeLanguageRisk 공개 API). 쉼표 형식 정책(v2.8: 정상 0위반·한문장 3개↑ 남발 검출·천단위 1,000 제외) + 지침어 본문 누수(templateLeak: 정상 소제목 0·'넘겨짚' 노출 검출). 모두 순수(CLI 0).
+- 게이트: tsc 0 | P0 | PASS · test 136 | P1 | PASS · lint 0 | P2 | PASS.
+- 검수자: 메인 직접.
+
+### 2026-06-21 6매장 중복방지 분석 테스트 (검증 인프라)
+- Change-Fingerprint: network-dup-tests
+- Gate Result: PASS — type-check 0 + test 142(+6) + lint 0.
+- 변경: networkDuplicateAnalyzer.test.ts 6건(analyzeNetworkDuplicateRisk 공개 API). 핵심 제품가치(자기잠식/과잉탈락 방지) 고정: 빈 히스토리 0위험 · 같은매장 메인조합 중복=high · 다른소재 미탐 · 조사무시(적응에=적응) 매칭 · 다른블로그 메인+서브 관점겹침 검출 · 제목패턴 토큰공유 검출. 순수(CLI 0).
+- 게이트: tsc 0 | P0 | PASS · test 142 | P1 | PASS · lint 0 | P2 | PASS.
+- 검수자: 메인 직접.
+
+### 2026-06-21 검색량 게이트 테스트 (검증 인프라)
+- Change-Fingerprint: volume-gate-tests
+- Gate Result: PASS — type-check 0 + test 148(+6) + lint 0.
+- 변경: volumeGate.test.ts 6건(normalizeKeywordKey + applyVolumeGate). searchAdEnabled가 env(NAVER_SEARCHAD_*)의존이라 테스트에서 설정/복원(afterEach)해 무비용 검증(fetch 0, 제공 signals만). 자격증명 없으면 graceful OFF(unknown+노트) · 충분수요+낮은포화=pass · 실측저수요=weak · **정확일치만(부분일치 신호상속 차단=환각키워드 weak)** · pass가 weak/unknown보다 상위 정렬. env 복원으로 스위트 오염 0 확인.
+- 게이트: tsc 0 | P0 | PASS · test 148 | P1 | PASS · lint 0 | P2 | PASS.
+- 검수자: 메인 직접.
+
+### 2026-06-21 제목 유사도 분석 테스트 (검증 인프라)
+- Change-Fingerprint: title-similarity-tests
+- Gate Result: PASS — type-check 0 + test 156(+8) + lint 0.
+- 변경: titleSimilarity.test.ts 8건(tokenizeMeaningfulTitle + analyzeTitleSimilarity). 불용어/조사/중복 토큰화 + 비교대상 없음=low/0% · 동일=100%/high · 핵심토큰 전겹침=high · 무관주제=low · 다중대상 최유사 반환. 순수(CLI 0).
+- 게이트: tsc 0 | P0 | PASS · test 156 | P1 | PASS · lint 0 | P2 | PASS.
+- 검수자: 메인 직접.
+
+### 2026-06-21 키워드 조합 생성기 테스트 (검증 인프라)
+- Change-Fingerprint: keyword-combiner-tests
+- Gate Result: PASS — type-check 0 + test 164(+8) + lint 0.
+- 변경: keywordCombiner.test.ts 8건(combineKeywords). 순수·결정론 보장: 유효 head→후보 생성 · 모든 main/sub가 'head 수식어' 2단어+head 공유 · head≠수식어 · main 중복 0 · maxCandidates/maxModifiersPerHead 한도 · 결정론(idempotent) · 빈/2어절 head 제외.
+- 게이트: tsc 0 | P0 | PASS · test 164 | P1 | PASS · lint 0 | P2 | PASS.
+- 검수자: 메인 직접.
+
+### 2026-06-21 제목-본문 일치 + BLAI 언어규칙 테스트 (검증 인프라)
+- Change-Fingerprint: tba-blai-tests
+- Gate Result: PASS — type-check 0 + test 178(+14) + lint 0.
+- 변경: titleBodyAlignment.test.ts 4건(키워드 커버리지/누락 high이슈·표 감지·인용 감지) + blaiLanguageRules.test.ts 10건(비속어/비하/민감/상업어/강조어/광고어 6탐지기 + 중복제거 + **가장자리 오탐 방지(법적)**). 둘 다 순수(CLI 0).
+- 게이트: tsc 0 | P0 | PASS · test 178 | P1 | PASS · lint 0 | P2 | PASS.
+- 검수자: 메인 직접.
+
+### 2026-06-21 주제 추천/월간 슬롯 테스트 (검증 인프라)
+- Change-Fingerprint: topic-planner-tests
+- Gate Result: PASS — type-check 0 + test 185(+7) + lint 0.
+- 변경: topicPlanner.test.ts 7건(planBlogTopics·planBlogTopic·planMonthlyCategorySlots). 내부 rotation이 현재 월(getMonthKey=new Date) 의존이라 정확값 대신 시간독립 불변식 고정: maxCount 이하·핵심필드(topic/thesis/axis) 존재 · userTopic 단축경로(결정론) · 같은입력=같은출력 · 슬롯 1..N 번호 · 제공 카테고리만 사용 · 6슬롯=6카테고리 1회씩(쏠림 방지).
+- 게이트: tsc 0 | P0 | PASS · test 185 | P1 | PASS · lint 0 | P2 | PASS.
+- 검수자: 메인 직접.
+
+### 2026-06-21 지역추론/발굴시드/전략가이드 테스트 (검증 인프라)
+- Change-Fingerprint: seasonal-strategy-tests
+- Gate Result: PASS — type-check 0 + test 192(+7) + lint 0.
+- 변경: seasonalStrategy.test.ts 7건. inferShopRegion(6매장 고정 매핑: top50jn=장림·leesi7007=대전충남대 등 + 미등록 이름추론) · buildKeywordDiscoverySeeds(지역=마지막토큰 '대전 충남대'→충남대, 비지역시드 공백정규화 '누진렌즈적응', 25개·중복0) · buildKeywordStrategyGuide(now? 주입 결정론). inferShopRegion/seeds 순수, guide는 now 주입으로 시간 의존 우회.
+- 절차: 첫 시도서 시드 공백정규화('누진렌즈 적응'→'누진렌즈적응') 미인지로 1건 실패 → 실제 출력 probe로 확인 후 정정(추측 금지 원칙).
+- 게이트: tsc 0 | P0 | PASS · test 192 | P1 | PASS · lint 0 | P2 | PASS.
+- 검수자: 메인 직접.
+
+### 2026-06-21 의료법 워싱(결정론 치환) 테스트 (검증 인프라·법적)
+- Change-Fingerprint: medical-law-sanitizer-tests
+- Gate Result: PASS — type-check 0 + test 200(+8) + lint 0.
+- 변경: medicalLawSanitizer.test.ts 8건(sanitizeMedicalLaw). 의료행위어 치환(시술/수술→조정·치료/진단→확인·의사→안경사·병원→매장) · 단정/보장(100%효과 보장·완치됩니다→개선) · 비방(다른안경원보다 제거)·압박(지금바로 방문하세요) · **매장 안내 블록 보호(주소/운영시간/상호의 '정확한'·'의원'은 단어치환 건너뜀)** · 무위반 0치환 내용보존 · examples 8개 제한. 순수.
+- 게이트: tsc 0 | P0 | PASS · test 200 | P1 | PASS · lint 0 | P2 | PASS.
+- 검수자: 메인 직접.
+
+### 2026-06-21 워싱 짝+브리프+본문프롬프트 테스트 (검증 인프라)
+- Change-Fingerprint: wash-brief-articleprompt-tests
+- Gate Result: PASS — type-check 0 + test 219(+19) + lint 0.
+- 변경 3파일: aiClicheSanitizer.test(7: 1:1 안전치환·레지스터 유지·무위반 0치환·결정론·examples 8제한) + articleBrief.test(5: 키워드 매핑·연구요약 출처제외·crossBlog 5제한·sources naver-search 분기) + articlePrompt.test(7: getToneGuide 톤분기+standard 폴백·charCount→섹션수(1000=2/2500=5)·키워드 주입·외부참고/용어집 조건부 섹션). 전부 순수.
+- 게이트: tsc 0 | P0 | PASS · test 219 | P1 | PASS · lint 0 | P2 | PASS.
+- 검수자: 메인 직접.
+
+### 2026-06-21 프롬프트 빌더 4종 테스트 (검증 인프라)
+- Change-Fingerprint: prompt-builders-tests
+- Gate Result: PASS — type-check 0 + test 235(+16) + lint 0.
+- 변경 4파일: washingPrompt.test(3: 원문/의료법·광고법 지시·톤 주입) + revisionPrompt.test(4: 원문·금지어→대체어 지시(매핑유무)·삭제폴백) + promoPrompt.test(4: 키워드/매장·행사블록 조건부·[확인 필요] 폴백) + titlePrompt.test(4: TITLE_PATTERN_GUIDE·매장/카테고리/목록 주입·빈목록 (없음) 폴백). 전부 순수.
+- 게이트: tsc 0 | P0 | PASS · test 235 | P1 | PASS · lint 0 | P2 | PASS.
+- 검수자: 메인 직접.
+
+### 2026-06-21 외부 I/O mock 테스트 #1 — 노출 추적(BlogOps+네이버) (검증 인프라)
+- Change-Fingerprint: exposure-mock-tests
+- Gate Result: PASS — type-check 0 + test 238(+3) + lint 0 + mock 격리 확인.
+- 변경: exposure.test.ts 3건. **외부 I/O를 mock으로 검증**(첫 mock 테스트): vi.mock으로 getShops·fetchBlogSearch 가짜화 + global.fetch를 URL별 라우팅(clients/posts/exposure-runs)해 진짜 서버/키 없이 흐름 검증. graceful OFF(URL 미설정→enabled:false, fetch 호출 0) · 전체 흐름(등록확인→키워드→검색순위 측정→기록, measured/ranked 카운트) · 매장 미등록(clients 빈응답→사유). afterEach로 env·mock 복원(스위트 오염 0, 전체 238 통과 확인).
+- 게이트: tsc 0 | P0 | PASS · test 238 | P1 | PASS · lint 0 | P2 | PASS.
+- 비고: 같은 패턴으로 backfill·cadence도 가능(가치순 노출추적 우선). mock 한계: 실제 BlogOps/네이버 응답 스키마 변경은 못 잡음(계약 테스트 별도).
+- 검수자: 메인 직접.
+
+### 2026-06-21 외부 I/O mock 테스트 #2~5 — backfill/cadence/searchSignals/sessionStore
+- Change-Fingerprint: external-io-mock-batch2
+- Gate Result: PASS — type-check 0 + test 255(+17) + lint 0 + mock 격리 확인(전체 36파일 255 통과).
+- 변경 4파일(전부 mock):
+  - backfill.test(4): graceful OFF · RSS 파싱→posts 등록 집계(found/registered) · 미등록 사유 · RSS 실패 사유. fetch URL 라우팅(clients/RSS/posts) + getShops mock.
+  - cadence.test(5): graceful OFF · clients 500 사유 · 발행간격 집계(totalPosts·avgIntervalDays 7일, 시간독립 속성만) · 미등록 failures.
+  - searchSignals.test(4): fetchBlogSearch HTML태그 제거·필드 정규화 · items 없음 안전처리 · 401→NaverSearchDependencyError · display 1~100 클램프(URL 검증).
+  - sessionStore.test(5): **fs 인메모리 mock**으로 파일폴백 라운드트립(save→get→list 내림차순→delete) + **ID 새니타이즈 경로순회 방지(보안)**. KV env 삭제로 파일경로 강제.
+- 절차: sessionStore fixture가 SavedSession 필수필드 누락으로 tsc 2에러 → 실제 타입대로 채워 해소(test는 통과했었음). fs 전체 mock이 다른 테스트 오염 0 확인.
+- 게이트: tsc 0 | P0 | PASS · test 255 | P1 | PASS · lint 0 | P2 | PASS.
+- 검수자: 메인 직접.
+
+### 2026-06-21 컴포넌트 테스트 인프라 도입 + 첫 컴포넌트 테스트 (사용자 승인 설치)
+- Change-Fingerprint: component-test-infra
+- Gate Result: PASS — type-check 0 + test 260(+5) + lint 0 + 기존 255 무영향.
+- 설치(pnpm, 사용자 승인): @testing-library/react@16.3.2·jest-dom@6.9.1·dom@10.4.1·jsdom@25.0.1 (devDeps, React19 호환). package.json엔 4종만 추가, pnpm-lock 갱신.
+- 설정: vitest.config.ts에 environment:"node"(전역 유지) + setupFiles. vitest.setup.ts(jest-dom matcher + DOM 있을때만 cleanup 가드 → node 순수테스트 무영향). 컴포넌트 테스트는 파일 상단 `// @vitest-environment jsdom` 도크블록으로 개별 전환.
+- 첫 테스트: WorkflowStepper.test.tsx 5건(4단계 렌더·현재단계 강조·도달단계 클릭·현재단계 클릭무시·미도달 클릭무시). render/screen/fireEvent.
+- 게이트: tsc 0 | P0 | PASS · test 260 | P1 | PASS · lint 0 | P2 | PASS · 기존 255 통과 유지 | P0 | PASS.
+- 비고: 패키지 설치는 CLAUDE.md 평소 금지나 이번 사용자 명시 승인. node 환경 전역 유지로 순수 테스트 속도 보존.
+- 검수자: 메인 직접.
+
+### 2026-06-21 CadenceTracker 컴포넌트 테스트 (fetch mock)
+- Change-Fingerprint: cadence-tracker-component-test
+- Gate Result: PASS — type-check 0 + test 264(+4) + lint 0.
+- 변경: CadenceTracker.test.tsx 4건(jsdom). fetch mock으로 성공(매장 렌더+상태배지)·API 실패(오류 메시지)·빈 결과(reason 안내)·새로고침 버튼 재조회. 이번 세션 set-state-in-effect 수정한 컴포넌트의 동작 회귀 안전망.
+- 게이트: tsc 0 | P0 | PASS · test 264 | P1 | PASS · lint 0 | P2 | PASS.
+- 검수자: 메인 직접.
+
+### 2026-06-21 FinalConfirm(붙여넣기 export 화면) 컴포넌트 테스트
+- Change-Fingerprint: finalconfirm-component-test
+- Gate Result: PASS — type-check 0 + test 268(+4) + lint 0.
+- 변경: FinalConfirm.test.tsx 4건(jsdom). 핵심 화면(사람이 네이버에 붙여넣는 최종 export). 본문 제목 렌더 · **SEO 검수(/api/analysis) 실패해도 export 안 막힘(fail-open 계약)** · 복사 버튼이 붙여넣기용 평문(제목 포함)을 navigator.clipboard에 씀 · onStartOver 연결. fetch/clipboard mock. WorkflowState fixture(validation.revisionReasons 필수 — buildFinalReport 의존).
+- 게이트: tsc 0 | P0 | PASS · test 268 | P1 | PASS · lint 0 | P2 | PASS.
+- 검수자: 메인 직접.
+
+### 2026-06-21 API 라우트 테스트 — analysis/article-validate/sessions
+- Change-Fingerprint: api-route-tests
+- Gate Result: PASS — type-check 0 + test 283(+15) + lint 0 + mock 격리(42파일 전부 통과).
+- 변경 3파일(Next 핸들러를 가짜 request로 직접 호출):
+  - analysis/route.test(7): JSON파싱 실패 400·알수없는 mode 400·posting-audit(로컬순수, mock없이) 검증/성공·smart-block·autocomplete-index 외부함수 mock으로 분기+검증 가드.
+  - article/validate/route.test(3): zod 게이트(content 누락 400, validateContent 미호출)·유효시 호출+응답·tone 옵션 전달. **validateContent를 mock**(라우트는 fast 없이 호출→형태소가 AI CLI를 타므로 라우트 테스트는 mock 필수, 비용/타임아웃 회피).
+  - sessions/route.test(5): sessionStore+BlogOps mock으로 GET목록·POST저장(blogops 표면화·UUID생성)·DELETE(id 없으면 400/있으면 삭제).
+- 발견: article/validate 라우트가 validateContent를 `{fast:true}` 없이 호출 → 실제 AI CLI 경로(첫 시도 5s 타임아웃으로 드러남). 라우트 단위는 의존 mock이 정답.
+- 게이트: tsc 0 | P0 | PASS · test 283 | P1 | PASS · lint 0 | P2 | PASS.
+- 검수자: 메인 직접.
+
+### 2026-06-21 API 라우트 테스트 2차 — 순수/단순 6개 (auth·shops·image·document)
+- Change-Fingerprint: api-route-tests-simple6
+- Gate Result: PASS — type-check 0 + test 303(+20) + lint 0.
+- 변경 6파일: auth(5: 비번 미설정 500·틀린비번 401·맞으면 쿠키설정·JSON실패 400·로그아웃 쿠키삭제, next/headers mock) · shops(4: GET목록·POST 필수검증/rssUrl 구성) · shops/[shopId](3: PUT 부분수정·blogId→rssUrl 갱신·DELETE) · image/file/[imageId](2: 부재 404·존재 바이너리+헤더) · image/session(2: 필수누락 400·토큰발급) · document/upload(5: 파일없음 400·10MB초과·txt추출·미지원형식 500·빈txt 400, 실제 FormData/File).
+- 게이트: tsc 0 | P0 | PASS · test 303 | P1 | PASS · lint 0 | P2 | PASS.
+- 라우트 커버: 23개 중 9개 테스트(analysis·validate·sessions + auth·shops·shopsId·imageFile·imageSession·docUpload). 나머지 14는 AI비용/외부I/O 중심(핵심 lib은 이미 커버)이라 선택사항.
+- 검수자: 메인 직접.
+
+### 2026-06-21 시즌 시리즈 편성 엔진 STEP2 (TDD) — planSeasonalSeries
+- Change-Fingerprint: seasonal-series-engine
+- Gate Result: PASS — type-check 0 + test 313(+10) + lint 0.
+- 설계: docs/designs/seasonal-series-planner.md STEP2. 신규 `src/lib/topics/seasonalSeriesPlanner.ts`(순수 함수, 외부호출 0 — 데이터 주입 구조). 시즌랭킹(대상월 비율 desc, 동점시 절대량) · 피크월 계산 · **isPeakMonth는 월일치가 아니라 연중최고치 동률 판정**(TDD가 첫 설계 결함 잡음: 6·7·8 동점시 7월도 피크) · 자기잠식 제외 · cadence 간격 일정배치(startDateIso 주입=결정론) · 폴백(시즌데이터 없음/후보부족).
+- 테스트 10건: 여름/겨울 랭킹·동점 절대량 타이브레이크·피크월·자기잠식 note·일정 배치(3일/7일)·시즌없음 폴백·후보부족·결정론.
+- 게이트: tsc 0 | P0 | PASS · test 313 | P1 | PASS · lint 0 | P2 | PASS.
+- 다음: 데이터랩 12개월 month 호출(fetchMonthlySeasonality) → 라우트 → 대시보드.
+- 검수자: 메인 직접(TDD RED→GREEN).
+
+### 2026-06-21 데이터랩 12개월 시즌 곡선 (fetchMonthlySeasonality) — 설계 갭1 해소
+- Change-Fingerprint: datalab-monthly-seasonality
+- Gate Result: PASS — type-check 0 + test 318(+5) + lint 0.
+- 변경: searchSignals.ts에 `fetchMonthlySeasonality(keywords)` 추가(기존 데이터랩 API/인증 재사용, 시간창 ~13개월·timeUnit=month). **period(yyyy-mm-dd)에서 달력 월(1~12) 추출해 monthlyRatios[12]로 정렬**(같은 달 둘이면 최신값 덮음) → 엔진 SeasonalCandidate.monthlyRatios에 직결. 자격증명 없으면 빈배열(graceful OFF), 실패는 NaverSearchDependencyError.
+- 테스트 5건(기존 searchSignals.test 확장): graceful OFF·빈키워드·월 정렬(7월 최신값 덮기·없는 달 0)·timeUnit=month 호출·500 에러.
+- 게이트: tsc 0 | P0 | PASS · test 318 | P1 | PASS · lint 0 | P2 | PASS.
+- 다음: 라우트(/api/topics/seasonal-series)에서 fetchMonthlySeasonality+fetchKeywordDemandSignals+planSeasonalSeries 조립 → 대시보드.
+- 검수자: 메인 직접.
+
+### 2026-06-21 시즌 시리즈 라우트 — /api/topics/seasonal-series (설계 갭2 해소)
+- Change-Fingerprint: seasonal-series-route
+- Gate Result: PASS — type-check 0 + test 323(+5) + lint 0.
+- 변경: 신규 `app/api/topics/seasonal-series/route.ts` + `seasonalSeriesSchema`(zod). 3종 데이터(fetchMonthlySeasonality·fetchKeywordDemandSignals·getTopExposedKeywordKeys) Promise.all 병렬 수집(각각 catch 폴백) → 키 정규화 매칭으로 SeasonalCandidate 조립 → planSeasonalSeries 위임. 대상월 기본=다음달, startDateForMonth로 일정 기준일 산출.
+- 테스트 5건: headKeywords 누락 400·잘못된 shopId 400·정상 7월 편성(시즌+검색량 조립·isPeakMonth)·자기잠식 제외·시즌API 죽어도 폴백 200.
+- 발견: route 테스트에서 vi.clearAllMocks가 mockResolvedValue 구현을 안 지워 mock 누수→ beforeEach에서 기본 구현 명시 복원으로 해소(교훈).
+- **시즌 시리즈 기능 STEP2~라우트 완성**: 설계(seasonal-series-planner.md) → 엔진(planSeasonalSeries) → 데이터(fetchMonthlySeasonality) → 라우트. 남은 건 대시보드 UI(별도).
+- 게이트: tsc 0 | P0 | PASS · test 323 | P1 | PASS · lint 0 | P2 | PASS.
+- 검수자: 메인 직접(TDD).
+
+### 2026-06-21 시즌 발굴형 전환 — 매장+월 → TOP10 키워드 발굴(편성표 폐기)
+- Change-Fingerprint: f149c6774436b5f6
+- Gate Result: PASS — type-check 0 + test 329(+6) + lint 0 + build 0.
+- 배경: 사용자 피드백으로 방향 수정. 기존 "사용자가 헤드키워드 입력→날짜 편성표"는 발굴 단계 누락 + 카테고리 분할이 매일글쓰기 부담. → "매장+월만 입력→그 달 안경원 검색량 높은 키워드 TOP10 발굴" 발굴형으로 전환.
+- 변경:
+  - 신규 `src/lib/topics/seasonalDiscovery.ts`: 순수 `rankSeasonalKeywords`(그달 추정수요=절대량×시즌비율/100 정렬, 자기잠식·중복 제외) + IO `discoverSeasonalKeywords`(카테고리별 `CATEGORY_CORE_KEYWORDS` 시드→keywordstool 연관발굴[카테고리 귀속 보존]→절대량 상위40만 데이터랩 시즌곡선→coreTop[시드만]/discoveredTop[전체에서 coreTop 제외=겹침0] 두 리스트).
+  - `seasonalStrategy.ts`: `CATEGORY_CORE_KEYWORDS` export(시드 공유).
+  - `searchSignals.ts`: `fetchMonthlySeasonality` 5개씩 청크화(데이터랩 그룹 최대5 제한). **회귀 주의 해소**: 청크 !ok는 기존 계약대로 throw(처음 graceful[]로 바꿔 searchSignals.test 1건 깨짐→되돌림, 호출부 .catch로 폴백).
+  - `apiRequestSchemas.ts`: seasonalSeriesSchema → {shopId, month?, count?≤20}(headKeywords·categoryId 제거).
+  - `route.ts`: discoverSeasonalKeywords 위임으로 얇게.
+  - UI `SeasonalSeriesPlanner.tsx` 재작성: 매장+월만, "안경원 핵심 TOP10"/"전체 발굴 TOP10" 두 섹션, 각 행 키워드·카테고리태그·월검색량·그달추정·연중피크 + "글쓰기" 딥링크(?start=1, categoryId 자동) + 섹션별 일괄생성.
+  - 메인 `page.tsx`: 딥링크 auto-start(이전 세션에서 추가, 유지).
+- 테스트: seasonalDiscovery.test 6(순수 랭킹) + route.test 5(IO mock으로 재작성) 신규. 전체 329 passed(51 files).
+- 라이브검증(:3100, top50jn 7월): 핵심=안경테/난시/근시/돋보기/변색렌즈… 발굴=돋보기안경/노안안경/컬러렌즈/편광렌즈/안압… overlap 0. 카테고리 태그·월검색량·시즌가중 실데이터 정상.
+- 게이트: tsc 0 | P0 | PASS · test 329 | P1 | PASS · lint 0 | P2 | PASS · build 0 | P2 | PASS.
+- 미검증: UX 하네스 리뷰어 미실행(반응형/접근성 정밀점검은 별도) — 기능/렌더는 라이브 확인.
+- 잔재(P3): 구 `seasonalSeriesPlanner.ts`(편성 schedule 엔진) 미사용 고아(파일삭제 금지로 보존, 테스트 통과 유지). 추후 정리 후보.
+- 검수자: 메인 직접(TDD RED→GREEN + 라이브).
+
+## 2026-06-21 외부리뷰 P1 수정 — 딥링크 topic 길이 경계검증
+- Change-Fingerprint: a47d89f004660190
+- Gate Result: PASS — type-check 0 · test 337(+1) · lint 0 · build 0(✓ Compiled 6.2s).
+- 배경: codex 외부 diff 리뷰(d06dad3)가 유일 P1 지적 — `?start=1` 딥링크가 페이지 로드 시 `/api/keywords` 자동 호출 + 서버 `keywordsSchema.topic = z.string().optional()` 길이 상한 없음(캐시키에 topic 포함 → 상이 topic마다 실제 LLM 생성). 메인 검증: auto-start는 d06dad3 신규(+블록), allowlist 매장검증(page.tsx:174-175) 존재로 외부 노출면 낮으나 zod 경계검증은 글로벌 원칙상 필수.
+- 수정: `apiRequestSchemas.ts` keywordsSchema.topic + articleSchema.topic에 `.max(100, "주제가 너무 깁니다.")` 추가. 사용자 승인 옵션은 .max(60)이었으나 UI 입력 maxLength=100(ShopSelector.tsx:181)+buildUserTopicPlan 80자 슬라이스와 충돌(61~100자 정상입력 400 회귀) → 회귀방지로 UI 허용치와 일치하는 .max(100) 적용(사용자에 명시 보고).
+- 테스트 +1: keywordsSchema 100자 허용·101자 거부(메시지 "주제가 너무 깁니다.") 경계 고정.
+- 미검증: UX 하네스 리뷰어(스키마 변경이라 UI 영향 없음). P2/P3(IO 단위테스트·RSS파서테스트·계약버전·클라zod단언)는 보류(사용자 결정 대기).
+- 검수자: 메인 직접(코드확인+TDD+전게이트).
+
+## 2026-06-21 외부리뷰 P2 3건 처리 — 이슈누락 보정 + IO/파서 테스트
+- Change-Fingerprint: 622d463c2ef2e537
+- Gate Result: PASS — type-check 0 · lint 0 · test 347(+10) · build 0(✓ Compiled 5.7s).
+- 배경: codex 외부 diff 리뷰(d06dad3) P2 3건 처리(사용자 지시).
+- P2-1 알고리즘(seasonalDiscovery.ts): issueTop(급상승)은 시즌데이터 있어야 평가되는데 검색량 상위 40만 시즌 fetch → 40위 밖 급상승 적격(>=200) 키워드가 seasonalLift null로 조용히 누락. 수정: SEASONALITY_FETCH_LIMIT 40→60 확대 + 이슈 적격 후보가 상한 초과 시 notes로 누락 한계 명시(조용한 누락 금지). 회귀: volume 랭킹 로직 불변, 상한만 확대(데이터랩 호출 8→12청크, graceful 유지).
+- P2-2 테스트(seasonalDiscovery.io.test.ts 신규 +5): discoverSeasonalKeywords IO를 fetch 4종 mock으로 검증 — 카테고리 귀속 보존·자기잠식 제외(양 리스트)·시즌 fetch 실패 graceful(이슈 비움)·빈 발굴 노트·누락 한계 노트. 기존 route.test는 함수 통째 mock이라 IO 조립 미검증이던 공백 해소.
+- P2-3 테스트(googleTrends.test.ts 신규 +5): RSS 파서를 실제 Response로 fetch mock — CDATA/엔티티 디코딩·approx_traffic·null 트래픽·중복 제거·limit·!ok 폴백·throw 폴백. as 캐스팅 회피(new Response).
+- 테스트 +10(53 files). 순수 랭킹 8건 회귀 없음 확인.
+- 미검증: UX 하네스 리뷰어(테스트/엔진 변경이라 UI 영향 없음). 남은 P3 2건(계약버전·클라 zod단언)·고아파일은 보류(사용자 결정 대기).
+- 검수자: 메인 직접(TDD + 전게이트).
+
+## 2026-06-21 외부리뷰 P3 2건 + 고아 정리 — 클라 응답 zod + 구 엔진 삭제
+- Change-Fingerprint: c9aaa3a87403497b
+- Gate Result: PASS — type-check 0 · lint 0 · test 342 · build 0(✓ Compiled 8.3s).
+- 배경: codex 외부 diff 리뷰(d06dad3) 잔여 P3 2건 + 고아 파일(사용자 지시 "남은거하자" + 삭제 명시 승인).
+- P3-1 판정(코드변경 없음): "응답 계약 picks/schedule→volumeTop/issueTop 깨짐, 버전 분리 없음"은 조사 결과 **구 계약 프로덕션 소비자 0건**(구 planSeasonalSeries는 자기 테스트만 import). 따라서 버전 분리는 과잉 → 고아 정리로 해소.
+- P3-2 수정(클라 응답 경계검증): 신규 `apiResponseSchemas.ts` — parseShopList(형식 깨지면 []), seasonalDiscoveryResultSchema, seriesPlanSchema. SeasonalSeriesPlanner.tsx(2곳)·SeriesPlanner.tsx(2곳)의 `json.data as Shop[]/SeasonalDiscoveryResult/SeriesPlan` 4개 단언을 safeParse+폴백/오류로 교체(글로벌 원칙 no-as + zod 경계). 컴포넌트 로컬 타입은 구조 동일이라 유지(z.infer 호환). 테스트 +5(apiResponseSchemas.test).
+- 고아 삭제(사용자 승인): `seasonalSeriesPlanner.ts` + `seasonalSeriesPlanner.test.ts` 제거. 삭제 전 프로덕션 import 0건 재확인, 삭제 후 전 게이트 PASS(test 352→342: 스키마+5, 고아테스트−15). git 복구 가능.
+- 미검증: UX 하네스 리뷰어(응답검증/삭제라 화면 동작 불변). 라이브 미실행(스키마는 단위테스트로 고정).
+- 검수자: 메인 직접(코드확인 + TDD + 전게이트).
+
+## 외부리뷰 d06dad3 종결 요약
+- codex P0 0 / P1 1 / P2 3 / P3 2 — 전부 처리 완료(P1 topic상한, P2 이슈누락보정+IO/파서테스트, P3 계약판정+클라zod, 고아삭제).
+- 누적 게이트: type-check 0 · lint 0 · test 342 · build 0. 미커밋 상태(push는 사용자 승인 대기).
+
+## 2026-06-22 이미지 전량 실패 긴급대응 — 토큰 만료 복구 + 401 표면화
+- Change-Fingerprint: b6c352c5e4abda58
+- Gate Result: PASS — type-check 0 · lint 0 · build 0(✓ Compiled). 단위테스트 신규 없음(아래 미검증 참조).
+- 배경(긴급): 사용자 화면에서 이미지 10/10 전부 "실패". 진단 결과 코드 버그 아님 — gti 백엔드(private-codex)가 전 호출에 HTTP 401. `~/.codex/auth.json` access_token이 2026-06-22T04:49:41Z 만료(06-12 발급, 10일 수명). gti는 토큰을 읽기만 하고 갱신 안 함 → 만료 시 전량 실패.
+- 1차 복구(코드무관): `codex exec` 1회로 refresh_token 자동 갱신 → exp 2026-07-02로 갱신 확인 → gti 직접호출 HTTP 200·1.9MB PNG 생성 확인. 사용자 재생성 가능 상태 복귀.
+- 원인규명: 인증 닿는 변경파일은 gtiCli.ts 단 1개이며 토큰 제어 로직 0줄. 만료는 JWT exp 객관값. 이미지 변경이 만료 유발했다는 근거 없음(평소 codex 사용이 10일내 갱신해 만료선 미도달, 이번엔 갱신 트리거 미발생).
+- 2차 재발방지(사용자 승인 후 구현 — 401 표면화):
+  - `spawnCli.ts`: CliErrorCode에 `"auth"` 추가.
+  - `gtiCli.ts`: runCli를 try/catch로 감싸 stderr가 `/unauthorized|auth may be expired|\b401\b/i`면 CliError code `"auth"` + 한국어 안내 메시지로 재분류(일반 non-zero와 분리). 성공 경로 불변(rethrow만).
+  - `page.tsx`: `/api/image/one`·`/regenerate` 실패 응답의 `code:"auth"` 감지 → `imageAuthExpired` 상태(만료 시 재시도 즉시 중단, 재생성 성공 시 해제). LooseApiResponse·worker json 타입에 code 추가.
+  - `ImagePreview.tsx`: authExpired prop → 그리드 상단 적색 안내 배너("ChatGPT 로그인 만료 → 터미널 codex 실행 후 재생성", 다크모드 대응).
+- 게이트: tsc 0 | P0 | PASS · build 0 | P0 | PASS · lint 0 | P1 | PASS · 핵심기능삭제 0 | P0 | PASS · 민감정보출력 0(토큰값 미출력, exp/만료여부만 표시) | P0 | PASS.
+- 미검증(P1 test): gtiCli 인증분류는 신규 유닛테스트 미작성 — 대신 실제 stderr 시그니처 2종(Unauthorized / HTTP 401) 매칭 + 일반 타임아웃 오탐 0을 node 스니펫으로 확인. src/lib/ai엔 기존 테스트파일 없음. UX 하네스 리뷰어 미실행(배너 단일 추가, 반응형/접근성 정밀점검 별도).
+- 검수자: 메인 직접(라이브 진단·복구 + 코드확인 + 전게이트). 미커밋(push 사용자 승인 대기).

@@ -82,3 +82,6 @@ LLM Wiki(프로젝트 기억) 색인. 새 세션은 여기서 출발.
 - **AI 라우트 9개**(keywords·article*·image*)는 로컬 구독 CLI 위임 → 내부 점검 시 비용 주의.
 - 입력 키는 정적 추출(요청 본문 파싱 기준). 상세 스키마는 각 route.ts + `src/types/` 참조.
 - 다음: T2(화면 흐름) · T3(파이프라인 데이터 흐름)에서 본 맵과 연결.
+
+## 명령어 (AGENCY AI OS)
+- `docs/ai/COMMANDS.md` — 표준 슬래시 명령 사용법(/agency-run-local, /agency-next-task, /agency-improve-ui, /agency-improve-feature, /agency-quality-sweep, /agency-external-review, /agency-auto-improve).

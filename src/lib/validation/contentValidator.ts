@@ -29,8 +29,9 @@ const ALLOWED_COMPOUNDS: Map<string, string[]> = new Map([
 /**
  * 금지어가 실제로 문제가 되는 용법인지 스마트 매칭.
  * 허용 복합어 안에 포함된 경우는 해당 출현을 제외하고 판단.
+ * (export: 의료법/광고법 오탐·미탐 회귀 테스트용 — contentValidator.test.ts)
  */
-function isProhibitedWordPresent(content: string, word: string): boolean {
+export function isProhibitedWordPresent(content: string, word: string): boolean {
   if (!content.includes(word)) return false;
 
   const allowedList = ALLOWED_COMPOUNDS.get(word);

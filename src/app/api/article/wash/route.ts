@@ -4,7 +4,8 @@ import { buildWashingPrompt } from "@/lib/prompts/washingPrompt";
 import { sanitizeMedicalLaw } from "@/lib/wash/medicalLawSanitizer";
 import { sanitizeAiCliches } from "@/lib/wash/aiClicheSanitizer";
 import { validateContent } from "@/lib/validation/contentValidator";
-import type { ArticleContent } from "@/types";
+import { articleWashSchema } from "@/lib/validation/apiRequestSchemas";
+import { parseRequestBody } from "@/lib/validation/parseRequestBody";
 
 export const maxDuration = 300;
 
@@ -25,18 +26,16 @@ function stripLeadingTitleLine(content: string, title: string): string {
 
 export async function POST(request: NextRequest) {
   try {
-    const body = (await request.json()) as {
-      article?: ArticleContent;
-      charCount?: number;
-    };
-
-    const article = body.article;
-    if (!article?.content || !article.mainKeyword || !article.subKeyword1 || !article.subKeyword2) {
+    const raw = await request.json();
+    const parsed = parseRequestBody(articleWashSchema, raw);
+    if (!parsed.ok) {
       return NextResponse.json(
-        { success: false, error: "워싱할 본문과 키워드 정보가 필요합니다." },
+        { success: false, error: parsed.message },
         { status: 400 }
       );
     }
+    const body = parsed.data;
+    const article = body.article;
 
     const charCount = body.charCount ?? 2000;
 

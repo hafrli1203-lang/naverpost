@@ -41,7 +41,7 @@ function killProcessTree(pid: number | undefined): void {
   }
 }
 
-export type CliErrorCode = "not-found" | "timeout" | "non-zero" | "empty";
+export type CliErrorCode = "not-found" | "timeout" | "non-zero" | "empty" | "auth";
 
 export class CliError extends Error {
   readonly code: CliErrorCode;

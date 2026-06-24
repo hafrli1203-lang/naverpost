@@ -3,6 +3,8 @@ import { reviseArticle } from "@/lib/ai/claude";
 import { buildChatRevisionPrompt } from "@/lib/prompts/chatRevisionPrompt";
 import { validateContent } from "@/lib/validation/contentValidator";
 import { lookupGlossary, buildGlossaryHint } from "@/lib/domain/opticalGlossary";
+import { articleChatSchema } from "@/lib/validation/apiRequestSchemas";
+import { parseRequestBody } from "@/lib/validation/parseRequestBody";
 import type { ArticleContent, ChatMessage } from "@/types";
 
 export const maxDuration = 300;
@@ -37,19 +39,16 @@ function sanitizeMessages(raw: unknown): ChatMessage[] {
 
 export async function POST(request: NextRequest) {
   try {
-    const body = (await request.json()) as {
-      article?: ArticleContent;
-      messages?: unknown;
-      charCount?: number;
-    };
-
-    const article = body.article;
-    if (!article?.content || !article.mainKeyword) {
+    const raw = await request.json();
+    const parsed = parseRequestBody(articleChatSchema, raw);
+    if (!parsed.ok) {
       return NextResponse.json(
-        { success: false, error: "수정할 본문과 키워드 정보가 필요합니다." },
+        { success: false, error: parsed.message },
         { status: 400 }
       );
     }
+    const body = parsed.data;
+    const article = body.article;
 
     const messages = sanitizeMessages(body.messages);
     if (messages.length === 0 || messages[messages.length - 1].role !== "user") {

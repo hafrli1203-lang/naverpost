@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { ArticlePreview } from "@/components/ArticlePreview";
@@ -24,6 +24,7 @@ type LooseApiResponse = {
   success?: boolean;
   error?: string;
   data?: unknown;
+  code?: string;
 };
 
 async function safeJson(res: Response): Promise<LooseApiResponse> {
@@ -68,11 +69,14 @@ export default function Home() {
     state.shop === null && state.currentStage <= 1 ? 0 : (state.currentStage as 1 | 2 | 3 | 4);
 
   const [maxStageReached, setMaxStageReached] = useState<number>(state.currentStage);
+  const autoStartedRef = useRef(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isChatting, setIsChatting] = useState(false);
   const [isWashing, setIsWashing] = useState(false);
   const [isGeneratingImages, setIsGeneratingImages] = useState(false);
   const [imageProgress, setImageProgress] = useState({ current: 0, total: 0 });
+  // ChatGPT(Codex) 로그인 만료(401)로 이미지가 막혔을 때만 true → 명확한 안내 배너.
+  const [imageAuthExpired, setImageAuthExpired] = useState(false);
   const [keywordOptions, setKeywordOptions] = useState<KeywordOption[]>([]);
   const [shops, setShops] = useState<Shop[]>([]);
   const [articleOptions, setArticleOptions] = useState<ArticleOptions | null>(null);
@@ -160,6 +164,31 @@ export default function Home() {
     },
     [shops, state, setState]
   );
+
+  // 시즌 편성표 "글쓰기 시작" 딥링크: ?start=1&shopId&categoryId&topic 로 진입하면
+  // 매장+카테고리+헤드키워드를 프리필해 키워드 생성을 자동 시작한다. (한 번만 실행)
+  useEffect(() => {
+    if (autoStartedRef.current || shops.length === 0) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("start") !== "1") return;
+    const shopId = params.get("shopId") ?? "";
+    const categoryId = params.get("categoryId") ?? "";
+    const topic = params.get("topic") ?? "";
+    if (!shopId || !categoryId || !shops.some((s) => s.id === shopId)) return;
+    if (!CATEGORIES.some((c) => c.id === categoryId)) return;
+    autoStartedRef.current = true;
+    window.history.replaceState(null, "", "/");
+    // Defer out of the effect body so the initial setState happens off the
+    // synchronous render path (avoids cascading renders).
+    const timer = setTimeout(() => {
+      handleStart(shopId, categoryId, topic, {
+        articleType: "info",
+        tone: "standard",
+        charCount: 2000,
+      });
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [shops, handleStart]);
 
   const handleKeywordRegenerate = useCallback(async () => {
     if (!state.shop || !state.category) return;
@@ -352,6 +381,7 @@ export default function Home() {
 
       setIsGeneratingImages(true);
       setImageProgress({ current: 0, total: 10 });
+      setImageAuthExpired(false);
 
       try {
         const shopId = state.shop?.id;
@@ -384,7 +414,7 @@ export default function Home() {
             try {
               const maxAttempts = 3;
               let lastErr: unknown = null;
-              let json: { success?: boolean; error?: string; data?: unknown } = {};
+              let json: { success?: boolean; error?: string; data?: unknown; code?: string } = {};
               let res: Response | null = null;
               for (let attempt = 1; attempt <= maxAttempts; attempt++) {
                 try {
@@ -406,6 +436,11 @@ export default function Home() {
                     break;
                   }
                   lastErr = new Error(json.error ?? `HTTP ${res.status}`);
+                  // 로그인 만료(401)는 재시도해도 무의미 → 즉시 중단하고 안내 플래그를 켠다.
+                  if (json.code === "auth") {
+                    setImageAuthExpired(true);
+                    break;
+                  }
                 } catch (e) {
                   lastErr = e;
                 }
@@ -509,7 +544,11 @@ export default function Home() {
           body: JSON.stringify(body),
         });
         const json = await safeJson(res);
-        if (!res.ok || !json.success) throw new Error(json.error ?? "이미지 재생성 실패");
+        if (!res.ok || !json.success) {
+          // 로그인 만료(401)면 안내 배너를 켠다(원인 모를 "실패" 방지).
+          if (json.code === "auth") setImageAuthExpired(true);
+          throw new Error(json.error ?? "이미지 재생성 실패");
+        }
 
         const regenData = (json.data as {
           mimeType?: string;
@@ -521,6 +560,9 @@ export default function Home() {
         const regenUrl = regenData.base64Data
           ? `data:${regenMime};base64,${regenData.base64Data}`
           : (regenData.imageUrl ?? "");
+
+        // 재생성이 성공했다 = 로그인이 다시 유효 → 안내 배너 해제.
+        setImageAuthExpired(false);
 
         setState((prev) => ({
           ...prev,
@@ -798,6 +840,7 @@ export default function Home() {
             isGenerating={isGeneratingImages}
             progress={imageProgress}
             hasArticle={!!state.article}
+            authExpired={imageAuthExpired}
           />
         )}
 
