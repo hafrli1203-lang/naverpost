@@ -11,7 +11,37 @@ import {
 } from "@/lib/validation/imageRequestSchemas";
 
 export const runtime = "nodejs";
-export const maxDuration = 300;
+// 개별 gti 호출이 최대 ~320s까지 걸릴 수 있고, 동시성 제한으로 작업을 여러 파동에 나눠
+// 처리하므로 전체 핸들러 시간이 길어진다. one/route 와 동일하게 600s 여유를 둔다.
+export const maxDuration = 600;
+
+// 동시 spawn 상한. 과거 10개 동시 spawn은 Windows 프로세스 초기화 실패(0xC0000142)와
+// 백엔드 혼잡성 401을 유발했고, 반대로 3개는 배치가 과도하게 느려졌다. 5개로 두면
+// 10장을 2파동에 처리(속도 회복)하면서 동시 spawn 압력은 절반으로 낮춘다. 간헐 실패는
+// gtiCli 내부 재시도(혼잡성 401·빈응답·파일 레이스)가 흡수한다.
+const IMAGE_CONCURRENCY = 5;
+
+/**
+ * items 를 worker 로 처리하되 동시에 최대 limit 개만 실행한다(워커 풀).
+ * worker 는 자체적으로 try/catch 하여 개별 실패가 전체를 멈추지 않는다.
+ */
+async function mapWithConcurrency<T>(
+  items: readonly T[],
+  limit: number,
+  worker: (item: T, index: number) => Promise<void>
+): Promise<void> {
+  let cursor = 0;
+  async function runLane(): Promise<void> {
+    while (true) {
+      const index = cursor;
+      cursor += 1;
+      if (index >= items.length) return;
+      await worker(items[index], index);
+    }
+  }
+  const laneCount = Math.min(Math.max(1, limit), items.length);
+  await Promise.all(Array.from({ length: laneCount }, () => runLane()));
+}
 
 export async function POST(request: NextRequest) {
   let raw: unknown;
@@ -102,16 +132,17 @@ function createImageStream(
         let successCount = 0;
         let failCount = 0;
 
-        // Fire all image jobs in parallel; SSE controller serializes the writes.
-        // gti -> private-codex backend handles concurrent calls per session.
-        // If the backend throttles, individual jobs surface as image-failed and
-        // the whole batch still completes.
+        // 동시성 제한(IMAGE_CONCURRENCY)으로 작업을 여러 파동에 나눠 처리한다. 과거 전량
+        // 동시 spawn은 Windows 프로세스 초기화 실패와 백엔드 스로틀(타임아웃·ENOENT)을
+        // 유발했다. SSE 컨트롤러가 쓰기를 직렬화하므로 완료 순서가 섞여도 클라가 index로 처리한다.
         for (let i = 0; i < total; i++) {
           send({ type: "progress", index: i, total });
         }
 
-        await Promise.all(
-          prompts.map(async ({ prompt, scene }, i) => {
+        await mapWithConcurrency(
+          prompts,
+          IMAGE_CONCURRENCY,
+          async ({ prompt, scene }, i) => {
             try {
               const refImages =
                 scene && shopId ? await getSceneReferenceImages(shopId, scene) : [];
@@ -139,7 +170,7 @@ function createImageStream(
               send({ type: "image-failed", index: i, total, error: message });
               failCount++;
             }
-          })
+          }
         );
 
         console.log("[image.generate] complete", { sessionId, successCount, failCount, total });

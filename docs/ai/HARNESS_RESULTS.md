@@ -702,3 +702,33 @@
 - 게이트: tsc 0 | P0 | PASS · build 0 | P0 | PASS · lint 0 | P1 | PASS · 핵심기능삭제 0 | P0 | PASS · 민감정보출력 0(토큰값 미출력, exp/만료여부만 표시) | P0 | PASS.
 - 미검증(P1 test): gtiCli 인증분류는 신규 유닛테스트 미작성 — 대신 실제 stderr 시그니처 2종(Unauthorized / HTTP 401) 매칭 + 일반 타임아웃 오탐 0을 node 스니펫으로 확인. src/lib/ai엔 기존 테스트파일 없음. UX 하네스 리뷰어 미실행(배너 단일 추가, 반응형/접근성 정밀점검 별도).
 - 검수자: 메인 직접(라이브 진단·복구 + 코드확인 + 전게이트). 미커밋(push 사용자 승인 대기).
+
+## 2026-06-23 이미지 생성 ENOENT/간헐실패 — 병렬 과부하 동시성 제한 + readFile 재시도
+- Change-Fingerprint: fd586076f07971ad
+- Gate Result: PASS — type-check 0 · lint 0 · build 0(✓ Compiled 5.5s, 31/31 정적생성).
+- 배경: 사용자 화면 `ENOENT ... naverpost-gti-XXXXXX\<uuid>.png`. "토큰 문제 아니다" 지적. 진단 결과 토큰 정상(단일+10병렬 실측 모두 exit 0·PNG 생성·httpStatus 200). 진짜 원인 = `route.ts` `Promise.all`로 gti 프로세스 10개 동시 spawn.
+- 원인 증거(실측): data/cli-crash.log 42건 중 30건 진짜 401(이미 auth 표면화·금번 무관)·6건 MISSING_IMAGE_GENERATION(모델 텍스트 거부)·**2건 exitCode 3221225794(0xC0000142=Windows 프로세스 초기화 실패, stderr 공백 → JS 실행 전 크래시 = 동시 spawn 과다)**. 재현: 10병렬 시 백엔드 스로틀로 일부 작업 157~170s(단독 50~70s)로 300s 한계 근접. 3중 300s 타임아웃(route maxDuration/gtiCli/gti 내부 fetch) 정렬로 마진 0.
+- ENOENT 메커니즘(가설 명시): gti 소스상 exit 0이면 항상 파일 기록 후 종료 → "exit 0+파일없음"은 소스 로직만으론 불가. 따라서 병렬로 갓 생성된 PNG를 Windows 실시간 백신(Defender)이 순간 잠금/은닉하는 FS 레이스로 추정(단정 아님). 같은 뿌리(병렬 과부하).
+- 수정(사용자 승인 후 — "동시성 제한+재시도"):
+  - `route.ts`(image/generate): `Promise.all(10 동시)` → 신규 `mapWithConcurrency` 워커 풀 **IMAGE_CONCURRENCY=3** 제한. `maxDuration` 300→600(여러 파동 처리 여유, one/route와 동일). 워커 자체 try/catch 유지(실패는 image-failed로 표면화, 풀에 throw 전파 안 함).
+  - `gtiCli.ts`: `fs.readFile`→`readFileWithRetry`(ENOENT/EBUSY/EPERM 시 150ms*n backoff 5회 = AV/FS 레이스 흡수). 개별 timeoutMs 300_000→320_000(gti 자체 300s fetch 타임아웃이 먼저 정확한 오류 표면화하도록 마진).
+- 게이트: tsc 0 | P0 | PASS · build 0 | P0 | PASS · lint 0 | P1 | PASS · 핵심기능삭제 0(SSE·index·자체catch·401 auth 표면화 보존) | P0 | PASS.
+- 검증: 풀 로직 단위검증(node 스니펫) maxActive=3·10건 전량처리·실패1건 격리 PASS. 실제 gti 단일+10병렬 exit 0·PNG 생성 실측(토큰 정상 입증).
+- 라이브 E2E(검증 완료): pnpm dev(:3100) 기동 후 POST /api/image/generate 실제 호출 2회. 1회차(shopId 없음, 콘택트렌즈 글) 9개 ready·실패0·ENOENT0 확인 후 클라 타임아웃 조기종료(서버는 계속 진행해 10번째 저장 확인). 2회차(안경테 글, 클라 타임아웃 640s) **complete successCount=10·failCount=0·total=10·ENOENT0**, 소요 ~537s(maxDuration 600s 이내). 완료 순서가 3개 단위 파동 → 동시성 제한 실동작 확인.
+- 미검증: 신규 유닛테스트 파일 미작성(src/lib/ai·image route에 기존 테스트 부재). 풀/재시도는 node 스니펫으로 동치 검증. UX 하네스 리뷰어 미실행(서버 로직 변경, 화면 동작 불변).
+- 검수자: 메인 직접(라이브 진단·재현·E2E 2회 + 코드확인 + 전게이트). 미커밋(push 사용자 승인 대기).
+
+## 2026-06-23 이미지 간헐/전면 실패 후속 — gtiCli 자동재시도 + 동시성 5 복원 + 세션폐기 규명
+- Change-Fingerprint: eda6102d05d39bf2
+- Gate Result: PASS(코드) — type-check 0 · lint 0 · build 0(✓ Compiled 5.6s, 31/31). 단, 라이브 이미지 생성은 세션 폐기로 차단(미검증 — 재로그인 대기).
+- 배경: 사용자 화면 일부 섹션 "실패"(felt 느림+간헐실패). 라이브 진단으로 단계적 규명.
+- 규명 1(백엔드 지연): 단일 gti 호출 69s(동시성0)·성공. 백엔드(gpt-image/private-codex) 자체가 느려진 게 "느리다"의 한 축. 직전 변경의 동시성 3은 배치를 ~3배(537s vs 이전 ~170s) 늘려 체감 악화 → 과교정 인정.
+- 규명 2(간헐 401): 배치(19:25) 8/9 성공, 1건 실패 = image-failed error가 auth(401). crash로그(UTC) 오늘 1건 privateCodexProvider.js:18/178=Unauthorized. JWT exp=2026-07-02(미만료)인데 401 → 토큰 만료 아닌 "혼잡성 throttle-401" 가설.
+- 규명 3(세션 폐기=진짜 원인): 이후 배치(20:02) 8/8 전면 401(재시도 3회 소진, 80s 내). codex exec 갱신 시도 → `refresh_token_invalidated` "refresh token was revoked. log out and sign in again". access_token 회전 안 됨(tail 불변). 즉 서버측 세션 폐기 — 코드로 복구 불가, 재로그인(codex logout/login)만이 해법. 직전 "테스트 쿼터 차단" 추측은 철회(에러는 쿼터 아닌 명시적 revoke).
+- 수정(사용자 "제대로 해라" 지시 — 세션 정상일 때 유효):
+  - `gtiCli.ts`: runGti를 maxAttempts=3 재시도 루프로 감쌈(매 시도 새 tmpDir). 신규 `isRetryableGtiError`로 단발성만 재시도(auth=혼잡성401·empty·ENOENT/EBUSY/EPERM), not-found/non-zero/timeout/dry-run은 즉시 표면화. backoff 1.5s·3.0s. 401 메시지 "로그인 만료" 단정 → "서버 혼잡 또는 로그인 만료"로 정정(토큰 유효해도 발생).
+  - `route.ts`(image/generate): IMAGE_CONCURRENCY 3→5(10장 2파동, 속도 회복+초기화부담 절반). 간헐 실패는 gtiCli 재시도가 흡수.
+- 게이트: tsc 0 | P0 | PASS · build 0 | P0 | PASS · lint 0 | P1 | PASS · 핵심기능보존(SSE·index·자체catch·dry-run·debug) | P0 | PASS.
+- 검증: 재시도 루프 로직 node 동치검증 7/7 PASS(auth 1·2회→성공, 3회→소진throw, ENOENT 1회→성공, non-zero/timeout 즉시throw, dry-run empty 재시도안함). 단일 gti 실측 69s 성공(폐기 전). type-check/lint/build green.
+- 미검증(P0): 라이브 배치 E2E는 세션 폐기로 401 전면차단 상태라 정상복구 미검증 — 사용자 재로그인(codex login) 후 단일 호출 1개로 검증 예정(배치 테스트 자제, 쿼터 보호).
+- 검수자: 메인 직접(라이브 진단·세션폐기 규명 + 코드확인 + 단위검증 + 전게이트). 미커밋(push 사용자 승인 대기).
