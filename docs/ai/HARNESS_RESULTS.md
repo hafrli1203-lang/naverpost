@@ -732,3 +732,14 @@
 - 검증: 재시도 루프 로직 node 동치검증 7/7 PASS(auth 1·2회→성공, 3회→소진throw, ENOENT 1회→성공, non-zero/timeout 즉시throw, dry-run empty 재시도안함). 단일 gti 실측 69s 성공(폐기 전). type-check/lint/build green.
 - 미검증(P0): 라이브 배치 E2E는 세션 폐기로 401 전면차단 상태라 정상복구 미검증 — 사용자 재로그인(codex login) 후 단일 호출 1개로 검증 예정(배치 테스트 자제, 쿼터 보호).
 - 검수자: 메인 직접(라이브 진단·세션폐기 규명 + 코드확인 + 단위검증 + 전게이트). 미커밋(push 사용자 승인 대기).
+
+## 2026-06-25 이미지 실패 원인 규명(인증401) + crash 로그 진단 보강(stderr 머리 보존)
+- Change-Fingerprint: c19a42024742d1d7
+- Gate Result: PASS — type-check 0 | P0 | PASS · lint 0 | P1 | PASS · test 342/342 | P1 | PASS · 핵심기능삭제 0(crash 로깅 tail 키 유지, 동작 불변) | P0 | PASS · 민감정보출력 0(토큰값 미출력) | P0 | PASS.
+- 배경: 사용자 "원고로 이미지 생성 시 실패" 후속. 동일 세션에서 codex/gti 인증을 재로그인으로 복구한 직후.
+- 원인규명(라이브 진단): data/cli-crash.log 75건 분석 → 63건이 401 Unauthorized(`privateCodexProvider.js:178` classifyFailure 경로), 날짜 06-22(30)·06-23(25)·06-24(8) = 로그인 끊긴 기간과 정확히 일치. 오늘(06-25) 실패 0건. 즉 실패 원인 = 만료/로그아웃 인증(401)이며 이미지 코드 결함 아님. 옛 6건 MISSING_IMAGE(06-15~16)는 한국어 프롬프트 누수 → 이미 IMG-1 필터로 수정됨. (초기 "rate limit 61건" 집계는 정규식 /rate/가 스택의 "geneRATEImage"에 오탐한 것 → 철회.)
+- 수정(사용자 승인 후 — 진단 보강 1파일): `spawnCli.ts` appendCrashLog가 stderr/stdout을 `slice(-400)` 꼬리만 저장 → gti 401처럼 에러가 stderr 맨 앞줄이면 스택트레이스에 밀려 잘림. `stderrHead/stdoutHead = slice(0,600)` 추가(tail 키 유지 = 과거 로그 파싱 호환). 로깅 외 제어흐름 변경 0.
+- 검증(라이브): ① gti 직접호출 httpStatus 200 + 정상 PNG(2MB) ② `/api/image/one` 라우트 e2e(:3100) → success:true + imageId + 정상 PNG base64(iVBORw 헤더). 둘 다 복구된 인증으로 통과.
+- 환경 메모: dev 포트 = 3100(package.json `next dev -p 3100`). :3000은 별도 앱("NaverKey")이 점유 → 거기로 호출 시 /api/* 전부 404(초기 오진단 원인). 테스트는 반드시 3100.
+- 미검증: spawnCli 로깅 변경 전용 유닛테스트 미작성(src/lib/ai/cli 기존 테스트 부재) — 변경이 진단 로그 한정·기존 342 테스트 무회귀로 갈음. UX 하네스 리뷰어 미실행(화면 변경 없음, 서버 로깅만).
+- 검수자: 메인 직접(라이브 진단·crash로그 분석·e2e 2종 + 코드확인 + 전게이트). 미커밋(push 사용자 승인 대기).

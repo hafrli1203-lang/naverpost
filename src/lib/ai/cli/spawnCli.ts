@@ -17,7 +17,12 @@ async function appendCrashLog(entry: {
       args: entry.args.slice(0, 6),
       exitCode: entry.exitCode,
       signal: entry.signal,
+      // CLI 오류 메시지(예: "ERROR: ... 401 Unauthorized")는 보통 stderr 맨 앞줄에 오고
+      // 그 뒤로 긴 스택트레이스가 붙는다. 꼬리(tail)만 남기면 정작 원인 줄이 잘려나가므로
+      // 머리(head)도 함께 저장한다. tail 키는 과거 로그 파싱 호환을 위해 유지.
+      stdoutHead: entry.stdout.slice(0, 600),
       stdoutTail: entry.stdout.slice(-400),
+      stderrHead: entry.stderr.slice(0, 600),
       stderrTail: entry.stderr.slice(-400),
     });
     await fs.appendFile(path.join(process.cwd(), "data", "cli-crash.log"), line + "\n", "utf8");
