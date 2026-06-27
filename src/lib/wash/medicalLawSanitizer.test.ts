@@ -81,3 +81,30 @@ describe("sanitizeMedicalLaw — 리포트/안전성", () => {
     expect(r.totalReplacements).toBeGreaterThan(0);
   });
 });
+
+describe("sanitizeMedicalLaw — 금지어 갭 보강(정답·가장)", () => {
+  it('"정답은 아니에요" 구문은 "능사는 아니에요"로 자연스럽게 치환된다', () => {
+    const r = sanitizeMedicalLaw("도수를 올리는 게 정답은 아니에요.");
+    expect(r.content).not.toContain("정답");
+    expect(r.content).toContain("능사는 아니에요");
+  });
+
+  it('잔여 "정답"도 "답"으로 치환된다', () => {
+    const r = sanitizeMedicalLaw("이게 정답입니다.");
+    expect(r.content).not.toContain("정답");
+    expect(r.content).toContain("답입니다");
+  });
+
+  it('최상급 "가장 흔한"은 "특히 흔한"으로 치환된다(워싱 재유입 회귀 차단)', () => {
+    const r = sanitizeMedicalLaw("가장 흔한 원인은 건조함이에요.");
+    expect(r.content).not.toMatch(/가장 /);
+    expect(r.content).toContain("특히 흔한 원인");
+  });
+
+  it('복합어 "가장자리"는 보호된다(오탐 금지)', () => {
+    const clean = "렌즈 가장자리가 변형됐어요.";
+    const r = sanitizeMedicalLaw(clean);
+    expect(r.content).toContain("가장자리");
+    expect(r.content).toBe(clean);
+  });
+});

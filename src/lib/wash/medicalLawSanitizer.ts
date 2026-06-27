@@ -70,6 +70,9 @@ const PHRASE_REPLACEMENTS: Replacement[] = [
   { pattern: /문의해 주세요/g, replacement: "확인해 주세요", category: "discount-pressure" },
   { pattern: /문의해주세요/g, replacement: "확인해 주세요", category: "discount-pressure" },
   { pattern: /지금 예약하세요/g, replacement: "편하게 들러 보세요", category: "discount-pressure" },
+
+  // 단정형 "정답" — 흔한 구문을 먼저 자연스럽게 (단어 단위 치환보다 우선)
+  { pattern: /정답(은|이)?\s*아니/g, replacement: "능사는 아니", category: "absolute" },
 ];
 
 /**
@@ -120,6 +123,11 @@ const WORD_REPLACEMENTS: Replacement[] = [
   { pattern: /추천 대상/g, replacement: "잘 어울리는 분", category: "exaggeration" },
   { pattern: /추천드립니다/g, replacement: "안내드립니다", category: "exaggeration" },
   { pattern: /추천 드립니다/g, replacement: "안내드립니다", category: "exaggeration" },
+
+  // 단정형 "정답" 잔여분 + 최상급 "가장"
+  // "가장"은 뒤에 공백이 오는 최상급 용법만 치환 — "가장자리"·"가장무도회" 등 복합어는 보호
+  { pattern: /정답/g, replacement: "답", category: "absolute" },
+  { pattern: /가장(?=\s)/g, replacement: "특히", category: "exaggeration" },
 ];
 
 /**
