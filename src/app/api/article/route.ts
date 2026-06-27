@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { writeArticle, reviseArticle } from "@/lib/ai/claude";
 import { researchKeyword } from "@/lib/ai/perplexity";
+import {
+  isResearchOnTopic,
+  OFF_TOPIC_RESEARCH_NOTE,
+} from "@/lib/ai/researchRelevance";
 import { buildArticlePrompt } from "@/lib/prompts/articlePrompt";
 import { buildPromoPrompt } from "@/lib/prompts/promoPrompt";
 import {
@@ -310,8 +314,17 @@ export async function POST(request: NextRequest) {
       ),
     ]);
 
-    const researchData = researchResponse.text;
-    const researchStatus = researchResponse.status;
+    // 리서치 표류 가드: 조사 결과가 제목/키워드 주제와 무관하면(예: "안경 가격 차이"인데
+    // 세척 자료가 옴) 그 자료를 본문에 강요하지 않고 제목 논지 기반 작성으로 전환한다.
+    const rawResearch = researchResponse.text;
+    const researchOnTopic = isResearchOnTopic(rawResearch, {
+      title: keyword.title,
+      mainKeyword: keyword.mainKeyword,
+      subKeyword1: keyword.subKeyword1,
+      subKeyword2: keyword.subKeyword2,
+    });
+    const researchData = researchOnTopic ? rawResearch : OFF_TOPIC_RESEARCH_NOTE;
+    const researchStatus = researchOnTopic ? researchResponse.status : "empty";
     const { sameStoreHistory, crossBlogTitles } = rssOutcome;
 
     const smartBlock =
